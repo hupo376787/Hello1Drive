@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0-browser</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Hello1Drive.Browser</RootNamespace>
+    <AssemblyName>Hello1Drive.Browser</AssemblyName>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <WasmMainJSPath>main.js</WasmMainJSPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Hello1Drive.Core/Hello1Drive.Core.csproj" />
+    <PackageReference Include="Avalonia.Browser" />
+  </ItemGroup>
+</Project>

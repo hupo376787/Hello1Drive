@@ -1,0 +1,32 @@
+html, body, #out {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f5f7fb;
+}
+body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.loader {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #1d2433;
+}
+.logo {
+  width: 68px;
+  height: 68px;
+  border-radius: 18px;
+  background: #FD6F71;
+  color: white;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 24px;
+  box-shadow: 0 10px 30px rgba(22,119,255,.25);
+}
+.title { margin-top: 18px; font-size: 24px; font-weight: 650; }
+.sub { margin-top: 7px; font-size: 13px; opacity: .55; }
+
+.logo{width:84px;height:84px;border-radius:22px;object-fit:cover;margin-bottom:14px;}

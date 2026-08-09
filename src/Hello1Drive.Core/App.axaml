@@ -1,0 +1,403 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Hello1Drive.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <Color x:Key="HelloSettingsTintColor">#FFF7F7F8</Color>
+          <Color x:Key="HelloSettingsFallbackColor">#FFF7F7F8</Color>
+          <SolidColorBrush x:Key="HelloExplorerSelectionBrush" Color="#BFD7EBFA" />
+          <SolidColorBrush x:Key="HelloExplorerHoverBrush" Color="#8AEAF4FB" />
+          <SolidColorBrush x:Key="HelloExplorerMarqueeBrush" Color="#335AA9E6" />
+          <SolidColorBrush x:Key="HelloExplorerMarqueeBorderBrush" Color="#B85AA9E6" />
+          <!-- Semantic icon palette: vivid enough to feel lively, but grouped by action instead of random per-icon colors. -->
+          <SolidColorBrush x:Key="HelloIconNavigationBrush" Color="#3B82F6" />
+          <SolidColorBrush x:Key="HelloIconHomeBrush" Color="#2563EB" />
+          <SolidColorBrush x:Key="HelloIconRefreshBrush" Color="#0F9D8A" />
+          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#E79B18" />
+          <SolidColorBrush x:Key="HelloIconDownloadBrush" Color="#0EA5C8" />
+          <SolidColorBrush x:Key="HelloIconViewBrush" Color="#7C3AED" />
+          <SolidColorBrush x:Key="HelloIconSortBrush" Color="#F97316" />
+          <SolidColorBrush x:Key="HelloIconSettingsBrush" Color="#A855F7" />
+          <SolidColorBrush x:Key="HelloIconTransferUpBrush" Color="#8B5CF6" />
+          <SolidColorBrush x:Key="HelloIconTransferDownBrush" Color="#06B6D4" />
+          <SolidColorBrush x:Key="HelloIconRetryBrush" Color="#F59E0B" />
+          <SolidColorBrush x:Key="HelloIconMinimizeBrush" Color="#D79B00" />
+          <SolidColorBrush x:Key="HelloIconMaximizeBrush" Color="#16A36A" />
+          <SolidColorBrush x:Key="HelloIconCloseBrush" Color="#E5484D" />
+          <SolidColorBrush x:Key="HelloIconPreviewBrush" Color="#4F8EF7" />
+          <SolidColorBrush x:Key="HelloIconSecondaryBrush" Color="#FD6F71" />
+          <SolidColorBrush x:Key="HelloToolbarHoverBrush" Color="#26000000" />
+          <SolidColorBrush x:Key="HelloToolbarPressedBrush" Color="#3A000000" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <Color x:Key="HelloSettingsTintColor">#FF181B22</Color>
+          <Color x:Key="HelloSettingsFallbackColor">#FF181B22</Color>
+          <SolidColorBrush x:Key="HelloExplorerSelectionBrush" Color="#8A416B8D" />
+          <SolidColorBrush x:Key="HelloExplorerHoverBrush" Color="#65405263" />
+          <SolidColorBrush x:Key="HelloExplorerMarqueeBrush" Color="#334C9BD0" />
+          <SolidColorBrush x:Key="HelloExplorerMarqueeBorderBrush" Color="#B85AA9E6" />
+          <SolidColorBrush x:Key="HelloIconNavigationBrush" Color="#78A9FF" />
+          <SolidColorBrush x:Key="HelloIconHomeBrush" Color="#6EA8FF" />
+          <SolidColorBrush x:Key="HelloIconRefreshBrush" Color="#43D3B2" />
+          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#FFC857" />
+          <SolidColorBrush x:Key="HelloIconDownloadBrush" Color="#4DD6E7" />
+          <SolidColorBrush x:Key="HelloIconViewBrush" Color="#B69CFF" />
+          <SolidColorBrush x:Key="HelloIconSortBrush" Color="#FFAA5C" />
+          <SolidColorBrush x:Key="HelloIconSettingsBrush" Color="#D08CFF" />
+          <SolidColorBrush x:Key="HelloIconTransferUpBrush" Color="#B69CFF" />
+          <SolidColorBrush x:Key="HelloIconTransferDownBrush" Color="#53D7E8" />
+          <SolidColorBrush x:Key="HelloIconRetryBrush" Color="#FFD166" />
+          <SolidColorBrush x:Key="HelloIconMinimizeBrush" Color="#FFD166" />
+          <SolidColorBrush x:Key="HelloIconMaximizeBrush" Color="#55D98A" />
+          <SolidColorBrush x:Key="HelloIconCloseBrush" Color="#FF767B" />
+          <SolidColorBrush x:Key="HelloIconPreviewBrush" Color="#A8C7FA" />
+          <SolidColorBrush x:Key="HelloIconSecondaryBrush" Color="#FF8F91" />
+          <SolidColorBrush x:Key="HelloToolbarHoverBrush" Color="#30FFFFFF" />
+          <SolidColorBrush x:Key="HelloToolbarPressedBrush" Color="#46FFFFFF" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <SolidColorBrush x:Key="HelloAccentBrush" Color="#FD6F71" />
+      <SolidColorBrush x:Key="HelloAccentHoverBrush" Color="#EB6265" />
+      <SolidColorBrush x:Key="HelloAccentPressedBrush" Color="#D95558" />
+      <SolidColorBrush x:Key="HelloOverlayBrush" Color="#99000000" />
+      <SolidColorBrush x:Key="HelloFileItemBrush" Color="#20FFFFFF" />
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#FD6F71" />
+        <ColorPaletteResources x:Key="Dark" Accent="#FD6F71" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+
+    <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
+
+    <Style Selector="Button">
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <!-- Icon-only action buttons use the exact same 28x28 geometry as the custom-title-bar buttons. -->
+    <Style Selector="Button.toolbar">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.toolbar:pointerover">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar:pressed">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar:disabled">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.toolbar:disabled /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.icon">
+      <Setter Property="MinWidth" Value="30" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="CornerRadius" Value="7" />
+    </Style>
+
+    <Style Selector="Button.coral">
+      <Setter Property="Background" Value="{DynamicResource HelloAccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.coral:pointerover">
+      <Setter Property="Background" Value="{DynamicResource HelloAccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.coral:pressed">
+      <Setter Property="Background" Value="{DynamicResource HelloAccentPressedBrush}" />
+    </Style>
+
+    <Style Selector="Button.breadcrumb">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="7,3" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="Button.headerSort">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="4,2" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="Button.viewMode">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.viewMode:pointerover">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode:pressed">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode:disabled">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.viewMode:disabled /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.fab">
+      <Setter Property="Width" Value="36" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Background" Value="{DynamicResource HelloAccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="FontSize" Value="20" />
+    </Style>
+
+    <Style Selector="Button.titleToolbar">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.titleToolbar:pointerover">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.titleToolbar:pressed">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.titleToolbar /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.titleToolbar:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarHoverBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.titleToolbar:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloToolbarPressedBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style Selector="TextBox.titleSearch">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="9,3" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="#18000000" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Path.toolbarIcon">
+      <Setter Property="Width" Value="13" />
+      <Setter Property="Height" Value="13" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="Stroke" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="StrokeThickness" Value="1.35" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="Fill" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Path.menuIcon">
+      <Setter Property="Width" Value="15" />
+      <Setter Property="Height" Value="15" />
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="Stroke" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="StrokeThickness" Value="1.45" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="Fill" Value="Transparent" />
+    </Style>
+
+    <!-- Semantic icon colors. Shape stays consistent; color communicates the action family. -->
+    <Style Selector="Path.iconNavigation"><Setter Property="Stroke" Value="{DynamicResource HelloIconNavigationBrush}" /></Style>
+    <Style Selector="Path.iconHome"><Setter Property="Stroke" Value="{DynamicResource HelloIconHomeBrush}" /></Style>
+    <Style Selector="Path.iconRefresh"><Setter Property="Stroke" Value="{DynamicResource HelloIconRefreshBrush}" /></Style>
+    <Style Selector="Path.iconFolder"><Setter Property="Stroke" Value="{DynamicResource HelloIconFolderBrush}" /></Style>
+    <Style Selector="Path.iconDownload"><Setter Property="Stroke" Value="{DynamicResource HelloIconDownloadBrush}" /></Style>
+    <Style Selector="Path.iconView"><Setter Property="Stroke" Value="{DynamicResource HelloIconViewBrush}" /></Style>
+    <Style Selector="Path.iconSort"><Setter Property="Stroke" Value="{DynamicResource HelloIconSortBrush}" /></Style>
+    <Style Selector="Path.iconSettings"><Setter Property="Stroke" Value="{DynamicResource HelloIconSettingsBrush}" /></Style>
+    <Style Selector="Path.iconTransferUp"><Setter Property="Stroke" Value="{DynamicResource HelloIconTransferUpBrush}" /></Style>
+    <Style Selector="Path.iconTransferDown"><Setter Property="Stroke" Value="{DynamicResource HelloIconTransferDownBrush}" /></Style>
+    <Style Selector="Path.iconRetry"><Setter Property="Stroke" Value="{DynamicResource HelloIconRetryBrush}" /></Style>
+    <Style Selector="Path.iconPreview"><Setter Property="Stroke" Value="{DynamicResource HelloIconPreviewBrush}" /></Style>
+    <Style Selector="Path.iconSecondary"><Setter Property="Stroke" Value="{DynamicResource HelloIconSecondaryBrush}" /></Style>
+    <Style Selector="Path.iconOpen"><Setter Property="Stroke" Value="{DynamicResource HelloIconPreviewBrush}" /></Style>
+    <Style Selector="Path.iconCache"><Setter Property="Stroke" Value="{DynamicResource HelloIconRefreshBrush}" /></Style>
+    <Style Selector="Path.iconRename"><Setter Property="Stroke" Value="{DynamicResource HelloIconSettingsBrush}" /></Style>
+    <Style Selector="Path.iconDanger"><Setter Property="Stroke" Value="{DynamicResource HelloIconCloseBrush}" /></Style>
+    <Style Selector="Path.iconWeb"><Setter Property="Stroke" Value="{DynamicResource HelloIconNavigationBrush}" /></Style>
+    <Style Selector="Button.iconCloseGlyph"><Setter Property="Foreground" Value="{DynamicResource HelloIconCloseBrush}" /></Style>
+    <Style Selector="Button:disabled Path.toolbarIcon"><Setter Property="Opacity" Value="0.38" /></Style>
+
+    <Style Selector="Button.windowButton">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.closeWindowButton:pointerover">
+      <Setter Property="Background" Value="#D93025" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.closeWindowButton:pointerover Path">
+      <Setter Property="Stroke" Value="White" />
+    </Style>
+
+    <Style Selector="Button.sectionAction">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+
+    <Style Selector="TextBlock.caption">
+      <Setter Property="Opacity" Value="0.65" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style Selector="TextBox.search">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="#18000000" />
+    </Style>
+
+    <Style Selector="ListBox.fileList">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem">
+      <Setter Property="Margin" Value="4" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!-- Explorer-like selection is deliberately independent from the coral app accent. -->
+    <Style Selector="Grid.fileItemSurface">
+      <Setter Property="Background" Value="{DynamicResource HelloFileItemBrush}" />
+    </Style>
+    <Style Selector="Border.fileItemSurface">
+      <Setter Property="Background" Value="{DynamicResource HelloFileItemBrush}" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloExplorerHoverBrush}" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource HelloExplorerSelectionBrush}" />
+    </Style>
+    <!-- Keep only one Explorer selection/hover surface. The template presenter paints
+         the state; the item's own decorative surface becomes transparent for that state. -->
+    <Style Selector="ListBox.fileList ListBoxItem:pointerover Grid.fileItemSurface">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem:pointerover Border.fileItemSurface">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem:selected Grid.fileItemSurface">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.fileList ListBoxItem:selected Border.fileItemSurface">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.iconFileList ListBoxItem">
+      <Setter Property="Margin" Value="4" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.transferList">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.transferList ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.transferList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.transferList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+  </Application.Styles>
+</Application>

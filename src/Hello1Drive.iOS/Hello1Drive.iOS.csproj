@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios26.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Hello1Drive.iOS</RootNamespace>
+    <AssemblyName>Hello1Drive.iOS</AssemblyName>
+    <ApplicationId>com.xiaowei.hello1drive</ApplicationId>
+    <ApplicationTitle>Hello1Drive</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>ios-arm64;iossimulator-arm64;iossimulator-x64</RuntimeIdentifiers>
+    <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+    <AppIcon>AppIcon</AppIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Hello1Drive.Core/Hello1Drive.Core.csproj" />
+    <PackageReference Include="Avalonia.iOS" />
+    <PackageReference Include="Microsoft.Identity.Client" />
+  </ItemGroup>
+</Project>

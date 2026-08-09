@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hello1Drive.Core", "src\Hello1Drive.Core\Hello1Drive.Core.csproj", "{7FC5BA05-4A6B-466B-AEF8-D26349BD045A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hello1Drive.Desktop", "src\Hello1Drive.Desktop\Hello1Drive.Desktop.csproj", "{8112906C-312A-4B05-B006-129AEBD63095}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hello1Drive.Android", "src\Hello1Drive.Android\Hello1Drive.Android.csproj", "{47324C13-D6C8-448E-B80F-7ED1AD22564B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hello1Drive.iOS", "src\Hello1Drive.iOS\Hello1Drive.iOS.csproj", "{2859CFF2-6DCB-4F1D-ADF5-427F5DBB78FE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hello1Drive.Browser", "src\Hello1Drive.Browser\Hello1Drive.Browser.csproj", "{6F629B2B-736C-416C-8F16-73085253E883}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7FC5BA05-4A6B-466B-AEF8-D26349BD045A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7FC5BA05-4A6B-466B-AEF8-D26349BD045A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7FC5BA05-4A6B-466B-AEF8-D26349BD045A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7FC5BA05-4A6B-466B-AEF8-D26349BD045A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8112906C-312A-4B05-B006-129AEBD63095}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8112906C-312A-4B05-B006-129AEBD63095}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8112906C-312A-4B05-B006-129AEBD63095}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8112906C-312A-4B05-B006-129AEBD63095}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47324C13-D6C8-448E-B80F-7ED1AD22564B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47324C13-D6C8-448E-B80F-7ED1AD22564B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47324C13-D6C8-448E-B80F-7ED1AD22564B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47324C13-D6C8-448E-B80F-7ED1AD22564B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2859CFF2-6DCB-4F1D-ADF5-427F5DBB78FE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2859CFF2-6DCB-4F1D-ADF5-427F5DBB78FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2859CFF2-6DCB-4F1D-ADF5-427F5DBB78FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2859CFF2-6DCB-4F1D-ADF5-427F5DBB78FE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6F629B2B-736C-416C-8F16-73085253E883}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F629B2B-736C-416C-8F16-73085253E883}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F629B2B-736C-416C-8F16-73085253E883}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F629B2B-736C-416C-8F16-73085253E883}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

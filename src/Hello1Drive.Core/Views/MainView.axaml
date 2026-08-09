@@ -1,0 +1,1078 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hello1Drive.ViewModels"
+             xmlns:models="using:Hello1Drive.Models"
+             x:Class="Hello1Drive.Views.MainView"
+             x:DataType="vm:MainViewModel"
+             x:CompileBindings="True">
+  <Grid x:Name="RootGrid" ClipToBounds="True">
+    <!-- Customizable window background -->
+    <Border x:Name="BackgroundColorLayer" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+    <Image x:Name="BackgroundImageLayer" Stretch="UniformToFill" IsVisible="False" />
+    <Border x:Name="BackgroundScrimLayer" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Opacity="0.30" />
+
+    <!-- Login -->
+    <Grid IsVisible="{Binding IsNotAuthenticated}">
+      <Border MaxWidth="440" Margin="24" Padding="{OnFormFactor Desktop='34', Mobile='24'}" CornerRadius="18"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
+              BoxShadow="0 12 38 0 #35000000">
+        <StackPanel Spacing="16">
+          <Image Source="/Assets/app-icon.png" Width="92" Height="92" HorizontalAlignment="Center" />
+          <TextBlock Text="Hello1Drive" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" />
+          <TextBlock Text="全平台 OneDrive 客户端" TextAlignment="Center" Opacity="0.65" />
+          <Button Classes="coral" Content="登录 Microsoft 账户" Command="{Binding LoginCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center" MinHeight="48" FontSize="15" />
+          <TextBlock Text="权限：User.Read + Files.ReadWrite" Classes="caption" TextAlignment="Center" />
+          <TextBlock Text="{Binding StatusText}" Classes="caption" TextAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- Main file manager -->
+    <Grid IsVisible="{Binding IsAuthenticated}" RowDefinitions="Auto,Auto,*,Auto">
+      <!-- Desktop first-row toolbar is hosted by MainWindow inside the custom title bar. -->
+
+      <!-- Mobile toolbar -->
+      <Border Grid.Row="0" Padding="5,2" Background="Transparent" MinHeight="34"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1"
+              IsVisible="{OnFormFactor Desktop=False, Mobile=True}">
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="5">
+            <Button Grid.Column="0" Classes="icon" Command="{Binding GoBackCommand}"><Path Classes="toolbarIcon iconNavigation" Data="M10.5,2 L4,7 L10.5,12" /></Button>
+            <TextBlock Grid.Column="1" Text="{Binding CurrentLocation}" VerticalAlignment="Center" Margin="6,0"
+                       TextTrimming="CharacterEllipsis" />
+            <Button Grid.Column="2" Classes="titleToolbar" ToolTip.Tip="上传 / 下载列表"
+                    Command="{Binding ToggleTransfersCommand}">
+              <Grid Width="24" Height="24">
+                <!-- Transfer icon: simple, immediately recognizable up/down pair. -->
+                <Path Classes="toolbarIcon iconTransferUp" Width="9" Height="15"
+                      HorizontalAlignment="Left" Margin="2,0,0,0"
+                      Data="M4.5,13 V2.5 M1.8,5.2 L4.5,2.5 L7.2,5.2" />
+                <Path Classes="toolbarIcon iconTransferDown" Width="9" Height="15"
+                      HorizontalAlignment="Right" Margin="0,0,2,0"
+                      Data="M4.5,2 V12.5 M1.8,9.8 L4.5,12.5 L7.2,9.8" />
+                <Border Width="13" Height="13" CornerRadius="7" Background="{DynamicResource HelloAccentBrush}"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-4,0"
+                        IsVisible="{Binding HasActiveTransfers}">
+                  <TextBlock Text="{Binding ActiveTransferCount}" Foreground="White" FontSize="8"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+              </Grid>
+            </Button>
+            <Button Grid.Column="3" Width="30" Height="30" Padding="0" CornerRadius="15">
+              <Grid Width="28" Height="28">
+                <Border CornerRadius="14" Background="{DynamicResource HelloAccentBrush}">
+                  <TextBlock Text="{Binding UserInitial}" Foreground="White" FontWeight="SemiBold"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <Border CornerRadius="14" ClipToBounds="True" IsVisible="{Binding HasUserAvatar}">
+                  <Image Source="{Binding UserAvatar}" Stretch="UniformToFill" />
+                </Border>
+              </Grid>
+              <Button.Flyout>
+                <MenuFlyout>
+                  <MenuItem Header="进入网页版" Click="OpenWebMenuItem_Click" />
+                  <Separator />
+                  <MenuItem Header="设置" Click="SettingsMenuItem_Click" />
+                  <MenuItem Header="退出登录" Click="LogoutMenuItem_Click" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+          </Grid>
+          <TextBox Classes="search" PlaceholderText="搜索当前文件夹" Text="{Binding SearchText, Mode=TwoWay}" />
+        </StackPanel>
+      </Border>
+
+      <!-- File action toolbar. Primary actions stay left-aligned in Home / Refresh / Download / New / Rename / Delete order. -->
+      <Border Grid.Row="1"
+              Padding="{OnFormFactor Desktop='6,0', Mobile='5,2'}"
+              MinHeight="{OnFormFactor Desktop=34, Mobile=34}"
+              Background="Transparent" IsVisible="{Binding ShowToolbar}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
+        <Grid RowDefinitions="{OnFormFactor Desktop='*,0', Mobile='Auto,Auto'}" ColumnDefinitions="*,Auto"
+              ColumnSpacing="10" RowSpacing="4" VerticalAlignment="Stretch">
+          <!-- Mobile keeps a breadcrumb strip because it has no desktop custom title bar. -->
+          <ScrollViewer Grid.Row="0" Grid.Column="0" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                        IsVisible="{OnFormFactor Desktop=False, Mobile=True}">
+            <ItemsControl ItemsSource="{Binding Breadcrumbs}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:BreadcrumbItem">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button Classes="breadcrumb" Content="{Binding Name}" Click="BreadcrumbButton_Click" />
+                    <TextBlock Text="›" VerticalAlignment="Center" Opacity="0.45" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+
+          <!-- Left side of the toolbar: primary file actions in Explorer-like order. -->
+          <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="5"
+                      HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,6,0,-1"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+            <Button Classes="toolbar" ToolTip.Tip="主页" Command="{Binding GoRootCommand}">
+              <Path Classes="toolbarIcon iconHome" Data="M1.5,6.2 L7,1.8 L12.5,6.2 M3.5,5.1 V11.5 H10.5 V5.1" />
+            </Button>
+            <Button Classes="toolbar" ToolTip.Tip="刷新" Command="{Binding RefreshCommand}">
+              <Path Classes="toolbarIcon iconRefresh" Data="M11.6,5 A5,5 0 1 0 11,9.5 M11.6,5 V2 M11.6,5 H8.6" />
+            </Button>
+            <Button Classes="toolbar" ToolTip.Tip="下载" Click="DownloadButton_Click" IsEnabled="{Binding HasDownloadableSelection}">
+              <Path Classes="toolbarIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" />
+            </Button>
+            <Button Classes="toolbar" ToolTip.Tip="新建文件夹" Command="{Binding BeginCreateFolderCommand}">
+              <Path Classes="toolbarIcon iconFolder" Data="M1.5,3.5 H5 L6.5,5 H12.5 V11.5 H1.5 Z M9,6.7 V9.8 M7.45,8.25 H10.55" />
+            </Button>
+            <Button Classes="toolbar" ToolTip.Tip="重命名" Command="{Binding BeginRenameCommand}" IsEnabled="{Binding HasSingleSelection}">
+              <Path Classes="toolbarIcon iconRename" Data="M2,11.5 L2.7,8.8 L9.7,1.8 L12.2,4.3 L5.2,11.3 Z M8.5,3 L11,5.5" />
+            </Button>
+            <Button Classes="toolbar" ToolTip.Tip="删除" Command="{Binding BeginDeleteCommand}" IsEnabled="{Binding HasSelection}">
+              <Path Classes="toolbarIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" />
+            </Button>
+          </StackPanel>
+
+          <!-- View-mode controls stay on the right so the six primary actions remain grouped at the left. -->
+          <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="5"
+                      HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,6,0,-1"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+            <Button Classes="viewMode" ToolTip.Tip="详细信息" Tag="Details" Click="ViewModeButton_Click">
+              <Path Classes="toolbarIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" />
+            </Button>
+            <Button Classes="viewMode" ToolTip.Tip="大图标" Tag="LargeIcons" Click="ViewModeButton_Click">
+              <Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" />
+            </Button>
+            <Button Classes="viewMode" ToolTip.Tip="超大图标" Tag="ExtraLargeIcons" Click="ViewModeButton_Click">
+              <Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" />
+            </Button>
+          </StackPanel>
+
+          <ScrollViewer Grid.Row="1" Grid.ColumnSpan="2" HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled" IsVisible="{OnFormFactor Desktop=False, Mobile=True}">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Button Classes="toolbar" ToolTip.Tip="主页" Command="{Binding GoRootCommand}">
+                <Path Classes="toolbarIcon iconHome" Data="M1.5,6.2 L7,1.8 L12.5,6.2 M3.5,5.1 V11.5 H10.5 V5.1" />
+              </Button>
+              <Button Classes="toolbar" ToolTip.Tip="刷新" Command="{Binding RefreshCommand}">
+                <Path Classes="toolbarIcon iconRefresh" Data="M11.6,5 A5,5 0 1 0 11,9.5 M11.6,5 V2 M11.6,5 H8.6" />
+              </Button>
+              <Button Classes="toolbar" ToolTip.Tip="下载" Click="DownloadButton_Click" IsEnabled="{Binding HasDownloadableSelection}">
+                <Path Classes="toolbarIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" />
+              </Button>
+              <Button Classes="toolbar" ToolTip.Tip="新建文件夹" Command="{Binding BeginCreateFolderCommand}">
+                <Path Classes="toolbarIcon iconFolder" Data="M1.5,3.5 H5 L6.5,5 H12.5 V11.5 H1.5 Z M9,6.7 V9.8 M7.45,8.25 H10.55" />
+              </Button>
+              <Button Classes="toolbar" ToolTip.Tip="重命名" Command="{Binding BeginRenameCommand}" IsEnabled="{Binding HasSingleSelection}">
+                <Path Classes="toolbarIcon iconRename" Data="M2,11.5 L2.7,8.8 L9.7,1.8 L12.2,4.3 L5.2,11.3 Z M8.5,3 L11,5.5" />
+              </Button>
+              <Button Classes="toolbar" ToolTip.Tip="删除" Command="{Binding BeginDeleteCommand}" IsEnabled="{Binding HasSelection}">
+                <Path Classes="toolbarIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" />
+              </Button>
+              <Border Width="1" Margin="4,4" Background="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+              <Button Classes="viewMode" ToolTip.Tip="详细信息" Tag="Details" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></Button>
+              <Button Classes="viewMode" ToolTip.Tip="大图标" Tag="LargeIcons" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></Button>
+              <Button Classes="viewMode" ToolTip.Tip="超大图标" Tag="ExtraLargeIcons" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></Button>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <!-- Content -->
+      <Grid x:Name="FileArea" Grid.Row="2" Margin="0" ClipToBounds="True" SizeChanged="FileArea_SizeChanged"
+            InputElement.IsHoldingEnabled="True" Holding="FileArea_Holding">
+        <Grid.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="刷新" Command="{Binding RefreshCommand}">
+              <MenuItem.Icon><Path Classes="menuIcon iconRefresh" Data="M11.6,5 A5,5 0 1 0 11,9.5 M11.6,5 V2 M11.6,5 H8.6" /></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="查看">
+              <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
+              <MenuItem Header="详细信息" Tag="Details" Click="ViewContextMenu_Click">
+                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
+              </MenuItem>
+              <MenuItem Header="大图标" Tag="LargeIcons" Click="ViewContextMenu_Click">
+                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
+              </MenuItem>
+              <MenuItem Header="超大图标" Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
+              </MenuItem>
+            </MenuItem>
+            <MenuItem Header="排序方式">
+              <MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M2,3 H11 M4,7 H11 M6,11 H11" /></MenuItem.Icon>
+              <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="类型 · 升序" Tag="Type:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,4 H12 M8,8 H12" /></MenuItem.Icon></MenuItem>
+              <MenuItem Header="类型 · 降序" Tag="Type:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,4 H12 M8,8 H12" /></MenuItem.Icon></MenuItem>
+            </MenuItem>
+            <MenuItem Header="返回主页" Command="{Binding GoRootCommand}">
+              <MenuItem.Icon><Path Classes="menuIcon iconHome" Data="M1.5,6.2 L7,1.8 L12.5,6.2 M3.5,5.1 V11.5 H10.5 V5.1" /></MenuItem.Icon>
+            </MenuItem>
+            <Separator />
+            <MenuItem Header="上传文件" Click="FileArea_Upload_Click">
+              <MenuItem.Icon><Path Classes="menuIcon iconTransferUp" Data="M7,12 V2 M3.5,5.5 L7,2 L10.5,5.5 M2,12 H12" /></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="新建文件夹" Click="FileArea_NewFolder_Click">
+              <MenuItem.Icon><Path Classes="menuIcon iconFolder" Data="M1.5,3.5 H5 L6.5,5 H12.5 V11.5 H1.5 Z M9,6.7 V9.8 M7.45,8.25 H10.55" /></MenuItem.Icon>
+            </MenuItem>
+          </ContextMenu>
+        </Grid.ContextMenu>
+        <!-- Details -->
+        <Grid IsVisible="{Binding IsDetailsView}" RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
+                  Background="Transparent">
+            <Grid ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}" ColumnSpacing="6">
+              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序" HorizontalContentAlignment="Center" Padding="0">
+                <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
+                <Button.Flyout>
+                  <MenuFlyout>
+                    <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
+                    <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
+                    <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
+                    <MenuItem Header="类型 · 升序" Tag="Type:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="类型 · 降序" Tag="Type:Descending" Click="SortMenu_Click" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+              <Button Grid.Column="1" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Name" Click="SortHeader_Click">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="名称"/><TextBlock Text="{Binding NameSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+              <Button Grid.Column="2" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Type" Click="SortHeader_Click" IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="类型"/><TextBlock Text="{Binding TypeSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+              <Button Grid.Column="{OnFormFactor Desktop=3, Mobile=2}" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Size" Click="SortHeader_Click">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="大小"/><TextBlock Text="{Binding SizeSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+              <Button Grid.Column="4" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Modified" Click="SortHeader_Click" IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="修改时间"/><TextBlock Text="{Binding ModifiedSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+            </Grid>
+          </Border>
+
+          <ListBox x:Name="DetailsList" Grid.Row="1" Classes="fileList" ItemsSource="{Binding Items}" Margin="0,0,4,0"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                   SelectionMode="Multiple" SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:DriveItemModel">
+                <Grid Classes="fileItemSurface"
+                      ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}"
+                      ColumnSpacing="6" MinHeight="46" Margin="0"
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Holding="FileItem_Holding">
+                  <Grid.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="打开" Click="FileContext_Open_Click">
+                        <MenuItem.Icon><Path Classes="menuIcon iconOpen" Data="M2,7 C4.6,3.8 9.4,3.8 12,7 C9.4,10.2 4.6,10.2 2,7 Z M7,5.3 A1.7,1.7 0 1 1 7,8.7 A1.7,1.7 0 0 1 7,5.3 Z" /></MenuItem.Icon>
+                      </MenuItem>
+                      <Separator />
+                      <MenuItem Header="下载" Click="FileContext_Download_Click">
+                        <MenuItem.Icon><Path Classes="menuIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" /></MenuItem.Icon>
+                      </MenuItem>
+                      <MenuItem Header="缓存" Click="FileContext_Cache_Click">
+                        <MenuItem.Icon><Path Classes="menuIcon iconCache" Data="M4,3 H10.5 A2,2 0 0 1 12.5,5 V10.5 A2,2 0 0 1 10.5,12.5 H3.5 A2,2 0 0 1 1.5,10.5 V5 A2,2 0 0 1 3.5,3 M4.5,6.2 H9.5 M4.5,9.2 H8" /></MenuItem.Icon>
+                      </MenuItem>
+                      <MenuItem Header="重命名" Click="FileContext_Rename_Click">
+                        <MenuItem.Icon><Path Classes="menuIcon iconRename" Data="M2,11.5 L2.7,8.8 L9.7,1.8 L12.2,4.3 L5.2,11.3 Z M8.5,3 L11,5.5" /></MenuItem.Icon>
+                      </MenuItem>
+                      <MenuItem Header="删除" Click="FileContext_Delete_Click">
+                        <MenuItem.Icon><Path Classes="menuIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" /></MenuItem.Icon>
+                      </MenuItem>
+                      <Separator />
+                      <MenuItem Header="在 OneDrive 网页中打开" Click="FileContext_OpenWeb_Click" IsVisible="{Binding HasWebUrl}">
+                        <MenuItem.Icon><Path Classes="menuIcon iconWeb" Data="M5.5,2 H2.5 V11.5 H12 V8.5 M7.5,2 H12 V6.5 M12,2 L6,8" /></MenuItem.Icon>
+                      </MenuItem>
+                    </ContextMenu>
+                  </Grid.ContextMenu>
+                  <Grid Grid.Column="0" Width="36" Height="36" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid IsVisible="{Binding HasNoThumbnailImage}">
+                      <TextBlock Text="📁" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 IsVisible="{Binding IsFolder}" />
+                      <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="30" Height="30" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Ellipse Width="23" Height="23" Fill="#60A5FA" Opacity="0.95" Canvas.Left="2" Canvas.Top="7" />
+                            <Ellipse Width="23" Height="23" Fill="#FB7185" Opacity="0.94" Canvas.Left="7" Canvas.Top="2" />
+                            <Path Data="M13,9 V22 M13,9 L23,6.8 V18.5"
+                                  Stroke="White" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="6.2" Canvas.Top="19.3" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="16.2" Canvas.Top="15.8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsImage}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="30" Height="30" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Border Width="28" Height="28" Canvas.Left="2" Canvas.Top="2"
+                                    Background="#EEF7FF" BorderBrush="#8EC5FF" BorderThickness="1.2" CornerRadius="7" />
+                            <Path Data="M7,23 L12,16.5 L16,20 L20,15.5 L25,23"
+                                  Stroke="#3B82F6" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="5" Height="5" Fill="#FDBA74" Canvas.Left="8" Canvas.Top="8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsVideo}">
+                        <Border Width="28" Height="28" Background="#EEF2FF" BorderBrush="#A5B4FC" BorderThickness="1" CornerRadius="7" />
+                        <Border Width="16" Height="16" Background="#7C3AED" CornerRadius="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+                          <TextBlock Text="▶" Foreground="White" FontSize="8" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="1,0,0,0" />
+                        </Border>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPdf}">
+                        <Border Width="26" Height="30" Background="#FFF5F5" BorderBrush="#F0A0A8" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#EF4444" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="PDF" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsWord}">
+                        <Border Width="26" Height="30" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#2563EB" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="DOC" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsExcel}">
+                        <Border Width="26" Height="30" Background="#F0FDF4" BorderBrush="#86EFAC" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#16A34A" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="XLS" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPowerPoint}">
+                        <Border Width="26" Height="30" Background="#FFF7ED" BorderBrush="#FDBA74" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#F97316" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="PPT" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsArchive}">
+                        <Border Width="26" Height="30" Background="#F5F3FF" BorderBrush="#C4B5FD" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#8B5CF6" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="ZIP" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsUrlShortcut}">
+                        <Border Width="26" Height="30" Background="#F0FDFA" BorderBrush="#5EEAD4" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#0EA5A4" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="URL" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsText}">
+                        <Border Width="26" Height="30" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#64748B" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="TXT" Foreground="White" FontSize="5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsGenericFile}">
+                        <Border Width="26" Height="30" Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="1" CornerRadius="6" />
+                        <Border Width="26" Height="9" Background="#60A5FA" VerticalAlignment="Bottom" CornerRadius="0,0,6,6" />
+                        <TextBlock Text="{Binding FileBadgeText}" Foreground="White" FontSize="5" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                      </Grid>
+                    </Grid>
+                    <Border CornerRadius="5" ClipToBounds="True" IsVisible="{Binding HasThumbnailImage}" Background="#16000000">
+                      <Image Source="{Binding ThumbnailImage}" Stretch="UniformToFill" />
+                    </Border>
+                    <Border Width="14" Height="14" CornerRadius="7" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,1,1" Background="#B0000000" IsVisible="{Binding ShowVideoThumbnailBadge}">
+                      <TextBlock Text="▶" Foreground="White" FontSize="7" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="1,0,0,0" />
+                    </Border>
+                  </Grid>
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Column="2" Text="{Binding TypeDisplay}" VerticalAlignment="Center" Opacity="0.68"
+                             TextTrimming="CharacterEllipsis" IsVisible="{OnFormFactor Desktop=True, Mobile=False}" />
+                  <TextBlock Grid.Column="{OnFormFactor Desktop=3, Mobile=2}" Text="{Binding SizeDisplay}" VerticalAlignment="Center" Opacity="0.68" />
+                  <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.68"
+                             IsVisible="{OnFormFactor Desktop=True, Mobile=False}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <!-- Large icons -->
+        <ListBox x:Name="LargeIconList" Classes="fileList iconFileList" ItemsSource="{Binding Items}" SelectionMode="Multiple" Margin="0,0,4,0"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 IsVisible="{Binding IsLargeIconView}" SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" ItemWidth="152" ItemHeight="162" /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="models:DriveItemModel">
+              <Border Classes="fileItemSurface" Height="154" Margin="0" Padding="10" CornerRadius="10" HorizontalAlignment="Stretch"
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Holding="FileItem_Holding">
+                <Border.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="打开" Click="FileContext_Open_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconOpen" Data="M2,7 C4.6,3.8 9.4,3.8 12,7 C9.4,10.2 4.6,10.2 2,7 Z M7,5.3 A1.7,1.7 0 1 1 7,8.7 A1.7,1.7 0 0 1 7,5.3 Z" /></MenuItem.Icon>
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="下载" Click="FileContext_Download_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="缓存" Click="FileContext_Cache_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconCache" Data="M4,3 H10.5 A2,2 0 0 1 12.5,5 V10.5 A2,2 0 0 1 10.5,12.5 H3.5 A2,2 0 0 1 1.5,10.5 V5 A2,2 0 0 1 3.5,3 M4.5,6.2 H9.5 M4.5,9.2 H8" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="重命名" Click="FileContext_Rename_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconRename" Data="M2,11.5 L2.7,8.8 L9.7,1.8 L12.2,4.3 L5.2,11.3 Z M8.5,3 L11,5.5" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="删除" Click="FileContext_Delete_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" /></MenuItem.Icon>
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="在 OneDrive 网页中打开" Click="FileContext_OpenWeb_Click" IsVisible="{Binding HasWebUrl}">
+                      <MenuItem.Icon><Path Classes="menuIcon iconWeb" Data="M5.5,2 H2.5 V11.5 H12 V8.5 M7.5,2 H12 V6.5 M12,2 L6,8" /></MenuItem.Icon>
+                    </MenuItem>
+                  </ContextMenu>
+                </Border.ContextMenu>
+                <Grid RowDefinitions="*,Auto,Auto" RowSpacing="4">
+                  <Grid Grid.Row="0" Margin="1,1,1,8">
+                    <Grid IsVisible="{Binding HasNoThumbnailImage}">
+                      <TextBlock Text="📁" FontSize="45" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 IsVisible="{Binding IsFolder}" />
+                      <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="82" Height="82" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Ellipse Width="23" Height="23" Fill="#60A5FA" Opacity="0.95" Canvas.Left="2" Canvas.Top="7" />
+                            <Ellipse Width="23" Height="23" Fill="#FB7185" Opacity="0.94" Canvas.Left="7" Canvas.Top="2" />
+                            <Path Data="M13,9 V22 M13,9 L23,6.8 V18.5"
+                                  Stroke="White" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="6.2" Canvas.Top="19.3" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="16.2" Canvas.Top="15.8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsImage}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="82" Height="82" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Border Width="28" Height="28" Canvas.Left="2" Canvas.Top="2"
+                                    Background="#EEF7FF" BorderBrush="#8EC5FF" BorderThickness="1.2" CornerRadius="7" />
+                            <Path Data="M7,23 L12,16.5 L16,20 L20,15.5 L25,23"
+                                  Stroke="#3B82F6" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="5" Height="5" Fill="#FDBA74" Canvas.Left="8" Canvas.Top="8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsVideo}">
+                        <Border Width="90" Height="90" Background="#EEF2FF" BorderBrush="#A5B4FC" BorderThickness="1.5" CornerRadius="14" />
+                        <Border Width="44" Height="44" Background="#7C3AED" CornerRadius="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+                          <TextBlock Text="▶" Foreground="White" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0" />
+                        </Border>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPdf}">
+                        <Border Width="82" Height="96" Background="#FFF5F5" BorderBrush="#F0A0A8" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#EF4444" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="PDF" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsWord}">
+                        <Border Width="82" Height="96" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#2563EB" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="DOC" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsExcel}">
+                        <Border Width="82" Height="96" Background="#F0FDF4" BorderBrush="#86EFAC" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#16A34A" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="XLS" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPowerPoint}">
+                        <Border Width="82" Height="96" Background="#FFF7ED" BorderBrush="#FDBA74" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#F97316" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="PPT" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsArchive}">
+                        <Border Width="82" Height="96" Background="#F5F3FF" BorderBrush="#C4B5FD" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#8B5CF6" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="ZIP" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsUrlShortcut}">
+                        <Border Width="82" Height="96" Background="#F0FDFA" BorderBrush="#5EEAD4" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#0EA5A4" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="URL" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsText}">
+                        <Border Width="82" Height="96" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#64748B" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="TXT" Foreground="White" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsGenericFile}">
+                        <Border Width="82" Height="96" Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="1.5" CornerRadius="12" />
+                        <Border Width="82" Height="24" Background="#60A5FA" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
+                        <TextBlock Text="{Binding FileBadgeText}" Foreground="White" FontSize="9" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                      </Grid>
+                    </Grid>
+                    <Border CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasThumbnailImage}" Background="#16000000">
+                      <Image Source="{Binding ThumbnailImage}" Stretch="UniformToFill" />
+                    </Border>
+                    <Border Width="24" Height="24" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,5,5" Background="#B0000000" IsVisible="{Binding ShowVideoThumbnailBadge}">
+                      <TextBlock Text="▶" Foreground="White" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,0,0,0" />
+                    </Border>
+                  </Grid>
+                  <TextBlock Grid.Row="1" Text="{Binding Name}" TextAlignment="Center" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                  <TextBlock Grid.Row="2" Text="{Binding SizeDisplay}" Classes="caption" HorizontalAlignment="Center" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Extra large icons -->
+        <ListBox x:Name="ExtraLargeIconList" Classes="fileList iconFileList" ItemsSource="{Binding Items}" SelectionMode="Multiple" Margin="0,0,4,0"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 IsVisible="{Binding IsExtraLargeIconView}" SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" ItemWidth="220" ItemHeight="212" /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="models:DriveItemModel">
+              <Border Classes="fileItemSurface" Height="204" Margin="0" Padding="12" CornerRadius="12" HorizontalAlignment="Stretch"
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Holding="FileItem_Holding">
+                <Border.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="打开" Click="FileContext_Open_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconOpen" Data="M2,7 C4.6,3.8 9.4,3.8 12,7 C9.4,10.2 4.6,10.2 2,7 Z M7,5.3 A1.7,1.7 0 1 1 7,8.7 A1.7,1.7 0 0 1 7,5.3 Z" /></MenuItem.Icon>
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="下载" Click="FileContext_Download_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="缓存" Click="FileContext_Cache_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconCache" Data="M4,3 H10.5 A2,2 0 0 1 12.5,5 V10.5 A2,2 0 0 1 10.5,12.5 H3.5 A2,2 0 0 1 1.5,10.5 V5 A2,2 0 0 1 3.5,3 M4.5,6.2 H9.5 M4.5,9.2 H8" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="重命名" Click="FileContext_Rename_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconRename" Data="M2,11.5 L2.7,8.8 L9.7,1.8 L12.2,4.3 L5.2,11.3 Z M8.5,3 L11,5.5" /></MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="删除" Click="FileContext_Delete_Click">
+                      <MenuItem.Icon><Path Classes="menuIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" /></MenuItem.Icon>
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="在 OneDrive 网页中打开" Click="FileContext_OpenWeb_Click" IsVisible="{Binding HasWebUrl}">
+                      <MenuItem.Icon><Path Classes="menuIcon iconWeb" Data="M5.5,2 H2.5 V11.5 H12 V8.5 M7.5,2 H12 V6.5 M12,2 L6,8" /></MenuItem.Icon>
+                    </MenuItem>
+                  </ContextMenu>
+                </Border.ContextMenu>
+                <Grid RowDefinitions="*,Auto,Auto" RowSpacing="4">
+                  <Grid Grid.Row="0" Margin="1,1,1,10">
+                    <Grid IsVisible="{Binding HasNoThumbnailImage}">
+                      <TextBlock Text="📁" FontSize="72" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 IsVisible="{Binding IsFolder}" />
+                      <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="116" Height="116" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Ellipse Width="23" Height="23" Fill="#60A5FA" Opacity="0.95" Canvas.Left="2" Canvas.Top="7" />
+                            <Ellipse Width="23" Height="23" Fill="#FB7185" Opacity="0.94" Canvas.Left="7" Canvas.Top="2" />
+                            <Path Data="M13,9 V22 M13,9 L23,6.8 V18.5"
+                                  Stroke="White" StrokeThickness="2.2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="6.2" Canvas.Top="19.3" />
+                            <Ellipse Width="7.4" Height="5.8" Fill="White" Canvas.Left="16.2" Canvas.Top="15.8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsImage}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Viewbox Width="116" Height="116" Stretch="Uniform">
+                          <Canvas Width="32" Height="32">
+                            <Border Width="28" Height="28" Canvas.Left="2" Canvas.Top="2"
+                                    Background="#EEF7FF" BorderBrush="#8EC5FF" BorderThickness="1.2" CornerRadius="7" />
+                            <Path Data="M7,23 L12,16.5 L16,20 L20,15.5 L25,23"
+                                  Stroke="#3B82F6" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                            <Ellipse Width="5" Height="5" Fill="#FDBA74" Canvas.Left="8" Canvas.Top="8" />
+                          </Canvas>
+                        </Viewbox>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsVideo}">
+                        <Border Width="126" Height="126" Background="#EEF2FF" BorderBrush="#A5B4FC" BorderThickness="2" CornerRadius="18" />
+                        <Border Width="58" Height="58" Background="#7C3AED" CornerRadius="29" HorizontalAlignment="Center" VerticalAlignment="Center">
+                          <TextBlock Text="▶" Foreground="White" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,0,0,0" />
+                        </Border>
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPdf}">
+                        <Border Width="112" Height="132" Background="#FFF5F5" BorderBrush="#F0A0A8" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#EF4444" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="PDF" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsWord}">
+                        <Border Width="112" Height="132" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#2563EB" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="DOC" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsExcel}">
+                        <Border Width="112" Height="132" Background="#F0FDF4" BorderBrush="#86EFAC" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#16A34A" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="XLS" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsPowerPoint}">
+                        <Border Width="112" Height="132" Background="#FFF7ED" BorderBrush="#FDBA74" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#F97316" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="PPT" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsArchive}">
+                        <Border Width="112" Height="132" Background="#F5F3FF" BorderBrush="#C4B5FD" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#8B5CF6" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="ZIP" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsUrlShortcut}">
+                        <Border Width="112" Height="132" Background="#F0FDFA" BorderBrush="#5EEAD4" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#0EA5A4" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="URL" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsText}">
+                        <Border Width="112" Height="132" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#64748B" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="TXT" Foreground="White" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                      <Grid IsVisible="{Binding IsGenericFile}">
+                        <Border Width="112" Height="132" Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="2" CornerRadius="16" />
+                        <Border Width="112" Height="30" Background="#60A5FA" VerticalAlignment="Bottom" CornerRadius="0,0,16,16" />
+                        <TextBlock Text="{Binding FileBadgeText}" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                      </Grid>
+                    </Grid>
+                    <Border CornerRadius="10" ClipToBounds="True" IsVisible="{Binding HasThumbnailImage}" Background="#16000000">
+                      <Image Source="{Binding ThumbnailImage}" Stretch="UniformToFill" />
+                    </Border>
+                    <Border Width="30" Height="30" CornerRadius="15" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,7,7" Background="#B0000000" IsVisible="{Binding ShowVideoThumbnailBadge}">
+                      <TextBlock Text="▶" Foreground="White" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,0,0,0" />
+                    </Border>
+                  </Grid>
+                  <TextBlock Grid.Row="1" Text="{Binding Name}" TextAlignment="Center" TextTrimming="CharacterEllipsis" MaxLines="2" FontSize="15" />
+                  <TextBlock Grid.Row="2" Text="{Binding SizeDisplay}" Classes="caption" HorizontalAlignment="Center" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Border HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10" Padding="10,5"
+                CornerRadius="12" Background="#88000000" IsVisible="{Binding IsLoadingMore}" ZIndex="700">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <ProgressBar Width="56" Height="3" IsIndeterminate="True" />
+            <TextBlock Text="加载更多…" Foreground="White" FontSize="12" />
+          </StackPanel>
+        </Border>
+
+        <!-- Marquee selection + freely draggable upload button. -->
+        <Canvas IsHitTestVisible="False" ZIndex="800">
+          <Border x:Name="SelectionMarquee" IsVisible="False" IsHitTestVisible="False"
+                  BorderBrush="{DynamicResource HelloExplorerMarqueeBorderBrush}" BorderThickness="1"
+                  Background="{DynamicResource HelloExplorerMarqueeBrush}" CornerRadius="2" />
+        </Canvas>
+      </Grid>
+
+      <!-- Status -->
+      <Border Grid.Row="3" Padding="8,4" Background="Transparent"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+          <TextBlock Grid.Column="0" Text="{Binding UserDisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Column="1" Text="{Binding StatusText}" HorizontalAlignment="Center" Opacity="0.66" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Column="2" Text="{Binding QuotaText}" Opacity="0.62" IsVisible="{OnFormFactor Desktop=True, Mobile=False}" />
+        </Grid>
+      </Border>
+
+      <!-- The floating upload button spans the whole app content and can be dragged freely. -->
+      <Canvas x:Name="FloatingActionCanvas" Grid.RowSpan="4" ZIndex="850" SizeChanged="FloatingActionCanvas_SizeChanged">
+        <!--
+          Use a separate transparent drag surface above the visual Button. Avalonia Button
+          captures pointer input for its own pressed/click gesture, which made drag gestures
+          unreliable on some desktop platforms. The drag surface owns the pointer instead;
+          a release without movement is treated as the normal upload click.
+        -->
+        <Grid x:Name="FloatingUploadDragHost" Width="36" Height="36"
+              IsVisible="{Binding ShowFloatingUploadButton}" ToolTip.Tip="上传文件">
+          <Button x:Name="FloatingUploadButton" Classes="fab" IsHitTestVisible="False">
+            <Path Width="13" Height="13" Stretch="Uniform" Stroke="#FFF7F8" StrokeThickness="1.5" StrokeLineCap="Round"
+                  Data="M7,12 V2 M3.5,5.5 L7,2 L10.5,5.5 M2,12 H12" />
+          </Button>
+          <Border Background="#01000000" CornerRadius="18" Cursor="Hand"
+                  PointerPressed="FloatingUploadButton_PointerPressed"
+                  PointerMoved="FloatingUploadButton_PointerMoved"
+                  PointerReleased="FloatingUploadButton_PointerReleased" />
+        </Grid>
+      </Canvas>
+    </Grid>
+
+    <!-- Transfer list -->
+    <Border x:Name="TransferPanel" IsVisible="{Binding IsTransferPanelVisible}" ZIndex="950" Width="{OnFormFactor Desktop=400, Mobile=330}" MaxHeight="430"
+            Margin="{OnFormFactor Desktop='18,18,18,56', Mobile='10,10,12,64'}"
+            HorizontalAlignment="Right" VerticalAlignment="Bottom" Padding="16" CornerRadius="12"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
+            BoxShadow="0 8 28 0 #40000000">
+      <Grid RowDefinitions="Auto,*" RowSpacing="12">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+          <StackPanel>
+            <TextBlock Text="传输列表" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding TransferSummaryText}" Classes="caption" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="清理完成" Command="{Binding ClearFinishedTransfersCommand}" />
+          <Button Grid.Column="2" Classes="iconCloseGlyph" Content="×" Command="{Binding ToggleTransfersCommand}" />
+        </Grid>
+        <!-- ListBox uses Avalonia's virtualizing stack panel by default, so thousands of queued transfers
+             no longer create thousands of visual rows at once. -->
+        <ListBox Grid.Row="1" Classes="transferList" ItemsSource="{Binding Transfers}"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="models:TransferItemModel">
+              <Border Padding="10" Margin="0,0,0,8" CornerRadius="8" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                      ToolTip.Tip="{Binding Message}">
+                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto,Auto" RowSpacing="6" ColumnSpacing="7">
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding StateProgressText}" Classes="caption" VerticalAlignment="Center" />
+                  <Button Grid.Row="0" Grid.Column="2" Classes="titleToolbar" Width="25" Height="25" Padding="5"
+                          ToolTip.Tip="重试" IsVisible="{Binding CanRetry}" Click="RetryTransferButton_Click">
+                    <Path Classes="toolbarIcon iconRetry" Width="11" Height="11" Data="M10.8,4.8 A4.6,4.6 0 1 0 10.4,9.3 M10.8,4.8 V2 M10.8,4.8 H8.2" />
+                  </Button>
+                  <ProgressBar Grid.Row="1" Grid.ColumnSpan="3" Minimum="0" Maximum="1" Value="{Binding Progress}" Height="4" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Border>
+
+    <!-- Preview overlay: click outside preview card to close -->
+    <Grid x:Name="PreviewOverlay" IsVisible="{Binding IsPreviewVisible}" Background="#B0000000" ZIndex="1600"
+          Focusable="True" PointerPressed="PreviewOverlay_PointerPressed">
+      <Button Width="42" Height="62" Padding="0" CornerRadius="10" Background="#66000000" BorderThickness="0"
+              HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" Click="PreviewPrevious_Click" PointerPressed="OverlayContent_PointerPressed" ZIndex="2">
+        <Path Width="18" Height="26" Stretch="Uniform" Stroke="{DynamicResource HelloIconPreviewBrush}" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Data="M14,2 L4,13 L14,24" />
+      </Button>
+      <Button Width="42" Height="62" Padding="0" CornerRadius="10" Background="#66000000" BorderThickness="0"
+              HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Click="PreviewNext_Click" PointerPressed="OverlayContent_PointerPressed" ZIndex="2">
+        <Path Width="18" Height="26" Stretch="Uniform" Stroke="{DynamicResource HelloIconPreviewBrush}" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Data="M4,2 L14,13 L4,24" />
+      </Button>
+      <Border x:Name="PreviewCard" Margin="{OnFormFactor Desktop='70,55', Mobile='12,24'}" Padding="16" CornerRadius="14"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              BorderBrush="#45FFFFFF" BorderThickness="1" PointerPressed="OverlayContent_PointerPressed">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel>
+              <TextBlock Text="{Binding PreviewItem.Name}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding PreviewDetails}" Classes="caption" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="icon iconCloseGlyph" Content="×" Command="{Binding ClosePreviewCommand}" />
+          </Grid>
+
+          <Grid Grid.Row="1">
+            <!-- Text editor -->
+            <Grid IsVisible="{Binding IsTextPreview}" RowDefinitions="*,Auto" RowSpacing="8">
+              <TextBox Grid.Row="0" Text="{Binding PreviewText, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="NoWrap"
+                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+              <Button Grid.Row="1" Classes="coral" Content="保存修改" Command="{Binding SavePreviewTextCommand}"
+                      HorizontalAlignment="Right" Padding="18,8" />
+            </Grid>
+
+            <!-- Image/GIF viewer: clipped surface, no scrollbars. Wheel zoom anchors at the mouse. -->
+            <Grid x:Name="PreviewImageViewport" IsVisible="{Binding IsImagePreview}" ClipToBounds="True"
+                  PointerPressed="PreviewImage_PointerPressed" PointerMoved="PreviewImage_PointerMoved"
+                  PointerReleased="PreviewImage_PointerReleased" PointerWheelChanged="PreviewImage_PointerWheelChanged"
+                  DoubleTapped="PreviewImage_DoubleTapped"
+                  SizeChanged="PreviewImageViewport_SizeChanged">
+              <Grid.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="上一张" Click="PreviewPrevious_Click"><MenuItem.Icon><Path Classes="menuIcon iconPreview" Data="M10.5,2 L4,7 L10.5,12" /></MenuItem.Icon></MenuItem>
+                  <MenuItem Header="下一张" Click="PreviewNext_Click"><MenuItem.Icon><Path Classes="menuIcon iconPreview" Data="M3.5,2 L10,7 L3.5,12" /></MenuItem.Icon></MenuItem>
+                  <MenuItem Header="{Binding SlideshowText}" Click="PreviewSlideshow_Click"><MenuItem.Icon><Path Classes="menuIcon iconTransferUp" Data="M4,3 L11,7 L4,11 Z" /></MenuItem.Icon></MenuItem>
+                  <Separator />
+                  <MenuItem Header="下载" Click="PreviewDownload_Click"><MenuItem.Icon><Path Classes="menuIcon iconDownload" Data="M7,1.5 V9 M4.5,6.5 L7,9 L9.5,6.5 M2,11.5 H12" /></MenuItem.Icon></MenuItem>
+                  <MenuItem Header="详细信息" Click="PreviewDetails_Click"><MenuItem.Icon><Path Classes="menuIcon iconView" Data="M7,2.2 A4.8,4.8 0 1 1 7,11.8 A4.8,4.8 0 0 1 7,2.2 Z M7,6.2 V10 M7,4.2 V4.3" /></MenuItem.Icon></MenuItem>
+                </ContextMenu>
+              </Grid.ContextMenu>
+              <Canvas ClipToBounds="True">
+                <Image x:Name="PreviewImageElement" Source="{Binding PreviewImage}"
+                       Width="{Binding PreviewImageWidth}" Height="{Binding PreviewImageHeight}" Stretch="Fill" />
+              </Canvas>
+              <Border HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,8,0,0"
+                      Padding="9,4" CornerRadius="12" Background="#88000000" IsHitTestVisible="False">
+                <TextBlock Text="{Binding PreviewZoomText}" Foreground="White" FontSize="12" />
+              </Border>
+            </Grid>
+
+            <!-- Media: platform heads can provide a true in-app player. The desktop head
+                 registers a LibVLCSharp player; unsupported targets keep the system-player fallback. -->
+            <Grid IsVisible="{Binding IsMediaPreview}">
+              <ContentControl x:Name="EmbeddedMediaPlayerHost" HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch" IsVisible="False" />
+              <StackPanel x:Name="ExternalMediaFallback" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Spacing="14" MaxWidth="560">
+                <TextBlock Text="▶" FontSize="78" HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding PreviewItem.Name}" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock Text="当前平台未启用内置播放器，可使用系统播放器打开。" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.7" />
+                <Button Classes="coral" Content="使用系统播放器" Click="OpenMediaButton_Click" Padding="20,9" HorizontalAlignment="Center" />
+              </StackPanel>
+            </Grid>
+
+            <StackPanel IsVisible="{Binding ShowGenericPreview}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" MaxWidth="560">
+              <TextBlock Text="{Binding PreviewItem.Name}" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding PreviewStatus}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+
+            <Border IsVisible="{Binding IsPreviewLoading}" Background="#58000000" CornerRadius="10" ZIndex="20">
+              <StackPanel Width="150" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <ProgressBar Width="150" Height="4" IsIndeterminate="True" HorizontalAlignment="Center" />
+                <TextBlock Width="150" Text="加载中" Foreground="White" TextAlignment="Center" HorizontalAlignment="Center" />
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <Border Grid.Row="2" IsVisible="{Binding IsPreviewDetailsVisible}" Padding="12,9" CornerRadius="9" Background="#26000000">
+            <TextBlock Text="{Binding PreviewExtendedDetails}" FontSize="12" Opacity="0.84" TextWrapping="Wrap" />
+          </Border>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- HelloV-style acrylic slide-over: duplicated wallpaper + blur + translucent tint. -->
+    <Grid x:Name="SettingsOverlay" IsVisible="{Binding IsSettingsPanelVisible}" ZIndex="1800">
+      <Border Background="#01000000" PointerPressed="SettingsBackdrop_PointerPressed" />
+      <Border x:Name="SettingsPanelHost" Width="{OnFormFactor Desktop=430, Mobile=350}" HorizontalAlignment="Right"
+              Background="Transparent" BorderBrush="#45FFFFFF" BorderThickness="1,0,0,0"
+              BoxShadow="-14 0 36 0 #52000000" ClipToBounds="True" PointerPressed="OverlayContent_PointerPressed">
+        <Border.RenderTransform><TranslateTransform X="430" /></Border.RenderTransform>
+        <Grid ClipToBounds="True">
+          <Border x:Name="SettingsAcrylicBase" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Opacity="0.72" />
+          <Image x:Name="SettingsAcrylicBackgroundImage" Stretch="UniformToFill" Opacity="0.78" IsVisible="False">
+            <Image.Effect><BlurEffect Radius="22" /></Image.Effect>
+          </Image>
+          <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Opacity="0.42" />
+          <Border IsHitTestVisible="False" Opacity="0.28">
+            <Border.Background>
+              <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                <GradientStop Color="#70FFFFFF" Offset="0" />
+                <GradientStop Color="#08000000" Offset="0.55" />
+                <GradientStop Color="#30000000" Offset="1" />
+              </LinearGradientBrush>
+            </Border.Background>
+          </Border>
+
+          <Grid RowDefinitions="Auto,*" Margin="22,26,22,20">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,14">
+              <StackPanel>
+                <TextBlock Text="设置" FontSize="25" FontWeight="SemiBold" />
+                <TextBlock Text="Hello1Drive" Classes="caption" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="icon iconCloseGlyph" Content="×" Click="CloseSettingsButton_Click" />
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="16">
+                <StackPanel Spacing="7">
+                  <TextBlock Text="主题" FontWeight="SemiBold" />
+                  <ComboBox ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding SelectedThemeText, Mode=TwoWay}" />
+                </StackPanel>
+
+                <StackPanel Spacing="7">
+                  <TextBlock Text="窗体背景" FontWeight="SemiBold" />
+                  <ComboBox ItemsSource="{Binding BackgroundModeOptions}" SelectedItem="{Binding SelectedBackgroundModeText, Mode=TwoWay}" />
+                </StackPanel>
+
+                <StackPanel Spacing="7" IsVisible="{Binding IsBackgroundColorMode}">
+                  <TextBlock Text="背景颜色" Classes="caption" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding BackgroundColorText, Mode=TwoWay}"
+                             PlaceholderText="#FD6F71" />
+                    <Button Grid.Column="1"
+                            Width="40" Height="34" MinWidth="40" MinHeight="34"
+                            Padding="7"
+                            ToolTip.Tip="选择颜色">
+                      <Border Width="20" Height="20" CornerRadius="4"
+                              Background="{Binding BackgroundColorPreviewBrush}"
+                              BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                              BorderThickness="1" />
+                      <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedRight">
+                          <Border Padding="10" MinWidth="320" MaxWidth="380">
+                            <ColorView Color="{Binding BackgroundPickerColor, Mode=TwoWay}"
+                                       IsAlphaEnabled="False"
+                                       IsAlphaVisible="False"
+                                       IsAccentColorsVisible="False"
+                                       IsColorSpectrumVisible="True"
+                                       IsColorPaletteVisible="True"
+                                       IsColorComponentsVisible="True"
+                                       IsColorPreviewVisible="True"
+                                       IsHexInputVisible="True" />
+                          </Border>
+                        </Flyout>
+                      </Button.Flyout>
+                    </Button>
+                  </Grid>
+                  <TextBlock Text="可直接输入 HEX，也可以点击右侧色块打开调色盘。" Classes="caption" />
+                </StackPanel>
+
+                <StackPanel Spacing="7" IsVisible="{Binding IsBackgroundUrlMode}">
+                  <TextBlock Text="图片 URL" Classes="caption" />
+                  <TextBox Text="{Binding BackgroundUrl, Mode=TwoWay}" PlaceholderText="https://example.com/background.jpg" />
+                </StackPanel>
+
+                <StackPanel Spacing="7" IsVisible="{Binding IsBackgroundLocalImageMode}">
+                  <TextBlock Text="{Binding LocalImageDisplayName, FallbackValue='尚未选择图片'}" TextWrapping="Wrap" />
+                  <Button Content="选择本地图片" Click="PickLocalImageButton_Click" HorizontalAlignment="Stretch" />
+                </StackPanel>
+
+                <StackPanel Spacing="7" IsVisible="{Binding IsBackgroundLocalFolderMode}">
+                  <TextBlock Text="{Binding LocalFolderDisplayName, FallbackValue='尚未选择文件夹'}" TextWrapping="Wrap" />
+                  <Button Content="选择本地文件夹" Click="PickLocalFolderButton_Click" HorizontalAlignment="Stretch" />
+                </StackPanel>
+
+                <StackPanel Spacing="7" IsVisible="{Binding IsBackgroundOneDriveFolderMode}">
+                  <TextBlock Text="{Binding OneDriveBackgroundFolderName, FallbackValue='尚未选择 OneDrive 文件夹'}" TextWrapping="Wrap" />
+                  <Button Content="使用当前 OneDrive 文件夹" Click="UseCurrentOneDriveFolderButton_Click" HorizontalAlignment="Stretch" />
+                  <TextBlock Text="先在主界面进入目标目录，再点击此按钮。" Classes="caption" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Grid ColumnDefinitions="*,120" ColumnSpacing="10" IsVisible="{Binding IsBackgroundFolderMode}">
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="图片切换时间" FontWeight="SemiBold" />
+                    <TextBlock Text="单位：分钟" Classes="caption" />
+                  </StackPanel>
+                  <NumericUpDown Grid.Column="1" Minimum="0.1" Maximum="1440" Increment="0.5"
+                                 Value="{Binding BackgroundIntervalMinutes, Mode=TwoWay}" />
+                </Grid>
+
+                <StackPanel Spacing="6">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel>
+                      <TextBlock Text="亚克力磨砂程度" FontWeight="SemiBold" />
+                      <TextBlock Text="应用背景与设置面板的磨砂强度（默认 50%）" Classes="caption" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding AcrylicBlurText}" VerticalAlignment="Center" Classes="caption" />
+                  </Grid>
+                  <Slider Minimum="0" Maximum="100" Value="{Binding AcrylicBlurPercent, Mode=TwoWay}" />
+                </StackPanel>
+
+                <Border Height="1" Background="#28FFFFFF" />
+                <TextBlock Text="浏览与界面" FontWeight="SemiBold" />
+                <CheckBox Content="记住退出时所在目录" IsChecked="{Binding RememberLastFolder, Mode=TwoWay}" />
+                <CheckBox Content="显示悬浮上传按钮" IsChecked="{Binding ShowFloatingUploadButton, Mode=TwoWay}" />
+                <CheckBox Content="显示工具栏" IsChecked="{Binding ShowToolbar, Mode=TwoWay}" />
+                <CheckBox Content="文件项背景透明" IsChecked="{Binding TransparentFileItemBackground, Mode=TwoWay}" />
+                <CheckBox Content="删除文件/文件夹前确认" IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}" />
+
+                <Grid ColumnDefinitions="*,120" ColumnSpacing="10">
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="幻灯片切换时间" FontWeight="SemiBold" />
+                    <TextBlock Text="单位：秒" Classes="caption" />
+                  </StackPanel>
+                  <NumericUpDown Grid.Column="1" Minimum="1" Maximum="3600" Increment="1"
+                                 Value="{Binding SlideshowIntervalSeconds, Mode=TwoWay}" />
+                </Grid>
+
+                <Border Height="1" Background="#28FFFFFF" />
+                <TextBlock Text="传输限速" FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <TextBlock Text="限制下载速率" VerticalAlignment="Center" />
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding LimitDownloadSpeed, Mode=TwoWay}" OnContent="打开" OffContent="关闭" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,150,Auto" ColumnSpacing="8" IsEnabled="{Binding LimitDownloadSpeed}">
+                  <TextBlock Grid.Column="0" Text="限制为" VerticalAlignment="Center" Classes="caption" />
+                  <NumericUpDown Grid.Column="1" Minimum="1" Maximum="1048576" Increment="64" Value="{Binding DownloadSpeedLimitKBps, Mode=TwoWay}" />
+                  <TextBlock Grid.Column="2" Text="KB/s" VerticalAlignment="Center" Classes="caption" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <TextBlock Text="限制上传速率" VerticalAlignment="Center" />
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding LimitUploadSpeed, Mode=TwoWay}" OnContent="打开" OffContent="关闭" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,150,Auto" ColumnSpacing="8" IsEnabled="{Binding LimitUploadSpeed}">
+                  <TextBlock Grid.Column="0" Text="限制为" VerticalAlignment="Center" Classes="caption" />
+                  <NumericUpDown Grid.Column="1" Minimum="1" Maximum="1048576" Increment="64" Value="{Binding UploadSpeedLimitKBps, Mode=TwoWay}" />
+                  <TextBlock Grid.Column="2" Text="KB/s" VerticalAlignment="Center" Classes="caption" />
+                </Grid>
+
+                <Button Content="下载所有 OneDrive 文件" Click="DownloadAllFilesButton_Click" HorizontalAlignment="Stretch" />
+
+                <Border Height="1" Background="#28FFFFFF" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <StackPanel Grid.Column="0" Spacing="3">
+                    <TextBlock Text="缓存" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding CacheStatusText}" Classes="caption" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="清除缓存" Command="{Binding ClearCacheCommand}" VerticalAlignment="Center" />
+                </Grid>
+
+                <TextBlock Text="设置修改后会自动保存并立即生效。" Classes="caption" TextWrapping="Wrap" />
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Error banner -->
+    <Border IsVisible="{Binding HasError}" VerticalAlignment="Top" HorizontalAlignment="Stretch"
+            Margin="14" Padding="12" CornerRadius="8" Background="#C93B3B" ZIndex="2200">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="White" TextWrapping="Wrap" />
+        <Button Grid.Column="1" Classes="iconCloseGlyph" Content="×" Command="{Binding CloseErrorCommand}" />
+      </Grid>
+    </Border>
+
+    <!-- Busy overlay -->
+    <Grid IsVisible="{Binding IsBusy}" Background="#22000000" IsHitTestVisible="True" ZIndex="2100">
+      <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="18,12" CornerRadius="10"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <ProgressBar Width="90" Height="4" IsIndeterminate="True" />
+          <TextBlock Text="加载中" VerticalAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- HelloCrab-style prompt overlay -->
+    <Grid IsVisible="{Binding IsPromptVisible}" Background="{DynamicResource HelloOverlayBrush}" ZIndex="3000">
+      <Border Width="{OnFormFactor Desktop=420, Mobile=330}" Padding="22" CornerRadius="10"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="16">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding PromptTitle}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding PromptMessage}" Classes="caption" TextWrapping="Wrap" />
+          </StackPanel>
+          <TextBox Text="{Binding PromptText, Mode=TwoWay}" IsVisible="{Binding IsPromptInputVisible}" />
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+            <Button Classes="sectionAction" Content="取消" Command="{Binding CancelPromptCommand}" />
+            <Button Grid.Column="1" Classes="coral sectionAction" Content="确定" Command="{Binding ConfirmPromptCommand}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- HelloCrab-style logout confirmation -->
+    <Grid IsVisible="{Binding IsLogoutConfirmVisible}" Background="{DynamicResource HelloOverlayBrush}" ZIndex="3100">
+      <Border Width="{OnFormFactor Desktop=420, Mobile=330}" Padding="22" CornerRadius="10"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="16">
+          <StackPanel Spacing="6">
+            <TextBlock Text="退出登录" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="确定退出当前 Microsoft 账户吗？本地设置和传输历史不会删除。" Classes="caption" TextWrapping="Wrap" />
+          </StackPanel>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+            <Button Classes="sectionAction" Content="取消" Command="{Binding CancelLogoutCommand}" />
+            <Button Grid.Column="1" Classes="coral sectionAction" Content="退出登录" Command="{Binding ConfirmLogoutCommand}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- HelloCrab-style app close confirmation -->
+    <Grid IsVisible="{Binding IsCloseConfirmVisible}" Background="{DynamicResource HelloOverlayBrush}" ZIndex="3200">
+      <Border Width="{OnFormFactor Desktop=420, Mobile=330}" Padding="22" CornerRadius="10"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="16">
+          <StackPanel Spacing="6">
+            <TextBlock Text="关闭 Hello1Drive" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding CloseConfirmationMessage}" Classes="caption" TextWrapping="Wrap" />
+          </StackPanel>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+            <Button Classes="sectionAction" Content="取消" Click="CancelAppCloseButton_Click" />
+            <Button Grid.Column="1" Classes="coral sectionAction" Content="关闭" Click="ConfirmAppCloseButton_Click" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

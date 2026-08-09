@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 1.0.0'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            kind: desktop
+            rid: win-x64
+          - os: windows-latest
+            kind: desktop
+            rid: win-arm64
+          - os: ubuntu-latest
+            kind: desktop
+            rid: linux-x64
+          - os: ubuntu-latest
+            kind: desktop
+            rid: linux-arm64
+          - os: macos-latest
+            kind: desktop
+            rid: osx-arm64
+          - os: macos-latest
+            kind: desktop
+            rid: osx-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"; fi
+      - name: Publish
+        shell: bash
+        run: |
+          RID="${{ matrix.rid }}"
+          TARGET="publish/$RID"
+          OUTPUT="$TARGET"
+          if [[ "$RID" == osx-* ]]; then OUTPUT="$TARGET/raw"; fi
+          mkdir -p "$OUTPUT"
+
+          dotnet publish src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release -r "$RID" \
+            --self-contained true -o "$OUTPUT" /p:Version="$VERSION" /p:PublishSingleFile=false
+
+          if [[ "$RID" == osx-* ]]; then
+            APP="$TARGET/Hello1Drive.app"
+            mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+            cp -R "$OUTPUT"/* "$APP/Contents/MacOS/"
+            cp src/Hello1Drive.Core/Assets/app-icon.icns "$APP/Contents/Resources/app-icon.icns"
+            chmod +x "$APP/Contents/MacOS/Hello1Drive"
+            cat > "$APP/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>Hello1Drive</string>
+          <key>CFBundleDisplayName</key><string>Hello1Drive</string>
+          <key>CFBundleIdentifier</key><string>com.xiaowei.hello1drive</string>
+          <key>CFBundleExecutable</key><string>Hello1Drive</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleIconFile</key><string>app-icon.icns</string>
+          <key>CFBundleShortVersionString</key><string>$VERSION</string>
+          <key>CFBundleVersion</key><string>$VERSION</string>
+          </dict></plist>
+          EOF
+            rm -rf "$OUTPUT"
+          fi
+
+          cd "$TARGET"
+          if command -v zip >/dev/null 2>&1; then
+            zip -qr "../../Hello1Drive-Desktop-$RID-$VERSION.zip" .
+          else
+            7z a "../../Hello1Drive-Desktop-$RID-$VERSION.zip" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: Hello1Drive-Desktop-${{ matrix.rid }}-*.zip
+
+  web-mobile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"; fi
+      - run: dotnet workload install wasm-tools android ios
+      - name: Browser
+        run: |
+          dotnet publish src/Hello1Drive.Browser/Hello1Drive.Browser.csproj -c Release /p:Version="$VERSION"
+          cd src/Hello1Drive.Browser/bin/Release/net10.0-browser/publish/wwwroot
+          zip -qr "$GITHUB_WORKSPACE/Hello1Drive-Browser-$VERSION.zip" .
+      - name: Android
+        run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0 /p:Version="$VERSION"
+      - name: iOS simulator
+        run: dotnet publish src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios26.0 -r iossimulator-arm64 /p:CodesignKey= /p:CodesignProvision= /p:Version="$VERSION"
+      - name: Collect mobile outputs
+        shell: bash
+        run: |
+          mkdir -p release-mobile
+          cp Hello1Drive-Browser-$VERSION.zip release-mobile/
+          find src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish -maxdepth 1 -type f \( -name '*.apk' -o -name '*.aab' \) -exec cp {} release-mobile/ \;
+          cd src/Hello1Drive.iOS/bin/Release/net10.0-ios26.0/iossimulator-arm64/publish && zip -qr "$GITHUB_WORKSPACE/release-mobile/Hello1Drive-iOS-Simulator-arm64-$VERSION.zip" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web-mobile
+          path: release-mobile/*
+
+  github-release:
+    needs: [package, web-mobile]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then TAG="v${{ inputs.version }}"; fi
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hello1Drive $TAG" --generate-notes
+          gh release upload "$TAG" release-assets/* --clobber

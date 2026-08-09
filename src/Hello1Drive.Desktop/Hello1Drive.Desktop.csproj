@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Hello1Drive.Desktop</RootNamespace>
+    <AssemblyName>Hello1Drive</AssemblyName>
+    <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <UseAppHost>true</UseAppHost>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <ApplicationIcon>../Hello1Drive.Core/Assets/app-icon.ico</ApplicationIcon>
+    <ApplicationManifest Condition="$([MSBuild]::IsOSPlatform('Windows')) Or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))">app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Hello1Drive.Core/Hello1Drive.Core.csproj" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Microsoft.Identity.Client" />
+    <PackageReference Include="LibVLCSharp.Avalonia" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Condition="$([MSBuild]::IsOSPlatform('Windows')) Or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))" />
+  </ItemGroup>
+</Project>

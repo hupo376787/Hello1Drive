@@ -1,0 +1,158 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:Hello1Drive.Views"
+        xmlns:vm="using:Hello1Drive.ViewModels"
+        xmlns:models="using:Hello1Drive.Models"
+        x:Class="Hello1Drive.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="1180" Height="760" MinWidth="200" MinHeight="200"
+        Title="Hello1Drive"
+        Icon="avares://Hello1Drive.Core/Assets/app-icon.ico"
+        WindowStartupLocation="CenterScreen"
+        WindowDecorations="None"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="34"
+        CanResize="True"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        TransparencyBackgroundFallback="Transparent">
+  <Border x:Name="WindowFrame" CornerRadius="10" Background="Transparent"
+          BorderThickness="0" ClipToBounds="True">
+    <Grid>
+      <!-- A single wallpaper is painted under the complete client area, including title/status bars. -->
+      <Border x:Name="WindowBackgroundColorLayer" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+      <Image x:Name="WindowBackgroundImageLayer" Stretch="UniformToFill" IsVisible="False" />
+      <Border x:Name="WindowBackgroundFrostLayer" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Opacity="0.275" />
+
+      <Grid RowDefinitions="34,*">
+        <Border Grid.Row="0" Background="Transparent"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
+          <Grid Height="34"
+                ColumnDefinitions="Auto,Auto,Auto,*,190,Auto,Auto,Auto,Auto,Auto,Auto"
+                ColumnSpacing="4" Margin="4,0,0,0">
+            <!-- Back stays in the custom title bar; file actions live in the toolbar below. -->
+            <Button Grid.Column="0" Classes="titleToolbar" ToolTip.Tip="返回" Command="{Binding GoBackCommand}"
+                    IsVisible="{Binding IsAuthenticated}">
+              <Path Classes="toolbarIcon iconNavigation" Data="M10.5,2 L4,7 L10.5,12" />
+            </Button>
+
+            <Border Grid.Column="1" Background="Transparent" Padding="2,0,5,0"
+                    WindowDecorationProperties.ElementRole="TitleBar" PointerPressed="TitleBar_PointerPressed">
+              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Image Source="/Assets/app-icon.png" Width="22" Height="22" />
+                <TextBlock Text="Hello1Drive" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+
+            <!-- The navigable directory hierarchy is the address bar. -->
+            <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                          MinWidth="40" MaxWidth="560" Margin="2,0" IsVisible="{Binding IsAuthenticated}"
+                          HorizontalAlignment="Left">
+              <ItemsControl ItemsSource="{Binding Breadcrumbs}" VerticalAlignment="Center">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="1" /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:BreadcrumbItem">
+                    <StackPanel Orientation="Horizontal" Spacing="1" VerticalAlignment="Center">
+                      <Button Classes="breadcrumb" Content="{Binding Name}" Click="BreadcrumbButton_Click"
+                              FontSize="12" Padding="5,2" MaxWidth="150" />
+                      <TextBlock Text="›" VerticalAlignment="Center" Opacity="0.45" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+
+            <!-- Empty area after the address bar is a draggable title-bar region. -->
+            <Border Grid.Column="3" Background="Transparent"
+                    WindowDecorationProperties.ElementRole="TitleBar"
+                    PointerPressed="TitleBar_PointerPressed" />
+
+            <TextBox Grid.Column="4" Classes="titleSearch" PlaceholderText="搜索当前文件夹"
+                     Text="{Binding SearchText, Mode=TwoWay}" IsVisible="{Binding IsAuthenticated}" />
+
+            <Button Grid.Column="5" Classes="titleToolbar" ToolTip.Tip="上传 / 下载列表"
+                    Command="{Binding ToggleTransfersCommand}" IsVisible="{Binding IsAuthenticated}">
+              <Grid Width="22" Height="20">
+                <!-- Transfer list: one up arrow + one down arrow, side-by-side. -->
+                <Path Classes="toolbarIcon iconTransferUp" Width="9" Height="15"
+                      HorizontalAlignment="Left" Margin="1,0,0,0"
+                      Data="M4.5,13 V2.5 M1.8,5.2 L4.5,2.5 L7.2,5.2" />
+                <Path Classes="toolbarIcon iconTransferDown" Width="9" Height="15"
+                      HorizontalAlignment="Right" Margin="0,0,1,0"
+                      Data="M4.5,2 V12.5 M1.8,9.8 L4.5,12.5 L7.2,9.8" />
+                <Border Width="13" Height="13" CornerRadius="7" Background="{DynamicResource HelloAccentBrush}"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-5,0"
+                        IsVisible="{Binding HasActiveTransfers}">
+                  <TextBlock Text="{Binding ActiveTransferCount}" Foreground="White" FontSize="8"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+              </Grid>
+            </Button>
+            <Button Grid.Column="6" Classes="titleToolbar" ToolTip.Tip="设置" Click="SettingsButton_Click">
+              <!-- Familiar settings glyph: classic gear outline with a clear center hub. -->
+              <Grid Width="18" Height="18">
+                <Path Width="17" Height="17" Stretch="Uniform"
+                      Stroke="{DynamicResource HelloIconSettingsBrush}" StrokeThickness="1.55"
+                      StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent"
+                      Data="M9,2.1 L10.1,2.4 L10.8,4.1 L12.4,4.8 L14.1,4.1 L14.9,4.9 L14.2,6.6 L14.9,8.2 L16.6,8.9 L16.6,10 L14.9,10.7 L14.2,12.3 L14.9,14 L14.1,14.8 L12.4,14.1 L10.8,14.8 L10.1,16.5 L9,16.8 L7.9,16.5 L7.2,14.8 L5.6,14.1 L3.9,14.8 L3.1,14 L3.8,12.3 L3.1,10.7 L1.4,10 L1.4,8.9 L3.1,8.2 L3.8,6.6 L3.1,4.9 L3.9,4.1 L5.6,4.8 L7.2,4.1 L7.9,2.4 Z" />
+                <Ellipse Width="5.6" Height="5.6" HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Fill="{DynamicResource HelloAccentBrush}" Stroke="{DynamicResource HelloIconSettingsBrush}" StrokeThickness="1.1" />
+              </Grid>
+            </Button>
+
+            <Button Grid.Column="7" Width="28" Height="28" Padding="0" CornerRadius="14"
+                    ToolTip.Tip="账户" IsVisible="{Binding IsAuthenticated}">
+              <Grid Width="26" Height="26">
+                <Border CornerRadius="13" Background="{DynamicResource HelloAccentBrush}">
+                  <TextBlock Text="{Binding UserInitial}" Foreground="White" FontWeight="SemiBold" FontSize="11"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <Border CornerRadius="13" ClipToBounds="True" IsVisible="{Binding HasUserAvatar}">
+                  <Image Source="{Binding UserAvatar}" Stretch="UniformToFill" />
+                </Border>
+              </Grid>
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                  <MenuItem Header="进入网页版" Click="AccountOpenWebMenuItem_Click" />
+                  <Separator />
+                  <MenuItem Header="设置" Click="AccountSettingsMenuItem_Click" />
+                  <MenuItem Header="退出登录" Click="AccountLogoutMenuItem_Click" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+
+            <Button Grid.Column="8" Classes="windowButton" ToolTip.Tip="最小化" Click="MinimizeButton_Click">
+              <Border Width="10" Height="1.5" CornerRadius="0.75" VerticalAlignment="Center"
+                      Background="{DynamicResource HelloIconMinimizeBrush}" />
+            </Button>
+            <Button Grid.Column="9" Classes="windowButton" ToolTip.Tip="最大化 / 还原" Click="MaximizeButton_Click">
+              <Path Width="9" Height="9" Stretch="Uniform" Stroke="{DynamicResource HelloIconMaximizeBrush}"
+                    StrokeThickness="1.1" StrokeJoin="Round" Data="M1.2,1.2 H7.8 V7.8 H1.2 Z" />
+            </Button>
+            <Button Grid.Column="10" Classes="windowButton closeWindowButton" ToolTip.Tip="关闭" Click="CloseButton_Click">
+              <Path Width="9" Height="9" Stretch="Uniform" Stroke="{DynamicResource HelloIconCloseBrush}"
+                    StrokeThickness="1.15" StrokeLineCap="Round" Data="M1.4,1.4 L7.6,7.6 M7.6,1.4 L1.4,7.6" />
+            </Button>
+          </Grid>
+        </Border>
+
+        <views:MainView x:Name="MainContent" Grid.Row="1" />
+      </Grid>
+
+      <!-- Borderless windows need explicit resize hit targets. A 3 px band is enough for resize
+           without stealing ordinary pointer use from scrollbars and edge-adjacent content. -->
+      <Grid x:Name="ResizeGripLayer" ZIndex="10000" RowDefinitions="3,*,3" ColumnDefinitions="3,*,3">
+        <Border Grid.Row="0" Grid.Column="0" Background="Transparent" Cursor="TopLeftCorner" Tag="NorthWest" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="0" Grid.Column="1" Background="Transparent" Cursor="TopSide" Tag="North" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="0" Grid.Column="2" Background="Transparent" Cursor="TopRightCorner" Tag="NorthEast" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="1" Grid.Column="0" Background="Transparent" Cursor="LeftSide" Tag="West" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="1" Grid.Column="2" Background="Transparent" Cursor="RightSide" Tag="East" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="2" Grid.Column="0" Background="Transparent" Cursor="BottomLeftCorner" Tag="SouthWest" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="2" Grid.Column="1" Background="Transparent" Cursor="BottomSide" Tag="South" PointerPressed="ResizeGrip_PointerPressed" />
+        <Border Grid.Row="2" Grid.Column="2" Background="Transparent" Cursor="BottomRightCorner" Tag="SouthEast" PointerPressed="ResizeGrip_PointerPressed" />
+      </Grid>
+    </Grid>
+  </Border>
+</Window>
