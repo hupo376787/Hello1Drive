@@ -9,6 +9,9 @@ public sealed class DesktopAuthenticationService : IAuthenticationService
     private readonly IPublicClientApplication _app;
     private readonly string _cachePath;
     private readonly object _cacheLock = new();
+    private readonly SemaphoreSlim _tokenGate = new(1, 1);
+    private string? _cachedAccessToken;
+    private DateTimeOffset _cachedAccessTokenExpiresOn;
 
     public DesktopAuthenticationService()
     {
@@ -27,36 +30,64 @@ public sealed class DesktopAuthenticationService : IAuthenticationService
 
     public async Task<string?> GetAccessTokenAsync(bool interactive, CancellationToken cancellationToken = default)
     {
-        var accounts = await _app.GetAccountsAsync();
-        var account = accounts.FirstOrDefault();
+        if (HasUsableInMemoryToken())
+            return _cachedAccessToken;
 
-        if (account is not null)
+        await _tokenGate.WaitAsync(cancellationToken);
+        try
         {
-            try
+            if (HasUsableInMemoryToken())
+                return _cachedAccessToken;
+
+            var accounts = await _app.GetAccountsAsync();
+            var account = accounts.FirstOrDefault();
+
+            if (account is not null)
             {
-                var silent = await _app.AcquireTokenSilent(AppConfig.GraphScopes, account)
-                    .ExecuteAsync(cancellationToken);
-                return silent.AccessToken;
+                try
+                {
+                    var silent = await _app.AcquireTokenSilent(AppConfig.GraphScopes, account)
+                        .ExecuteAsync(cancellationToken);
+                    CacheResult(silent);
+                    return silent.AccessToken;
+                }
+                catch (MsalUiRequiredException)
+                {
+                    // Interactive sign-in below when requested.
+                }
             }
-            catch (MsalUiRequiredException)
-            {
-                // Interactive sign-in below when requested.
-            }
+
+            if (!interactive)
+                return null;
+
+            var result = await _app.AcquireTokenInteractive(AppConfig.GraphScopes)
+                .WithUseEmbeddedWebView(false)
+                .ExecuteAsync(cancellationToken);
+            CacheResult(result);
+            return result.AccessToken;
         }
+        finally
+        {
+            _tokenGate.Release();
+        }
+    }
 
-        if (!interactive)
-            return null;
+    private bool HasUsableInMemoryToken() =>
+        !string.IsNullOrWhiteSpace(_cachedAccessToken) &&
+        DateTimeOffset.UtcNow < _cachedAccessTokenExpiresOn - TimeSpan.FromMinutes(2);
 
-        var result = await _app.AcquireTokenInteractive(AppConfig.GraphScopes)
-            .WithUseEmbeddedWebView(false)
-            .ExecuteAsync(cancellationToken);
-        return result.AccessToken;
+    private void CacheResult(AuthenticationResult result)
+    {
+        _cachedAccessToken = result.AccessToken;
+        _cachedAccessTokenExpiresOn = result.ExpiresOn;
     }
 
     public bool TryHandleProtocolActivation(Uri uri) => false;
 
     public async Task SignOutAsync(CancellationToken cancellationToken = default)
     {
+        _cachedAccessToken = null;
+        _cachedAccessTokenExpiresOn = default;
         var accounts = await _app.GetAccountsAsync();
         foreach (var account in accounts)
             await _app.RemoveAsync(account);

@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Hello1Drive.Controls.LoadingIndicator">
+  <StackPanel Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Grid Width="36" Height="36" HorizontalAlignment="Center">
+      <Ellipse Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center"
+               Stroke="{DynamicResource SystemControlForegroundBaseLowBrush}" StrokeThickness="3" />
+      <Path x:Name="SpinnerArc" Width="32" Height="32" Stretch="None"
+            HorizontalAlignment="Center" VerticalAlignment="Center"
+            Stroke="{DynamicResource HelloAccentBrush}" StrokeThickness="3"
+            StrokeLineCap="Round" Fill="Transparent"
+            Data="M16,2 A14,14 0 0 1 30,16"
+            RenderTransformOrigin="50%,50%">
+      </Path>
+    </Grid>
+    <TextBlock Text="加载中" HorizontalAlignment="Center" TextAlignment="Center" />
+  </StackPanel>
+</UserControl>

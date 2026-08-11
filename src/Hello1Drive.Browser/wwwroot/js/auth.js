@@ -1,6 +1,8 @@
 const authority = 'https://login.microsoftonline.com/consumers/oauth2/v2.0';
 const tokenKey = 'hello1drive.auth.token';
 const pkceKey = 'hello1drive.auth.pkce';
+let callbackPromise = null;
+let loginRedirectStarted = false;
 
 function redirectUri() {
   // Keep the SPA callback distinct from the desktop loopback redirect.
@@ -33,6 +35,28 @@ function requestedScopes(scopes) {
 function readToken() {
   try { return JSON.parse(localStorage.getItem(tokenKey) || 'null'); }
   catch { return null; }
+}
+
+function readPkce() {
+  let value = null;
+  try { value = sessionStorage.getItem(pkceKey); } catch {}
+  // Some mobile/privacy browser modes can lose sessionStorage across the Entra redirect.
+  // localStorage is only a short-lived fallback and is cleared as soon as the callback ends.
+  if (!value) {
+    try { value = localStorage.getItem(pkceKey); } catch {}
+  }
+  try { return JSON.parse(value || 'null'); } catch { return null; }
+}
+
+function writePkce(value) {
+  const text = JSON.stringify(value);
+  try { sessionStorage.setItem(pkceKey, text); } catch {}
+  try { localStorage.setItem(pkceKey, text); } catch {}
+}
+
+function clearPkce() {
+  try { sessionStorage.removeItem(pkceKey); } catch {}
+  try { localStorage.removeItem(pkceKey); } catch {}
 }
 
 function writeToken(payload) {
@@ -81,9 +105,7 @@ async function processCallback(clientId, scopes) {
   if (!code) return '';
 
   const state = url.searchParams.get('state') || '';
-  let pkce;
-  try { pkce = JSON.parse(sessionStorage.getItem(pkceKey) || 'null'); }
-  catch { pkce = null; }
+  const pkce = readPkce();
 
   if (!pkce || pkce.state !== state || !pkce.verifier) {
     cleanCallbackUrl();
@@ -99,7 +121,7 @@ async function processCallback(clientId, scopes) {
     scope: requestedScopes(scopes)
   });
 
-  sessionStorage.removeItem(pkceKey);
+  clearPkce();
   cleanCallbackUrl();
   return writeToken(payload);
 }
@@ -120,7 +142,11 @@ async function refresh(clientId, scopes, refreshToken) {
 }
 
 export async function getAccessToken(clientId, scopes) {
-  const callbackToken = await processCallback(clientId, scopes);
+  // Startup can ask for a token from more than one code path. Consume an OAuth callback
+  // as a single-flight operation so the authorization code is never exchanged twice.
+  if (!callbackPromise)
+    callbackPromise = processCallback(clientId, scopes);
+  const callbackToken = await callbackPromise;
   if (callbackToken) return callbackToken;
 
   const token = readToken();
@@ -133,11 +159,13 @@ export async function getAccessToken(clientId, scopes) {
 export async function login(clientId, scopes) {
   const existing = await getAccessToken(clientId, scopes);
   if (existing) return existing;
+  if (loginRedirectStarted) return '';
+  loginRedirectStarted = true;
 
   const verifier = randomString(64);
   const challenge = await pkceChallenge(verifier);
   const state = randomString(24);
-  sessionStorage.setItem(pkceKey, JSON.stringify({ verifier, state }));
+  writePkce({ verifier, state, createdAt: Date.now() });
 
   const url = new URL(`${authority}/authorize`);
   url.searchParams.set('client_id', clientId);
@@ -155,5 +183,5 @@ export async function login(clientId, scopes) {
 
 export async function logout() {
   localStorage.removeItem(tokenKey);
-  sessionStorage.removeItem(pkceKey);
+  clearPkce();
 }

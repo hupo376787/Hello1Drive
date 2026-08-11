@@ -26,11 +26,15 @@ public enum FileViewMode
 
 public enum FileSortColumn
 {
-    None,
-    Name,
-    Type,
-    Size,
-    Modified
+    None = 0,
+    Name = 1,
+
+    // Legacy value kept only so settings written by older builds (Type = 2)
+    // can be recognized and discarded safely without shifting enum numbers.
+    LegacyType = 2,
+
+    Size = 3,
+    Modified = 4
 }
 
 public enum SortCycleState
@@ -55,6 +59,19 @@ public sealed class RememberedBreadcrumb
     public string? ItemId { get; set; }
 }
 
+public sealed class RememberedFolderSortRule
+{
+    public string FolderKey { get; set; } = string.Empty;
+    public FileSortColumn Column { get; set; } = FileSortColumn.None;
+    public SortCycleState State { get; set; } = SortCycleState.Original;
+}
+
+public sealed class RememberedFolderViewMode
+{
+    public string FolderKey { get; set; } = string.Empty;
+    public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
+}
+
 public sealed class AppSettings
 {
     public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
@@ -74,10 +91,20 @@ public sealed class AppSettings
     // Navigation / UI persistence
     public bool RememberLastFolder { get; set; } = true;
     public List<RememberedBreadcrumb> LastFolderBreadcrumbs { get; set; } = [];
+    public List<RememberedFolderSortRule> FolderSortRules { get; set; } = [];
+    public List<RememberedFolderViewMode> FolderViewModes { get; set; } = [];
     public bool ShowFloatingUploadButton { get; set; } = true;
     public bool ShowToolbar { get; set; } = true;
     public bool TransparentFileItemBackground { get; set; }
     public bool ConfirmBeforeDelete { get; set; } = true;
+    public bool UseBuiltInViewer { get; set; } = true;
+    public bool StartWithWindows { get; set; }
+
+    // Global default sort. Individual folders may override this through FolderSortRules.
+    // Changing the global default clears all per-folder overrides.
+    public FileSortColumn DefaultSortColumn { get; set; } = FileSortColumn.None;
+    public SortCycleState DefaultSortState { get; set; } = SortCycleState.Original;
+
     public double SlideshowIntervalSeconds { get; set; } = 5;
 
     // Transfer throttling. Values are KB/s and only applied when the matching switch is enabled.

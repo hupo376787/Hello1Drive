@@ -9,6 +9,7 @@ namespace Hello1Drive.Android;
 
 [Activity(
     Label = "Hello1Drive",
+    Theme = "@style/MyTheme.NoActionBar",
     MainLauncher = true,
     Exported = true,
     LaunchMode = LaunchMode.SingleTop,

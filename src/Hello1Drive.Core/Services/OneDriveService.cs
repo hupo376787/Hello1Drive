@@ -16,6 +16,7 @@ public sealed class OneDriveService : IOneDriveService
 
     private readonly IAuthenticationService _authentication;
     private readonly HttpClient _httpClient = new();
+    private string? _driveId;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -42,7 +43,9 @@ public sealed class OneDriveService : IOneDriveService
         using var request = new HttpRequestMessage(HttpMethod.Get,
             $"{AppConfig.GraphBaseUrl}/me/drive?$select=id,driveType,quota");
         using var response = await SendAsync(request, cancellationToken);
-        return await DeserializeAsync<DriveInfoModel>(response, cancellationToken);
+        var info = await DeserializeAsync<DriveInfoModel>(response, cancellationToken);
+        _driveId = info.Id;
+        return info;
     }
 
     public async Task<byte[]?> GetProfilePhotoAsync(CancellationToken cancellationToken = default)
@@ -70,21 +73,104 @@ public sealed class OneDriveService : IOneDriveService
         return all;
     }
 
+    public async Task<IReadOnlyList<DriveItemModel>> GetChildFoldersAsync(
+        string? parentItemId,
+        CancellationToken cancellationToken = default)
+    {
+        // The move/copy destination browser only needs folders. Microsoft Graph's
+        // driveItem/children endpoint does not support a server-side folder-only $filter,
+        // so request only the minimal facets and filter locally. Avoiding $expand=thumbnails
+        // makes deep destination navigation much cheaper than the normal file-list request.
+        var folders = new List<DriveItemModel>();
+        string? nextLink = null;
+
+        do
+        {
+            var url = nextLink;
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                var baseUrl = parentItemId is null
+                    ? $"{AppConfig.GraphBaseUrl}/me/drive/root/children"
+                    : $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(parentItemId)}/children";
+                url = baseUrl + "?$top=200&$select=id,name,webUrl,folder,remoteItem,specialFolder,parentReference";
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var page = await DeserializeAsync<GraphCollectionResponse<DriveItemModel>>(response, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Personal Vault is intentionally excluded from the app-side move/copy picker.
+            // It requires OneDrive's own extra verification flow and cannot be used as a
+            // normal Graph destination by this third-party client.
+            folders.AddRange(page.Value.Where(static item => item.IsFolder && !item.IsPersonalVault));
+            nextLink = page.NextLink;
+        }
+        while (!string.IsNullOrWhiteSpace(nextLink));
+
+        return folders;
+    }
+
     public async Task<DriveItemPage> GetChildrenPageAsync(
         string? parentItemId,
         string? nextLink = null,
         int pageSize = 120,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? orderBy = null)
     {
         pageSize = Math.Clamp(pageSize, 20, 200);
-        var url = !string.IsNullOrWhiteSpace(nextLink)
-            ? nextLink
-            : parentItemId is null
-                ? $"{AppConfig.GraphBaseUrl}/me/drive/root/children?$top={pageSize}&$expand=thumbnails"
-                : $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(parentItemId)}/children?$top={pageSize}&$expand=thumbnails";
+        var url = nextLink;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            var baseUrl = parentItemId is null
+                ? $"{AppConfig.GraphBaseUrl}/me/drive/root/children"
+                : $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(parentItemId)}/children";
+            // Request specialFolder explicitly. Some OneDrive consumer responses omit that
+            // facet from the default children payload; without it Personal Vault can look like
+            // a normal folder and the next /children request fails with 422.
+            const string select = "id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem,specialFolder,parentReference";
+            var query = $"?$top={pageSize}&$select={select}&$expand=thumbnails";
+            if (!string.IsNullOrWhiteSpace(orderBy))
+                query += $"&$orderby={Uri.EscapeDataString(orderBy)}";
+            url = baseUrl + query;
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        // Microsoft documents `size` as a supported OneDrive $orderby field, but some
+        // consumer storage backends map it to the non-indexed internal
+        // SMTotalFileStreamSize property and return 501/notSupported unless this SharePoint
+        // compatibility preference is present. Apply it to the initial request and to Graph
+        // nextLink pages so a large folder stays consistently ordered.
+        var sizeOrderRequested = IsSizeOrderRequest(url, orderBy);
+        if (sizeOrderRequested)
+            request.Headers.TryAddWithoutValidation("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly");
+
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (sizeOrderRequested && response.StatusCode == HttpStatusCode.NotImplemented &&
+                (detail.Contains("SMTotalFileStreamSize", StringComparison.OrdinalIgnoreCase) ||
+                 detail.Contains("notSupported", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new GraphOrderByNotSupportedException("大小", detail);
+            }
+
+            if ((int)response.StatusCode == 422 &&
+                (detail.Contains("getChildrenOnNonFolder", StringComparison.OrdinalIgnoreCase) ||
+                 detail.Contains("Children cannot be listed from an item that is not a folder", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new GraphChildrenOnNonFolderException(detail);
+            }
+
+            throw new HttpRequestException(
+                $"Microsoft Graph 请求失败：{(int)response.StatusCode} {response.ReasonPhrase}\n{detail}",
+                null,
+                response.StatusCode);
+        }
+
         var page = await DeserializeAsync<GraphCollectionResponse<DriveItemModel>>(response, cancellationToken).ConfigureAwait(false);
         return new DriveItemPage
         {
@@ -93,11 +179,14 @@ public sealed class OneDriveService : IOneDriveService
         };
     }
 
-    public async Task<DriveItemModel> GetItemMetadataAsync(string itemId, CancellationToken cancellationToken = default)
+    public async Task<DriveItemModel> GetItemMetadataAsync(string? itemId, CancellationToken cancellationToken = default)
     {
+        var itemPath = string.IsNullOrWhiteSpace(itemId)
+            ? "root"
+            : $"items/{Uri.EscapeDataString(itemId)}";
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}?$select=id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem");
+            $"{AppConfig.GraphBaseUrl}/me/drive/{itemPath}?$select=id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem,specialFolder");
         using var response = await SendAsync(request, cancellationToken);
         return await DeserializeAsync<DriveItemModel>(response, cancellationToken);
     }
@@ -182,6 +271,58 @@ public sealed class OneDriveService : IOneDriveService
         using var response = await SendAsync(request, cancellationToken);
         if (response.StatusCode != HttpStatusCode.NoContent)
             await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public async Task MoveAsync(string itemId, string targetFolderId, CancellationToken cancellationToken = default)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            parentReference = new { id = targetFolderId }
+        }, _jsonOptions);
+
+        using var request = new HttpRequestMessage(new HttpMethod("PATCH"),
+            $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var response = await SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public async Task CopyAsync(string itemId, string targetFolderId, CancellationToken cancellationToken = default)
+    {
+        var driveId = _driveId;
+        if (string.IsNullOrWhiteSpace(driveId))
+            driveId = (await GetDriveInfoAsync(cancellationToken)).Id;
+
+        var parentReference = string.IsNullOrWhiteSpace(driveId)
+            ? new Dictionary<string, string> { ["id"] = targetFolderId }
+            : new Dictionary<string, string> { ["driveId"] = driveId, ["id"] = targetFolderId };
+        var json = JsonSerializer.Serialize(new { parentReference }, _jsonOptions);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}/copy")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var response = await SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public async Task<string> CreateShareLinkAsync(string itemId, CancellationToken cancellationToken = default)
+    {
+        // Do not force an anonymous/public scope. With scope omitted Microsoft Graph uses the
+        // account's/default sharing-link policy, which is safer than silently widening access.
+        var json = JsonSerializer.Serialize(new { type = "view" }, _jsonOptions);
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}/createLink")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var response = await SendAsync(request, cancellationToken);
+        var permission = await DeserializeAsync<SharingPermissionModel>(response, cancellationToken);
+        return permission.Link?.WebUrl
+            ?? throw new InvalidOperationException("OneDrive 没有返回可分享链接。");
     }
 
     public async Task UploadFileAsync(
@@ -374,14 +515,36 @@ public sealed class OneDriveService : IOneDriveService
         progress?.Report(1.0);
     }
 
+    private static bool IsSizeOrderRequest(string? url, string? orderBy)
+    {
+        if (!string.IsNullOrWhiteSpace(orderBy) &&
+            orderBy.TrimStart().StartsWith("size", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        try
+        {
+            return Uri.UnescapeDataString(url).Contains("orderby=size", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return url.Contains("orderby=size", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     private async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken,
         HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
+        // Graph calls must never start an interactive login by themselves. Interactive
+        // authentication is initiated only by the explicit Login command, which prevents
+        // duplicate browser redirects during startup/callback processing.
         var token = await _authentication.GetAccessTokenAsync(interactive: false, cancellationToken);
-        if (string.IsNullOrWhiteSpace(token))
-            token = await _authentication.GetAccessTokenAsync(interactive: true, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("未登录 Microsoft 账户。");

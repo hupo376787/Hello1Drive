@@ -65,6 +65,18 @@ public sealed class DriveQuota
     public string? State { get; set; }
 }
 
+public sealed class SharingPermissionModel
+{
+    [JsonPropertyName("link")]
+    public SharingLinkModel? Link { get; set; }
+}
+
+public sealed class SharingLinkModel
+{
+    [JsonPropertyName("webUrl")]
+    public string? WebUrl { get; set; }
+}
+
 public sealed class DriveItemModel : ObservableObject, IDisposable
 {
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -153,10 +165,22 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     [JsonPropertyName("remoteItem")]
     public RemoteItemFacet? RemoteItem { get; set; }
 
+    [JsonPropertyName("specialFolder")]
+    public SpecialFolderFacet? SpecialFolder { get; set; }
+
     [JsonPropertyName("thumbnails")]
     public List<ThumbnailSetModel> Thumbnails { get; set; } = [];
 
     private Bitmap? _thumbnailImage;
+    private Bitmap? _galleryImage;
+    private bool _isMobileSelected;
+
+    [JsonIgnore]
+    public bool IsMobileSelected
+    {
+        get => _isMobileSelected;
+        set => SetProperty(ref _isMobileSelected, value);
+    }
 
     [JsonIgnore]
     public Bitmap? ThumbnailImage
@@ -172,7 +196,43 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         }
     }
 
-    public bool IsFolder => Folder is not null || RemoteItem?.Folder is not null;
+    [JsonIgnore]
+    public Bitmap? GalleryImage
+    {
+        get => _galleryImage;
+        set
+        {
+            if (!SetProperty(ref _galleryImage, value))
+                return;
+            OnPropertyChanged(nameof(HasGalleryImage));
+            OnPropertyChanged(nameof(HasNoGalleryImage));
+        }
+    }
+
+    // Personal Vault is not exposed consistently by every OneDrive consumer backend.
+    // Prefer the specialFolder facet when Graph returns it, but keep a localized-name
+    // fallback for older/alternate payloads where the vault still looks folder-like while
+    // /children rejects it as a non-folder.
+    public bool IsPersonalVault =>
+        string.Equals(SpecialFolder?.Name, "vault", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(RemoteItem?.SpecialFolder?.Name, "vault", StringComparison.OrdinalIgnoreCase) ||
+        IsKnownPersonalVaultDisplayName(Name);
+
+    private static bool IsKnownPersonalVaultDisplayName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var normalized = name.Trim();
+        return normalized.Equals("Personal Vault", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("OneDrive Personal Vault", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("个人保险库", StringComparison.Ordinal) ||
+               normalized.Equals("个人保管库", StringComparison.Ordinal) ||
+               normalized.Equals("個人保險庫", StringComparison.Ordinal) ||
+               normalized.Equals("個人保管庫", StringComparison.Ordinal);
+    }
+
+    public bool IsFolder => Folder is not null || RemoteItem?.Folder is not null || IsPersonalVault;
     public bool IsFile => !IsFolder;
     public int ChildCount => Folder?.ChildCount ?? RemoteItem?.Folder?.ChildCount ?? 0;
     public string MimeType => File?.MimeType ?? RemoteItem?.File?.MimeType ?? string.Empty;
@@ -192,6 +252,9 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     public bool SupportsThumbnail => IsFile && (!string.IsNullOrWhiteSpace(ThumbnailUrl) || IsImage || IsVideo || IsPdf || IsWord || IsExcel || IsPowerPoint || IsText);
     public bool HasThumbnailImage => ThumbnailImage is not null;
     public bool HasNoThumbnailImage => ThumbnailImage is null;
+    public bool HasGalleryImage => GalleryImage is not null;
+    public bool HasNoGalleryImage => GalleryImage is null;
+    public bool ShowMobileFileBadge => IsFile && !IsImage;
     public bool ShowVideoThumbnailBadge => IsVideo && HasThumbnailImage;
     public bool HasWebUrl => !string.IsNullOrWhiteSpace(WebUrl);
 
@@ -297,6 +360,8 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     {
         ThumbnailImage?.Dispose();
         ThumbnailImage = null;
+        GalleryImage?.Dispose();
+        GalleryImage = null;
     }
 }
 
@@ -339,6 +404,12 @@ public sealed class FileFacet
     public string? MimeType { get; set; }
 }
 
+public sealed class SpecialFolderFacet
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
 public sealed class RemoteItemFacet
 {
     [JsonPropertyName("id")]
@@ -349,6 +420,9 @@ public sealed class RemoteItemFacet
 
     [JsonPropertyName("file")]
     public FileFacet? File { get; set; }
+
+    [JsonPropertyName("specialFolder")]
+    public SpecialFolderFacet? SpecialFolder { get; set; }
 }
 
 public sealed class UploadSessionResponse

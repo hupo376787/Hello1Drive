@@ -9,7 +9,6 @@
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
     <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
-    <RuntimeIdentifiers>ios-arm64;iossimulator-arm64;iossimulator-x64</RuntimeIdentifiers>
     <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
     <AppIcon>AppIcon</AppIcon>
   </PropertyGroup>

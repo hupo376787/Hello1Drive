@@ -1,8 +1,11 @@
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.GestureRecognizers;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -27,16 +30,42 @@ public partial class MainView : UserControl
     private int _backgroundIndex;
     private bool _changingBackground;
     private bool _settingsPanelAnimating;
+    private bool _settingsOpenedFromMobileProfile;
     private bool _loaded;
     private bool _restoredTransfersResumeStarted;
     private CancellationTokenSource? _backgroundUrlApplyCts;
     private IDisposable? _backgroundScrimBinding;
+    private IDisposable? _mobileProfileScrimBinding;
+    private IDisposable? _mobileTransferScrimBinding;
+    private IDisposable? _mobileSettingsScrimBinding;
     private DriveItemModel? _contextItem;
     private bool _previewAutoFit;
     private bool _previewPanning;
     private Point _previewPanPointerStart;
     private double _previewPanStartLeft;
     private double _previewPanStartTop;
+    private readonly PinchGestureRecognizer _previewPinchGestureRecognizer = new();
+    private readonly ScrollGestureRecognizer _previewScrollGestureRecognizer = new()
+    {
+        CanHorizontallyScroll = false,
+        CanVerticallyScroll = false,
+        IsScrollInertiaEnabled = false,
+        ScrollStartDistance = 6
+    };
+    private double _previewLastPinchScale = 1.0;
+    private bool _previewPinching;
+    private bool _mobilePreviewZoomMode;
+    private bool _syncingMobileImageCarousel;
+    private string[] _mobileCarouselImageIds = [];
+
+    // Mobile preview long-press opens the same action surface as the ⋮ button.
+    // Movement/pinch/swipe cancels the pending hold so it never competes with
+    // Carousel paging or zoomed-image panning.
+    private readonly DispatcherTimer _previewLongPressTimer = new() { Interval = TimeSpan.FromMilliseconds(560) };
+    private bool _previewLongPressPending;
+    private Point _previewLongPressStart;
+    private IEmbeddedMediaOverlayController? _mobilePreviewActionsOverlayController;
+
     private IEmbeddedMediaPlayerSession? _embeddedMediaSession;
     private string? _embeddedMediaPath;
 
@@ -45,8 +74,54 @@ public partial class MainView : UserControl
     private TopLevel? _topLevel;
 
     private bool _marqueeSelecting;
+    private bool _mobileSelectionMode;
+    private readonly HashSet<string> _mobileSelectedIds = new(StringComparer.Ordinal);
     private Point _marqueeStart;
     private readonly HashSet<string> _marqueeBaseSelection = new(StringComparer.Ordinal);
+
+    private bool _mobileChromeVisible = true;
+    private double _lastMobileScrollOffset;
+    private double _mobileScrollAccumulator;
+    private int _mobileScrollDirection;
+    private ScrollViewer? _lastMobileScrollViewer;
+    private DateTime _mobileChromeIgnoreUntilUtc;
+    private DateTime _mobileChromeTransitionLockUntilUtc;
+    private DateTime _mobileScrollLastActivityUtc;
+    private DateTime _mobileThumbnailLastQueueUtc;
+    private bool _pendingMobileChromeVisible = true;
+    private readonly DispatcherTimer _mobileScrollIdleTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
+    private bool _mobileFolderNavigationInProgress;
+    private bool _mobileRefreshInProgress;
+
+    // Mobile long-press selection is implemented explicitly instead of Avalonia's Holding recognizer.
+    // This lets us cancel the pending long-press as soon as a touch starts becoming a scroll, which
+    // prevents accidental selections during slow drags/flings.
+    private readonly DispatcherTimer _mobileLongPressTimer = new() { Interval = TimeSpan.FromMilliseconds(620) };
+    private DriveItemModel? _mobileLongPressItem;
+    private Point _mobileLongPressStart;
+    private bool _mobileLongPressMoved;
+    private string? _suppressNextMobileTapItemId;
+    private bool _mobileDragSelecting;
+    private int _mobileDragSelectionAnchorIndex = -1;
+    private int _mobileDragSelectionCurrentIndex = -1;
+    private readonly HashSet<string> _mobileDragSelectionBaseIds = new(StringComparer.Ordinal);
+
+    private readonly AvaloniaList<DriveItemModel> _mobileDestinationFolders = [];
+    private readonly AvaloniaList<BreadcrumbItem> _mobileDestinationBreadcrumbItems = [];
+    private IReadOnlyList<DriveItemModel> _mobileDestinationPendingItems = Array.Empty<DriveItemModel>();
+    private string? _mobileDestinationFolderId;
+    private MobileDestinationOperation _mobileDestinationOperation;
+    private CancellationTokenSource? _mobileDestinationNavigationCts;
+    private long _mobileDestinationNavigationVersion;
+
+    private enum MobileDestinationOperation
+    {
+        None,
+        Move,
+        Copy
+    }
+
+    private static bool IsMobilePlatform => OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
 
     private bool _draggingFloatingUpload;
     private bool _floatingUploadMoved;
@@ -57,9 +132,14 @@ public partial class MainView : UserControl
     public MainView()
     {
         InitializeComponent();
+        MobileDestinationFolderList.ItemsSource = _mobileDestinationFolders;
+        MobileDestinationBreadcrumbs.ItemsSource = _mobileDestinationBreadcrumbItems;
         Loaded += MainView_Loaded;
         Unloaded += MainView_Unloaded;
         _backgroundTimer.Tick += BackgroundTimer_Tick;
+        _mobileScrollIdleTimer.Tick += MobileScrollIdleTimer_Tick;
+        _mobileLongPressTimer.Tick += MobileLongPressTimer_Tick;
+        _previewLongPressTimer.Tick += PreviewLongPressTimer_Tick;
 
         // ListBox can mark pointer events handled. Register on the routed event with
         // handledEventsToo so desktop marquee selection still starts on empty list space.
@@ -67,6 +147,25 @@ public partial class MainView : UserControl
         FileArea.AddHandler(InputElement.PointerMovedEvent, FileArea_PointerMoved, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
         FileArea.AddHandler(InputElement.PointerReleasedEvent, FileArea_PointerReleased, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
         AddHandler(InputElement.KeyDownEvent, MainView_KeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
+
+        if (IsMobilePlatform)
+        {
+            // Mobile gallery gestures: pinch zoom, one-finger pan while zoomed, and
+            // horizontal swipe paging while the image is fitted to the viewport.
+            PreviewImageViewport.GestureRecognizers.Add(_previewPinchGestureRecognizer);
+            PreviewImageViewport.GestureRecognizers.Add(_previewScrollGestureRecognizer);
+            PreviewImageViewport.AddHandler(InputElement.PinchEvent, PreviewImage_Pinch, RoutingStrategies.Bubble, true);
+            PreviewImageViewport.AddHandler(InputElement.PinchEndedEvent, PreviewImage_PinchEnded, RoutingStrategies.Bubble, true);
+            PreviewImageViewport.AddHandler(InputElement.ScrollGestureEvent, PreviewImage_ScrollGesture, RoutingStrategies.Bubble, true);
+
+            // handledEventsToo is required because Carousel may mark touch events handled.
+            PreviewImageViewport.AddHandler(InputElement.PointerPressedEvent, PreviewLongPress_PointerPressed,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
+            PreviewImageViewport.AddHandler(InputElement.PointerMovedEvent, PreviewLongPress_PointerMoved,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
+            PreviewImageViewport.AddHandler(InputElement.PointerReleasedEvent, PreviewLongPress_PointerReleased,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
+        }
     }
 
     private async void MainView_Loaded(object? sender, RoutedEventArgs e)
@@ -74,14 +173,6 @@ public partial class MainView : UserControl
         if (_loaded)
             return;
         _loaded = true;
-
-        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
-        {
-            var touchSelection = SelectionMode.Multiple | SelectionMode.Toggle;
-            DetailsList.SelectionMode = touchSelection;
-            LargeIconList.SelectionMode = touchSelection;
-            ExtraLargeIconList.SelectionMode = touchSelection;
-        }
 
         ConfigureBackgroundHost();
         _topLevel = TopLevel.GetTopLevel(this);
@@ -101,12 +192,29 @@ public partial class MainView : UserControl
             ApplyFileItemBackground(vm);
             ApplySettingsAcrylicBlur(vm.AcrylicBlurPercent);
             ApplyAppBackgroundAcrylicBlur(vm.AcrylicBlurPercent);
-            await ApplyWindowBackgroundAsync();
-            await vm.InitializeAsync();
+            ApplyStartupBackgroundShell(vm);
+
+            // Start initialization immediately, but keep the splash only for a short, fixed
+            // first-frame interval. With a startup snapshot the cached directory is already
+            // restored behind the splash, so network synchronization must not lengthen it.
+            var initializeTask = vm.InitializeAsync();
+            await Task.Delay(520);
+            StartupSplashOverlay.Opacity = 0;
+            await Task.Delay(170);
+            StartupSplashOverlay.IsVisible = false;
+            await initializeTask;
+
+            // URL / local-folder / OneDrive backgrounds are decorative and can involve disk or
+            // network I/O. Load them only after the OneDrive startup path has been released.
+            _ = ApplyWindowBackgroundAsync();
             _ = TryResumePersistedTransfersAsync(vm);
             Dispatcher.UIThread.Post(PositionFloatingUploadButton, DispatcherPriority.Loaded);
             Dispatcher.UIThread.Post(HookListScrollViewers, DispatcherPriority.Loaded);
             Dispatcher.UIThread.Post(UpdateIconPanelSizing, DispatcherPriority.Loaded);
+            if (IsMobilePlatform)
+                Dispatcher.UIThread.Post(UpdateResponsiveMobileIconLayouts, DispatcherPriority.Loaded);
+            if (IsMobilePlatform)
+                Dispatcher.UIThread.Post(() => SetMobileChromeVisible(true, vm), DispatcherPriority.Loaded);
         }
     }
 
@@ -183,12 +291,64 @@ public partial class MainView : UserControl
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.ShowToolbar) && IsMobilePlatform)
+        {
+            FileActionToolbar.IsVisible = _mobileChromeVisible && vm.ShowToolbar;
+            return;
+        }
+
+        if (e.PropertyName == nameof(MainViewModel.ViewMode) && IsMobilePlatform)
+        {
+            _lastMobileScrollViewer = null;
+            Dispatcher.UIThread.Post(() =>
+            {
+                var scroll = GetActiveScrollViewer(vm);
+                if (scroll is null)
+                    return;
+                _lastMobileScrollViewer = scroll;
+                QueueVisibleMobileThumbnails(scroll, vm);
+            }, DispatcherPriority.Loaded);
+            return;
+        }
+
         if (e.PropertyName == nameof(MainViewModel.PreviewKind))
         {
             _previewAutoFit = vm.IsImagePreview;
+            _previewLastPinchScale = 1.0;
+            _previewPinching = false;
+            if (IsMobilePlatform)
+            {
+                _mobilePreviewZoomMode = vm.IsImagePreview && IsCurrentPreviewGif(vm);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    SyncMobileImageCarousel(vm);
+                    ApplyMobileImagePreviewMode(vm);
+                }, DispatcherPriority.Loaded);
+            }
+
             if (_previewAutoFit)
-                Dispatcher.UIThread.Post(() => FitPreviewImageToViewport(vm));
+                Dispatcher.UIThread.Post(() =>
+                {
+                    FitPreviewImageToViewport(vm);
+                    UpdatePreviewTouchGestureMode(vm);
+                });
+            else
+                UpdatePreviewTouchGestureMode(vm);
             Dispatcher.UIThread.Post(() => SyncEmbeddedMediaPlayer(vm), DispatcherPriority.Loaded);
+            return;
+        }
+
+        if (e.PropertyName == nameof(MainViewModel.PreviewItem) && IsMobilePlatform)
+        {
+            if (vm.IsImagePreview)
+            {
+                _mobilePreviewZoomMode = IsCurrentPreviewGif(vm);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    SyncMobileImageCarousel(vm);
+                    ApplyMobileImagePreviewMode(vm);
+                }, DispatcherPriority.Loaded);
+            }
             return;
         }
 
@@ -204,14 +364,27 @@ public partial class MainView : UserControl
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    PreviewOverlay.Opacity = 1;
+                    PreviewCard.Opacity = 1;
                     PreviewOverlay.Focus();
                     SyncEmbeddedMediaPlayer(vm);
                 }, DispatcherPriority.Loaded);
             }
             else
             {
+                CloseMobilePreviewActions();
+                // Reset the entrance state while hidden; the next file open starts from 0 and
+                // the XAML transitions fade the whole preview page in for every file type.
+                PreviewOverlay.Opacity = 0;
+                PreviewCard.Opacity = 0;
                 _previewAutoFit = false;
                 _previewPanning = false;
+                _mobilePreviewZoomMode = false;
+                if (IsMobilePlatform)
+                {
+                    MobileImageCarousel.IsSwipeEnabled = true;
+                    _mobileCarouselImageIds = [];
+                }
                 DisposeEmbeddedMediaPlayer();
             }
         }
@@ -284,10 +457,23 @@ public partial class MainView : UserControl
 
     private void MainView_Unloaded(object? sender, RoutedEventArgs e)
     {
+        _mobileScrollIdleTimer.Stop();
+        _mobileLongPressTimer.Stop();
+        _previewLongPressTimer.Stop();
+        CloseMobilePreviewActions();
+        if (DataContext is MainViewModel mobileVm)
+            mobileVm.SetMobileListScrolling(false);
+
         _backgroundUrlApplyCts?.Cancel();
         _backgroundUrlApplyCts = null;
         _backgroundScrimBinding?.Dispose();
         _backgroundScrimBinding = null;
+        _mobileProfileScrimBinding?.Dispose();
+        _mobileProfileScrimBinding = null;
+        _mobileTransferScrimBinding?.Dispose();
+        _mobileTransferScrimBinding = null;
+        _mobileSettingsScrimBinding?.Dispose();
+        _mobileSettingsScrimBinding = null;
         DisposeEmbeddedMediaPlayer();
 
         if (_topLevel is not null)
@@ -515,9 +701,33 @@ public partial class MainView : UserControl
     {
         if (DataContext is not MainViewModel vm)
             return;
+
         var scroll = GetActiveScrollViewer(vm);
         if (scroll is not null)
             _folderScrollPositions[e.FolderKey] = scroll.Offset;
+
+        if (!IsMobilePlatform)
+            return;
+
+        ClearListSelections();
+
+        // The three mobile views intentionally reuse the same ScrollViewer instances when the
+        // folder changes. Pulse inertia off for one dispatcher turn so momentum from the folder
+        // we are leaving cannot be carried into the next data set. We don't disable hit testing
+        // while a remote folder is loading, so a failed request can never leave the list inert.
+        _mobileScrollIdleTimer.Stop();
+        vm.SetMobileListScrolling(false);
+        _lastMobileScrollViewer = null;
+        CancelMobileLongPress();
+        _mobileDragSelecting = false;
+
+        if (scroll is not null)
+        {
+            ScrollViewer.SetIsScrollInertiaEnabled(scroll, false);
+            Dispatcher.UIThread.Post(
+                () => ScrollViewer.SetIsScrollInertiaEnabled(scroll, true),
+                DispatcherPriority.Background);
+        }
     }
 
     private void Vm_FolderLoaded(object? sender, FolderNavigationEventArgs e)
@@ -528,42 +738,385 @@ public partial class MainView : UserControl
         Dispatcher.UIThread.Post(() =>
         {
             HookListScrollViewers();
+            if (IsMobilePlatform)
+            {
+                _lastMobileScrollOffset = 0;
+                _mobileScrollAccumulator = 0;
+                _mobileScrollDirection = 0;
+                _pendingMobileChromeVisible = true;
+                SetMobileChromeVisible(true, vm);
+            }
             var scroll = GetActiveScrollViewer(vm);
             if (scroll is null)
                 return;
 
-            if (e.ShouldRestoreScroll && _folderScrollPositions.TryGetValue(e.FolderKey, out var offset))
-                scroll.Offset = offset;
-            else
-                scroll.Offset = new Vector(scroll.Offset.X, 0);
+            var targetOffset = e.ShouldRestoreScroll && _folderScrollPositions.TryGetValue(e.FolderKey, out var offset)
+                ? offset
+                : new Vector(scroll.Offset.X, 0);
+
+            if (IsMobilePlatform)
+            {
+                _mobileFolderNavigationInProgress = true;
+                ScrollViewer.SetIsScrollInertiaEnabled(scroll, false);
+            }
+
+            scroll.Offset = targetOffset;
+
+            if (IsMobilePlatform)
+            {
+                _lastMobileScrollViewer = scroll;
+
+                // Re-apply the destination offset once after layout. This absorbs any already
+                // queued ScrollChanged/inertia frame from the folder we just left. Only after
+                // that fence is in place do we let the new folder accept inertial scrolling.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (DataContext is MainViewModel currentVm && ReferenceEquals(GetActiveScrollViewer(currentVm), scroll))
+                    {
+                        scroll.Offset = targetOffset;
+                        ScrollViewer.SetIsScrollInertiaEnabled(scroll, true);
+                        _mobileFolderNavigationInProgress = false;
+                        _lastMobileScrollOffset = Math.Max(0, targetOffset.Y);
+                    }
+                    else
+                    {
+                        // Never leave a stale guard behind if another navigation/view-mode change won.
+                        ScrollViewer.SetIsScrollInertiaEnabled(scroll, true);
+                        _mobileFolderNavigationInProgress = false;
+                    }
+
+                    QueueVisibleMobileThumbnails(scroll, vm);
+                    var maxBreadcrumbX = Math.Max(0, MobileBreadcrumbScrollViewer.Extent.Width - MobileBreadcrumbScrollViewer.Viewport.Width);
+                    MobileBreadcrumbScrollViewer.Offset = new Vector(maxBreadcrumbX, 0);
+                }, DispatcherPriority.Background);
+            }
         }, DispatcherPriority.Loaded);
     }
 
     private ScrollViewer? GetActiveScrollViewer(MainViewModel vm)
     {
+        if (IsMobilePlatform)
+        {
+            return vm.ViewMode switch
+            {
+                FileViewMode.LargeIcons => MobileLargeIconScrollViewer,
+                FileViewMode.ExtraLargeIcons => MobileExtraLargeIconScrollViewer,
+                _ => MobileDetailsScrollViewer
+            };
+        }
+
         var list = GetActiveFileList(vm);
         return list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
     }
 
     private void HookListScrollViewers()
     {
+        if (IsMobilePlatform)
+            return; // Mobile ScrollViewers are explicit in XAML and already have ScrollChanged handlers.
+
         foreach (var list in new[] { DetailsList, LargeIconList, ExtraLargeIconList })
         {
             var scroll = list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
             if (scroll is not null && _hookedScrollViewers.Add(scroll))
+            {
                 scroll.ScrollChanged += FileListScrollViewer_ScrollChanged;
+                scroll.AddHandler(
+                    InputElement.PointerWheelChangedEvent,
+                    DesktopFileList_PointerWheelChanged,
+                    RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
+                    true);
+            }
         }
+    }
+
+    private void DesktopFileList_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (IsMobilePlatform || sender is not ScrollViewer scroll ||
+            e.KeyModifiers.HasFlag(KeyModifiers.Control) || Math.Abs(e.Delta.Y) < 0.001)
+            return;
+
+        // Avalonia's default wheel step feels noticeably shorter than Explorer for these rows.
+        // Keep precision touchpad deltas smooth, but make a regular mouse-wheel notch roughly
+        // equal to 2.5-3 detail rows.
+        var pixelsPerWheelUnit = Math.Abs(e.Delta.Y) < 0.9 ? 82.0 : 124.0;
+        var maxY = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
+        var targetY = Math.Clamp(scroll.Offset.Y - e.Delta.Y * pixelsPerWheelUnit, 0, maxY);
+        if (Math.Abs(targetY - scroll.Offset.Y) < 0.01)
+            return;
+
+        scroll.Offset = new Vector(scroll.Offset.X, targetY);
+        e.Handled = true;
     }
 
     private async void FileListScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        if (sender is not ScrollViewer scroll || !scroll.IsVisible || DataContext is not MainViewModel vm ||
-            !vm.HasMoreItems || vm.IsLoadingMore)
+        if (sender is not ScrollViewer scroll || !scroll.IsVisible || DataContext is not MainViewModel vm)
+            return;
+
+        // Ignore the stale scroll frames that can still be queued while switching folders.
+        // The destination folder gets its remembered offset in Vm_FolderLoaded instead.
+        if (IsMobilePlatform && _mobileFolderNavigationInProgress)
+            return;
+
+        if (IsMobilePlatform)
+            HandleMobileChromeScroll(scroll, vm);
+
+        if (!vm.HasMoreItems || vm.IsLoadingMore)
             return;
 
         var remaining = scroll.Extent.Height - (scroll.Offset.Y + scroll.Viewport.Height);
-        if (remaining <= Math.Max(240, scroll.Viewport.Height * 0.35))
+        var preloadThreshold = IsMobilePlatform
+            ? Math.Max(720, scroll.Viewport.Height * 1.6)
+            : Math.Max(240, scroll.Viewport.Height * 0.35);
+        if (remaining <= preloadThreshold)
             await vm.LoadMoreCurrentFolderAsync();
+    }
+
+    private async void MobileRefreshContainer_RefreshRequested(object? sender, RefreshRequestedEventArgs e)
+    {
+        var deferral = e.GetDeferral();
+        if (!IsMobilePlatform || _mobileRefreshInProgress || DataContext is not MainViewModel vm || !vm.IsAuthenticated)
+        {
+            deferral.Complete();
+            return;
+        }
+
+        _mobileRefreshInProgress = true;
+        try
+        {
+            await vm.RefreshCurrentFolderAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer navigation/refresh superseded this refresh.
+        }
+        finally
+        {
+            _mobileRefreshInProgress = false;
+            deferral.Complete();
+        }
+    }
+
+    private void HandleMobileChromeScroll(ScrollViewer scroll, MainViewModel vm)
+    {
+        // Keep ScrollChanged extremely cheap. Android can deliver this once per rendered frame;
+        // layout-affecting toolbar visibility changes are deferred until the fling is idle.
+        var now = DateTime.UtcNow;
+        _lastMobileScrollViewer = scroll;
+        _mobileScrollLastActivityUtc = now;
+        vm.SetMobileListScrolling(true);
+        CancelMobileLongPress();
+        if (!_mobileScrollIdleTimer.IsEnabled)
+            _mobileScrollIdleTimer.Start();
+
+        // Re-evaluate the near-viewport thumbnail window at a modest cadence while scrolling.
+        // UpdateMobileThumbnailWindow only permits persistent disk-cache hits during the fling,
+        // so this gives recycled items their cached image without starting network work.
+        if ((now - _mobileThumbnailLastQueueUtc).TotalMilliseconds >= 90)
+        {
+            _mobileThumbnailLastQueueUtc = now;
+            QueueVisibleMobileThumbnails(scroll, vm);
+        }
+
+        var offset = Math.Max(0, scroll.Offset.Y);
+        if (now < _mobileChromeIgnoreUntilUtc)
+        {
+            _lastMobileScrollOffset = offset;
+            _mobileScrollAccumulator = 0;
+            return;
+        }
+
+        if (offset <= 4)
+        {
+            _lastMobileScrollOffset = offset;
+            _mobileScrollAccumulator = 0;
+            _mobileScrollDirection = 0;
+            _pendingMobileChromeVisible = true;
+            return;
+        }
+
+        var delta = offset - _lastMobileScrollOffset;
+        _lastMobileScrollOffset = offset;
+        if (Math.Abs(delta) < 1.25)
+            return;
+
+        var direction = delta > 0 ? 1 : -1;
+        if (_mobileScrollDirection != direction)
+        {
+            _mobileScrollDirection = direction;
+            _mobileScrollAccumulator = 0;
+        }
+
+        _mobileScrollAccumulator += Math.Abs(delta);
+
+        if (now < _mobileChromeTransitionLockUntilUtc)
+            return;
+
+        if (direction > 0 && offset > 72 && _mobileScrollAccumulator >= 64)
+        {
+            _pendingMobileChromeVisible = false;
+            _mobileScrollAccumulator = 0;
+        }
+        else if (direction < 0 && _mobileScrollAccumulator >= 40)
+        {
+            _pendingMobileChromeVisible = true;
+            _mobileScrollAccumulator = 0;
+        }
+    }
+
+    private void MobileScrollIdleTimer_Tick(object? sender, EventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _mobileScrollLastActivityUtc).TotalMilliseconds < 155)
+            return;
+
+        _mobileScrollIdleTimer.Stop();
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        vm.SetMobileListScrolling(false);
+        var scroll = _lastMobileScrollViewer ?? GetActiveScrollViewer(vm);
+        if (scroll is not null)
+            QueueVisibleMobileThumbnails(scroll, vm);
+
+        // IsVisible changes collapse/expand Auto rows and therefore force layout. Doing this
+        // after inertia stops avoids injecting a full layout pass into an Android scroll frame.
+        SetMobileChromeVisible(_pendingMobileChromeVisible, vm);
+    }
+
+    private void MobileIconScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        UpdateResponsiveMobileIconLayouts();
+    }
+
+    private void UpdateResponsiveMobileIconLayouts()
+    {
+        ConfigureResponsiveMobileGrid(
+            MobileLargeIconRepeater,
+            MobileLargeIconScrollViewer.Viewport.Width > 1
+                ? MobileLargeIconScrollViewer.Viewport.Width
+                : MobileLargeIconScrollViewer.Bounds.Width,
+            targetCellWidth: 104,
+            heightRatio: 1.34);
+
+        ConfigureResponsiveMobileGrid(
+            MobileExtraLargeIconRepeater,
+            MobileExtraLargeIconScrollViewer.Viewport.Width > 1
+                ? MobileExtraLargeIconScrollViewer.Viewport.Width
+                : MobileExtraLargeIconScrollViewer.Bounds.Width,
+            targetCellWidth: 154,
+            heightRatio: 1.18);
+    }
+
+    private static void ConfigureResponsiveMobileGrid(
+        ItemsRepeater repeater,
+        double availableWidth,
+        double targetCellWidth,
+        double heightRatio)
+    {
+        if (availableWidth <= 1 || repeater.Layout is not UniformGridLayout layout)
+            return;
+
+        const double spacing = 4;
+        // ScrollViewer content can otherwise keep its desired width instead of consuming the
+        // whole viewport. Pin the repeater to the current viewport so rotation / split-screen
+        // immediately reflows the grid.
+        if (double.IsNaN(repeater.Width) || Math.Abs(repeater.Width - availableWidth) > 0.5)
+            repeater.Width = availableWidth;
+
+        var columns = Math.Max(1, (int)Math.Floor((availableWidth + spacing) / (targetCellWidth + spacing)));
+        var itemWidth = Math.Max(72, (availableWidth - spacing * (columns - 1)) / columns);
+        var itemHeight = Math.Max(96, itemWidth * heightRatio);
+
+        // UniformGridLayout chooses the column count from MinItemWidth. Feeding it the exact
+        // width of one equal column makes the final row consume the entire phone width instead
+        // of leaving unused pixels at the right edge. The item template itself is stretch-based,
+        // so folder/file artwork grows and shrinks with this cell rather than staying at 68/96 dp.
+        if (Math.Abs(layout.MinItemWidth - itemWidth) > 0.5 || Math.Abs(layout.MinItemHeight - itemHeight) > 0.5)
+        {
+            layout.MinItemWidth = itemWidth;
+            layout.MinItemHeight = itemHeight;
+            repeater.InvalidateMeasure();
+        }
+    }
+
+    private static int CalculateGridColumns(double viewportWidth, double minItemWidth, double spacing)
+    {
+        if (viewportWidth <= 1)
+            return 1;
+        return Math.Max(1, (int)Math.Floor((viewportWidth + spacing) / (minItemWidth + spacing)));
+    }
+
+    private void QueueVisibleMobileThumbnails(ScrollViewer scroll, MainViewModel vm)
+    {
+        if (!IsMobilePlatform || !scroll.IsVisible || vm.Items.Count == 0)
+            return;
+
+        var offset = Math.Max(0, scroll.Offset.Y);
+        var viewportHeight = Math.Max(1, scroll.Viewport.Height);
+        var viewportWidth = Math.Max(1, scroll.Viewport.Width);
+        int startIndex;
+        int visibleCount;
+
+        switch (vm.ViewMode)
+        {
+            case FileViewMode.LargeIcons:
+            {
+                const double spacing = 4;
+                var layout = MobileLargeIconRepeater.Layout as UniformGridLayout;
+                var itemWidth = layout?.MinItemWidth ?? 108;
+                var rowPitch = (layout?.MinItemHeight ?? 146) + spacing;
+                var columns = CalculateGridColumns(viewportWidth, itemWidth, spacing);
+                var startRow = Math.Max(0, (int)Math.Floor(offset / rowPitch) - 1);
+                var rows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowPitch) + 3);
+                startIndex = startRow * columns;
+                visibleCount = rows * columns;
+                break;
+            }
+            case FileViewMode.ExtraLargeIcons:
+            {
+                const double spacing = 4;
+                var layout = MobileExtraLargeIconRepeater.Layout as UniformGridLayout;
+                var itemWidth = layout?.MinItemWidth ?? 150;
+                var rowPitch = (layout?.MinItemHeight ?? 188) + spacing;
+                var columns = CalculateGridColumns(viewportWidth, itemWidth, spacing);
+                var startRow = Math.Max(0, (int)Math.Floor(offset / rowPitch) - 1);
+                var rows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowPitch) + 3);
+                startIndex = startRow * columns;
+                visibleCount = rows * columns;
+                break;
+            }
+            default:
+            {
+                const double rowHeight = 46;
+                startIndex = Math.Max(0, (int)Math.Floor(offset / rowHeight) - 6);
+                visibleCount = Math.Max(16, (int)Math.Ceiling(viewportHeight / rowHeight) + 16);
+                break;
+            }
+        }
+
+        vm.UpdateMobileThumbnailWindow(startIndex, visibleCount);
+    }
+
+    private void SetMobileChromeVisible(bool visible, MainViewModel vm)
+    {
+        if (!IsMobilePlatform || (_mobileChromeVisible == visible &&
+            MobileTopToolbar.IsVisible == visible && BottomStatusBar.IsVisible == visible))
+            return;
+
+        _mobileChromeVisible = visible;
+        MobileTopToolbar.IsVisible = visible;
+        FileActionToolbar.IsVisible = visible && vm.ShowToolbar;
+        BottomStatusBar.IsVisible = visible;
+
+        // Collapsing/expanding Auto rows itself changes the viewport and can emit ScrollChanged.
+        // Ignore those synthetic offsets and lock another transition briefly so a single fling
+        // cannot make the chrome bounce between visible/hidden states.
+        _mobileChromeIgnoreUntilUtc = DateTime.UtcNow.AddMilliseconds(180);
+        _mobileChromeTransitionLockUntilUtc = DateTime.UtcNow.AddMilliseconds(360);
     }
 
     private void TopLevel_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -597,6 +1150,58 @@ public partial class MainView : UserControl
         if (DataContext is not MainViewModel vm)
             return;
 
+        if (DownloadAllConfirmOverlay.IsVisible)
+        {
+            DownloadAllConfirmOverlay.IsVisible = false;
+            e.Handled = true;
+            return;
+        }
+
+        // The mobile preview menu is a transient surface. Back must dismiss it
+        // before closing the underlying preview.
+        if (MobilePreviewActionsOverlay.IsVisible)
+        {
+            CloseMobilePreviewActions();
+            e.Handled = true;
+            return;
+        }
+
+        if (MobileDestinationOverlay.IsVisible)
+        {
+            if (!await GoBackMobileDestinationAsync())
+                CloseMobileDestinationPicker();
+            e.Handled = true;
+            return;
+        }
+
+        if (MobileProfileOverlay.IsVisible)
+        {
+            MobileProfileOverlay.IsVisible = false;
+            e.Handled = true;
+            return;
+        }
+
+        if (vm.IsPromptVisible)
+        {
+            vm.CancelPromptCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (vm.IsLogoutConfirmVisible)
+        {
+            vm.CancelLogoutCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (vm.IsCloseConfirmVisible)
+        {
+            vm.CancelCloseConfirmation();
+            e.Handled = true;
+            return;
+        }
+
         if (vm.IsPreviewVisible)
         {
             vm.ClosePreviewCommand.Execute(null);
@@ -606,7 +1211,13 @@ public partial class MainView : UserControl
 
         if (vm.IsSettingsPanelVisible)
         {
+            var returnToProfile = IsMobilePlatform && _settingsOpenedFromMobileProfile;
             await CloseSettingsPanelAsync();
+            if (returnToProfile)
+            {
+                _settingsOpenedFromMobileProfile = false;
+                MobileProfileOverlay.IsVisible = true;
+            }
             e.Handled = true;
             return;
         }
@@ -618,9 +1229,26 @@ public partial class MainView : UserControl
             return;
         }
 
+        // Android/iOS convention: when the file list is in selection mode, Back exits
+        // selection mode first. A second Back then navigates to the parent folder.
+        if (IsMobilePlatform && (vm.HasSelection || _mobileSelectionMode || _mobileSelectedIds.Count > 0))
+        {
+            ClearListSelections();
+            SetMobileChromeVisible(true, vm);
+            e.Handled = true;
+            return;
+        }
+
         if (vm.Breadcrumbs.Count > 1)
         {
             vm.GoBackCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsMobilePlatform && vm.IsAuthenticated)
+        {
+            vm.RequestCloseConfirmation();
             e.Handled = true;
         }
     }
@@ -680,7 +1308,14 @@ public partial class MainView : UserControl
         }
 
         if (TopLevel.GetTopLevel(this) is MainWindow window)
+        {
             window.ConfirmClose();
+            return;
+        }
+
+        // Android has an activity lifetime rather than an Avalonia Window. Let the platform
+        // head close its own native activity instead of terminating the process from Core.
+        AppServices.PlatformAppLifecycleService?.ExitApp();
     }
 
     public async Task ToggleSettingsPanelAsync()
@@ -698,6 +1333,14 @@ public partial class MainView : UserControl
     {
         if (DataContext is not MainViewModel vm || vm.IsSettingsPanelVisible || _settingsPanelAnimating)
             return;
+
+        if (IsMobilePlatform)
+        {
+            vm.IsSettingsPanelVisible = true;
+            if (SettingsPanelHost.RenderTransform is TranslateTransform mobileTransform)
+                mobileTransform.X = 0;
+            return;
+        }
 
         _settingsPanelAnimating = true;
         try
@@ -728,6 +1371,12 @@ public partial class MainView : UserControl
         if (DataContext is not MainViewModel vm || !vm.IsSettingsPanelVisible || _settingsPanelAnimating)
             return;
 
+        if (IsMobilePlatform)
+        {
+            vm.IsSettingsPanelVisible = false;
+            return;
+        }
+
         _settingsPanelAnimating = true;
         try
         {
@@ -753,14 +1402,50 @@ public partial class MainView : UserControl
         }
     }
 
-    private async void SettingsMenuItem_Click(object? sender, RoutedEventArgs e) => await ToggleSettingsPanelAsync();
+    private async void SettingsMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (IsMobilePlatform)
+            _settingsOpenedFromMobileProfile = false;
+        await ToggleSettingsPanelAsync();
+    }
 
-    private async void OpenWebMenuItem_Click(object? sender, RoutedEventArgs e)
+    private void MobileAvatarButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!IsMobilePlatform)
+            return;
+        _settingsOpenedFromMobileProfile = false;
+        MobileProfileOverlay.IsVisible = true;
+    }
+
+    private async void MobileProfileOpenWeb_Click(object? sender, RoutedEventArgs e)
+    {
+        MobileProfileOverlay.IsVisible = false;
+        await OpenOneDriveWebAsync();
+    }
+
+    private async void MobileProfileSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        _settingsOpenedFromMobileProfile = true;
+        MobileProfileOverlay.IsVisible = false;
+        await OpenSettingsPanelAsync();
+    }
+
+    private void MobileProfileLogout_Click(object? sender, RoutedEventArgs e)
+    {
+        _settingsOpenedFromMobileProfile = false;
+        MobileProfileOverlay.IsVisible = false;
+        if (DataContext is MainViewModel vm)
+            vm.RequestLogoutCommand.Execute(null);
+    }
+
+    private async Task OpenOneDriveWebAsync()
     {
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is not null)
             await topLevel.Launcher.LaunchUriAsync(new Uri("https://onedrive.live.com/"));
     }
+
+    private async void OpenWebMenuItem_Click(object? sender, RoutedEventArgs e) => await OpenOneDriveWebAsync();
 
     private void LogoutMenuItem_Click(object? sender, RoutedEventArgs e)
     {
@@ -780,17 +1465,64 @@ public partial class MainView : UserControl
 
     private void ItemsList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (sender is ListBox list && DataContext is MainViewModel vm)
+        if (IsMobilePlatform || sender is not ListBox list || DataContext is not MainViewModel vm)
+            return;
+
+        var selectedItems = list.SelectedItems?.OfType<DriveItemModel>() ?? Enumerable.Empty<DriveItemModel>();
+        vm.SetSelectedItems(selectedItems);
+    }
+
+    private async Task OpenDriveItemAsync(MainViewModel vm, DriveItemModel item)
+    {
+        if (item.IsFile && !vm.UseBuiltInViewer)
         {
-            var selectedItems = list.SelectedItems?.OfType<DriveItemModel>() ?? Enumerable.Empty<DriveItemModel>();
-            vm.SetSelectedItems(selectedItems);
+            await OpenWithSystemDefaultAsync(vm, item);
+            return;
         }
+
+        var result = await vm.OpenItemAsync(item);
+        if (result != DriveItemOpenResult.RequiresOfficialOneDriveHandoff)
+            return;
+
+        await OpenInOfficialOneDriveAsync(vm, item);
+    }
+
+    private async Task OpenInOfficialOneDriveAsync(MainViewModel vm, DriveItemModel item)
+    {
+        vm.ErrorMessage = null;
+        var isVault = item.IsPersonalVault;
+        vm.StatusText = isVault
+            ? "正在打开 OneDrive 个人保险库…"
+            : "正在通过 OneDrive 官方界面打开…";
+
+        // Personal Vault requires Microsoft's own additional-verification experience. Prefer
+        // the Graph-provided webUrl because it points at the exact item and survives localized
+        // display names. Fall back to OneDrive web root only when Graph omitted that URL.
+        var uri = Uri.TryCreate(item.WebUrl, UriKind.Absolute, out var itemUri)
+            ? itemUri
+            : new Uri("https://onedrive.live.com/");
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null || !await topLevel.Launcher.LaunchUriAsync(uri))
+        {
+            vm.ErrorMessage = isVault
+                ? "无法打开 OneDrive。请在 OneDrive 官方应用或 onedrive.com 中打开并验证个人保险库。"
+                : "无法使用 OneDrive 官方界面打开此项目。";
+            vm.StatusText = isVault
+                ? "个人保险库需要 OneDrive 官方验证"
+                : "无法打开此特殊项目";
+            return;
+        }
+
+        vm.StatusText = isVault
+            ? "请在 OneDrive 中完成身份验证后访问个人保险库"
+            : "已交给 OneDrive 官方界面处理";
     }
 
     private async void ItemsList_DoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is ListBox { SelectedItem: DriveItemModel item } && DataContext is MainViewModel vm)
-            await vm.OpenItemAsync(item);
+        if (!IsMobilePlatform && sender is ListBox { SelectedItem: DriveItemModel item } && DataContext is MainViewModel vm)
+            await OpenDriveItemAsync(vm, item);
     }
 
     private void FileItem_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -800,13 +1532,222 @@ public partial class MainView : UserControl
 
         _contextItem = item;
         var point = e.GetCurrentPoint(control);
+
+        if (IsMobilePlatform && e.Pointer.Type == PointerType.Touch)
+        {
+            BeginMobileLongPress(item, e.GetPosition(FileArea));
+            return;
+        }
+
         if (point.Properties.IsRightButtonPressed)
             SelectContextItem(item);
     }
 
+    private async void FileItem_Tapped(object? sender, TappedEventArgs e)
+    {
+        // Mobile file-manager semantics: tap opens; selection is reserved for a deliberate
+        // stationary long-press. Desktop keeps single-click-select / double-click-open.
+        if (!IsMobilePlatform ||
+            sender is not Control { DataContext: DriveItemModel item } ||
+            DataContext is not MainViewModel vm)
+            return;
+
+        CancelMobileLongPress();
+        _contextItem = item;
+        e.Handled = true;
+
+        // A long-press often ends with a Tapped routed event. Consume exactly that tap so the
+        // item selected by the long-press is not immediately toggled off on finger release.
+        if (string.Equals(_suppressNextMobileTapItemId, item.Id, StringComparison.Ordinal))
+        {
+            _suppressNextMobileTapItemId = null;
+            return;
+        }
+
+        if (_mobileSelectionMode)
+        {
+            ToggleMobileSelection(item, vm);
+            return;
+        }
+
+        ClearListSelections();
+        await OpenDriveItemAsync(vm, item);
+    }
+
+    private void BeginMobileLongPress(DriveItemModel item, Point start)
+    {
+        CancelMobileLongPress();
+        _mobileLongPressItem = item;
+        _mobileLongPressStart = start;
+        _mobileLongPressMoved = false;
+        _mobileLongPressTimer.Start();
+    }
+
+    private void CancelMobileLongPress()
+    {
+        if (_mobileLongPressItem is null && !_mobileLongPressTimer.IsEnabled && !_mobileLongPressMoved)
+            return;
+
+        _mobileLongPressTimer.Stop();
+        _mobileLongPressItem = null;
+        _mobileLongPressMoved = false;
+    }
+
+    private void MobileLongPressTimer_Tick(object? sender, EventArgs e)
+    {
+        _mobileLongPressTimer.Stop();
+        if (!IsMobilePlatform || _mobileLongPressMoved || _mobileLongPressItem is not { } item ||
+            DataContext is not MainViewModel vm)
+        {
+            _mobileLongPressItem = null;
+            return;
+        }
+
+        // Once the hold threshold is reached the gesture changes from "possible scroll" to
+        // drag-selection. From this point on, moving the finger up/down extends the selected
+        // range instead of scrolling the list. The contextual action bar is shown only after
+        // the finger is released so it cannot steal this pointer.
+        if (!_mobileSelectionMode)
+        {
+            _mobileSelectedIds.Clear();
+            _mobileSelectionMode = true;
+        }
+
+        _mobileDragSelectionBaseIds.Clear();
+        foreach (var id in _mobileSelectedIds)
+            _mobileDragSelectionBaseIds.Add(id);
+
+        _mobileDragSelectionAnchorIndex = vm.Items.IndexOf(item);
+        _mobileDragSelectionCurrentIndex = _mobileDragSelectionAnchorIndex;
+        _mobileDragSelecting = _mobileDragSelectionAnchorIndex >= 0;
+        MobileSelectionActionBar.IsVisible = false;
+
+        _mobileSelectedIds.Add(item.Id);
+        item.IsMobileSelected = true;
+        _suppressNextMobileTapItemId = item.Id;
+        SyncMobileSelection(vm);
+        SetMobileChromeVisible(true, vm);
+        _mobileLongPressItem = null;
+    }
+
+    private void ClearListSelections()
+    {
+        CancelMobileLongPress();
+        _suppressNextMobileTapItemId = null;
+        _mobileDragSelecting = false;
+        _mobileDragSelectionAnchorIndex = -1;
+        _mobileDragSelectionCurrentIndex = -1;
+        _mobileDragSelectionBaseIds.Clear();
+        MobileSelectionActionBar.IsVisible = false;
+
+        var vm = DataContext as MainViewModel;
+        if (vm is not null)
+        {
+            foreach (var item in vm.Items)
+                item.IsMobileSelected = false;
+        }
+
+        _mobileSelectedIds.Clear();
+        _mobileSelectionMode = false;
+
+        DetailsList.SelectedItems?.Clear();
+        LargeIconList.SelectedItems?.Clear();
+        ExtraLargeIconList.SelectedItems?.Clear();
+        vm?.SetSelectedItems([]);
+    }
+
+    private void ToggleMobileSelection(DriveItemModel item, MainViewModel vm)
+    {
+        if (_mobileSelectedIds.Add(item.Id))
+            item.IsMobileSelected = true;
+        else
+        {
+            _mobileSelectedIds.Remove(item.Id);
+            item.IsMobileSelected = false;
+        }
+
+        SyncMobileSelection(vm);
+    }
+
+    private void SyncMobileSelection(MainViewModel vm)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        foreach (var candidate in vm.Items)
+            candidate.IsMobileSelected = _mobileSelectedIds.Contains(candidate.Id);
+
+        var selected = vm.Items.Where(x => x.IsMobileSelected).ToArray();
+        vm.SetSelectedItems(selected);
+        _mobileSelectionMode = selected.Length > 0;
+        if (MobileSelectionActionBar.IsVisible)
+        {
+            if (selected.Length == 0)
+                MobileSelectionActionBar.IsVisible = false;
+            else
+                MobileSelectionCountText.Text = $"已选择 {selected.Length} 项";
+        }
+    }
+
+    private void ShowMobileSelectionActions(MainViewModel vm)
+    {
+        if (!IsMobilePlatform || vm.SelectionCount <= 0)
+        {
+            MobileSelectionActionBar.IsVisible = false;
+            return;
+        }
+
+        MobileSelectionCountText.Text = $"已选择 {vm.SelectionCount} 项";
+        MobileSelectionActionBar.IsVisible = true;
+    }
+
+    private DriveItemModel? GetMobileItemAt(Point point)
+    {
+        var visual = FileArea.InputHitTest(point) as Visual;
+        while (visual is not null)
+        {
+            if (visual is StyledElement { DataContext: DriveItemModel item })
+                return item;
+            if (ReferenceEquals(visual, FileArea))
+                break;
+            visual = visual.GetVisualParent();
+        }
+        return null;
+    }
+
+    private void ExtendMobileDragSelection(MainViewModel vm, DriveItemModel item)
+    {
+        var index = vm.Items.IndexOf(item);
+        if (index < 0 || index == _mobileDragSelectionCurrentIndex || _mobileDragSelectionAnchorIndex < 0)
+            return;
+
+        _mobileDragSelectionCurrentIndex = index;
+        _mobileSelectedIds.Clear();
+        foreach (var id in _mobileDragSelectionBaseIds)
+            _mobileSelectedIds.Add(id);
+
+        var first = Math.Min(_mobileDragSelectionAnchorIndex, index);
+        var last = Math.Max(_mobileDragSelectionAnchorIndex, index);
+        for (var i = first; i <= last; i++)
+            _mobileSelectedIds.Add(vm.Items[i].Id);
+
+        SyncMobileSelection(vm);
+    }
+
+    private void FileItem_ContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        // Mobile uses custom long-press selection; never allow the platform context-menu gesture
+        // to compete with scrolling. Desktop keeps the normal right-click menu.
+        if (IsMobilePlatform)
+            e.Handled = true;
+    }
+
     private void FileItem_Holding(object? sender, HoldingRoutedEventArgs e)
     {
-        if (e.HoldingState != HoldingState.Started || sender is not Control { DataContext: DriveItemModel item } control)
+        // Mobile templates no longer attach Holding at all. Keep this handler only for desktop
+        // templates where a long-press/right-click style context action is still useful.
+        if (IsMobilePlatform || e.HoldingState != HoldingState.Started ||
+            sender is not Control { DataContext: DriveItemModel item } control)
             return;
 
         _contextItem = item;
@@ -818,7 +1759,7 @@ public partial class MainView : UserControl
     private async void FileContext_Open_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm && GetContextItem(sender) is { } item)
-            await vm.OpenItemAsync(item);
+            await OpenDriveItemAsync(vm, item);
     }
 
     private async void FileContext_Download_Click(object? sender, RoutedEventArgs e)
@@ -905,26 +1846,25 @@ public partial class MainView : UserControl
 
         if (Enum.TryParse<FileViewMode>(tag, out var mode))
         {
-            DetailsList?.SelectedItems?.Clear();
-            LargeIconList?.SelectedItems?.Clear();
-            ExtraLargeIconList?.SelectedItems?.Clear();
-            vm.SetSelectedItems([]);
+            ClearListSelections();
             await vm.SetViewModeAsync(mode);
             Dispatcher.UIThread.Post(UpdateIconPanelSizing, DispatcherPriority.Loaded);
+            if (IsMobilePlatform)
+                Dispatcher.UIThread.Post(UpdateResponsiveMobileIconLayouts, DispatcherPriority.Loaded);
         }
     }
 
-    private void SortHeader_Click(object? sender, RoutedEventArgs e)
+    private async void SortHeader_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is Button button && DataContext is MainViewModel vm &&
             Enum.TryParse<FileSortColumn>(button.Tag?.ToString(), true, out var column))
         {
-            vm.CycleSort(column);
+            await vm.CycleSortAsync(column);
             e.Handled = true;
         }
     }
 
-    private void SortMenu_Click(object? sender, RoutedEventArgs e)
+    private async void SortMenu_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem || DataContext is not MainViewModel vm)
             return;
@@ -933,12 +1873,18 @@ public partial class MainView : UserControl
         if (string.IsNullOrWhiteSpace(tag))
             return;
 
+        if (string.Equals(tag, "Inherit:Default", StringComparison.Ordinal))
+        {
+            await vm.UseDefaultSortForCurrentFolderAsync();
+            return;
+        }
+
         var parts = tag.Split(':', 2, StringSplitOptions.TrimEntries);
         if (parts.Length != 2 || !Enum.TryParse<FileSortColumn>(parts[0], true, out var column) ||
             !Enum.TryParse<SortCycleState>(parts[1], true, out var state))
             return;
 
-        vm.SetSort(column, state);
+        await vm.SetSortAsync(column, state);
     }
 
     private async void ViewContextMenu_Click(object? sender, RoutedEventArgs e)
@@ -947,13 +1893,12 @@ public partial class MainView : UserControl
             !Enum.TryParse<FileViewMode>(tag, out var mode))
             return;
 
-        DetailsList.SelectedItems?.Clear();
-        LargeIconList.SelectedItems?.Clear();
-        ExtraLargeIconList.SelectedItems?.Clear();
-        vm.SetSelectedItems([]);
+        ClearListSelections();
         await vm.SetViewModeAsync(mode);
         Dispatcher.UIThread.Post(HookListScrollViewers, DispatcherPriority.Loaded);
         Dispatcher.UIThread.Post(UpdateIconPanelSizing, DispatcherPriority.Loaded);
+            if (IsMobilePlatform)
+                Dispatcher.UIThread.Post(UpdateResponsiveMobileIconLayouts, DispatcherPriority.Loaded);
     }
 
     private void FileArea_NewFolder_Click(object? sender, RoutedEventArgs e)
@@ -966,7 +1911,7 @@ public partial class MainView : UserControl
 
     private void FileArea_Holding(object? sender, HoldingRoutedEventArgs e)
     {
-        if (e.HoldingState != HoldingState.Started || e.Source is StyledElement { DataContext: DriveItemModel })
+        if (IsMobilePlatform || e.HoldingState != HoldingState.Started || e.Source is StyledElement { DataContext: DriveItemModel })
             return;
         FileArea.ContextMenu?.Open(FileArea);
         e.Handled = true;
@@ -1004,6 +1949,9 @@ public partial class MainView : UserControl
 
     private void UpdateIconPanelSizing()
     {
+        if (IsMobilePlatform)
+            return;
+
         var availableWidth = FileArea.Bounds.Width;
         if (availableWidth <= 1)
             return;
@@ -1028,7 +1976,7 @@ public partial class MainView : UserControl
 
     private void FileArea_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS() || DataContext is not MainViewModel vm)
+        if (IsMobilePlatform || DataContext is not MainViewModel vm)
             return;
 
         var point = e.GetCurrentPoint(FileArea);
@@ -1068,6 +2016,31 @@ public partial class MainView : UserControl
 
     private void FileArea_PointerMoved(object? sender, PointerEventArgs e)
     {
+        if (IsMobilePlatform && _mobileDragSelecting && DataContext is MainViewModel dragVm)
+        {
+            var touchPoint = e.GetPosition(FileArea);
+            if (GetMobileItemAt(touchPoint) is { } item)
+                ExtendMobileDragSelection(dragVm, item);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsMobilePlatform && _mobileLongPressItem is not null)
+        {
+            var touchPoint = e.GetPosition(FileArea);
+            var dx = touchPoint.X - _mobileLongPressStart.X;
+            var dy = touchPoint.Y - _mobileLongPressStart.Y;
+            // Before the hold threshold, movement means the user intended to scroll. Once the
+            // timer has fired, the separate drag-selection branch above owns the gesture.
+            if (dx * dx + dy * dy >= 10 * 10)
+            {
+                _mobileLongPressMoved = true;
+                _mobileLongPressTimer.Stop();
+                _mobileLongPressItem = null;
+            }
+            return;
+        }
+
         if (!_marqueeSelecting || DataContext is not MainViewModel vm)
             return;
 
@@ -1111,6 +2084,23 @@ public partial class MainView : UserControl
 
     private void FileArea_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (IsMobilePlatform)
+        {
+            var wasDragSelecting = _mobileDragSelecting;
+            _mobileDragSelecting = false;
+            _mobileDragSelectionAnchorIndex = -1;
+            _mobileDragSelectionCurrentIndex = -1;
+            _mobileDragSelectionBaseIds.Clear();
+            CancelMobileLongPress();
+
+            if (wasDragSelecting && DataContext is MainViewModel vm)
+            {
+                ShowMobileSelectionActions(vm);
+                e.Handled = true;
+            }
+            return;
+        }
+
         if (!_marqueeSelecting)
             return;
 
@@ -1132,8 +2122,8 @@ public partial class MainView : UserControl
         if (width <= 1 || height <= 1)
             return;
 
-        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 36;
-        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 36;
+        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 48;
+        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 48;
         var availableX = Math.Max(0, width - buttonWidth);
         var availableY = Math.Max(0, height - buttonHeight);
         var (x, y) = vm.GetFloatingUploadPosition();
@@ -1172,8 +2162,8 @@ public partial class MainView : UserControl
             return;
         _floatingUploadMoved = true;
 
-        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 36;
-        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 36;
+        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 48;
+        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 48;
         var maxX = Math.Max(0, FloatingActionCanvas.Bounds.Width - buttonWidth);
         var maxY = Math.Max(0, FloatingActionCanvas.Bounds.Height - buttonHeight);
         Canvas.SetLeft(FloatingUploadDragHost, Math.Clamp(_floatingUploadStartLeft + dx, 0, maxX));
@@ -1200,8 +2190,8 @@ public partial class MainView : UserControl
             return;
         }
 
-        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 36;
-        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 36;
+        var buttonWidth = FloatingUploadDragHost.Bounds.Width > 1 ? FloatingUploadDragHost.Bounds.Width : 48;
+        var buttonHeight = FloatingUploadDragHost.Bounds.Height > 1 ? FloatingUploadDragHost.Bounds.Height : 48;
         var maxX = Math.Max(1, FloatingActionCanvas.Bounds.Width - buttonWidth);
         var maxY = Math.Max(1, FloatingActionCanvas.Bounds.Height - buttonHeight);
         var left = GetCanvasCoordinate(FloatingUploadDragHost, true, 0);
@@ -1283,10 +2273,324 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void MobileSelectionDownload_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            await DownloadSelectedAsync(vm);
+    }
+
+    private async void MobileSelectionCache_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+        var selected = vm.SelectedItemsSnapshot.ToArray();
+        if (selected.Length > 0)
+            await vm.CacheItemsAsync(selected);
+    }
+
+    private async void MobileSelectionShare_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        var selected = vm.SelectedItemsSnapshot.ToArray();
+        if (selected.Length == 0)
+            return;
+
+        vm.IsBusy = true;
+        try
+        {
+            var lines = new List<string>(selected.Length * 2);
+            foreach (var item in selected)
+            {
+                var link = await AppServices.OneDrive.CreateShareLinkAsync(item.Id);
+                lines.Add(item.Name);
+                lines.Add(link);
+            }
+
+            var text = string.Join(Environment.NewLine, lines);
+            if (AppServices.PlatformShareService is { } shareService)
+            {
+                await shareService.ShareTextAsync(selected.Length == 1 ? selected[0].Name : $"分享 {selected.Length} 个 OneDrive 项目", text);
+                vm.StatusText = "已打开系统分享面板";
+            }
+            else if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            {
+                var clipboardData = new DataTransfer();
+                clipboardData.Add(DataTransferItem.CreateText(text));
+                await clipboard.SetDataAsync(clipboardData);
+                vm.StatusText = "分享链接已复制到剪贴板";
+            }
+        }
+        catch (Exception ex)
+        {
+            vm.ErrorMessage = ex.Message;
+            vm.StatusText = "创建分享链接失败";
+        }
+        finally
+        {
+            vm.IsBusy = false;
+        }
+    }
+
+    private async void MobileSelectionMove_Click(object? sender, RoutedEventArgs e) =>
+        await OpenMobileDestinationPickerAsync(MobileDestinationOperation.Move);
+
+    private async void MobileSelectionCopy_Click(object? sender, RoutedEventArgs e) =>
+        await OpenMobileDestinationPickerAsync(MobileDestinationOperation.Copy);
+
+    private void MobileSelectionDelete_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.BeginDeleteCommand.Execute(null);
+    }
+
+    private async Task OpenMobileDestinationPickerAsync(MobileDestinationOperation operation)
+    {
+        if (!IsMobilePlatform || operation == MobileDestinationOperation.None || DataContext is not MainViewModel vm)
+            return;
+
+        var selected = vm.SelectedItemsSnapshot.ToArray();
+        if (selected.Length == 0)
+            return;
+
+        _mobileDestinationOperation = operation;
+        _mobileDestinationPendingItems = selected;
+        MobileSelectionActionBar.IsVisible = false;
+        MobileDestinationTitle.Text = operation == MobileDestinationOperation.Move ? "移动到" : "复制到";
+        MobileDestinationConfirmButton.Content = operation == MobileDestinationOperation.Move ? "移动到这里" : "复制到这里";
+        MobileDestinationOverlay.IsVisible = true;
+        vm.IsBusy = true;
+
+        try
+        {
+            var root = await AppServices.OneDrive.GetItemMetadataAsync(null);
+            if (string.IsNullOrWhiteSpace(root.Id))
+                throw new InvalidOperationException("无法获取 OneDrive 根目录 ID。");
+
+            _mobileDestinationFolderId = root.Id;
+            _mobileDestinationBreadcrumbItems.Clear();
+            _mobileDestinationBreadcrumbItems.Add(new BreadcrumbItem("OneDrive", root.Id));
+            await NavigateMobileDestinationAsync(root.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer destination navigation or closing the picker superseded this request.
+        }
+        catch (Exception ex)
+        {
+            vm.ErrorMessage = ex.Message;
+            CloseMobileDestinationPicker();
+        }
+    }
+
+    private CancellationToken BeginMobileDestinationNavigation()
+    {
+        var next = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _mobileDestinationNavigationCts, next);
+        previous?.Cancel();
+        Interlocked.Increment(ref _mobileDestinationNavigationVersion);
+        return next.Token;
+    }
+
+    private async Task NavigateMobileDestinationAsync(string folderId)
+    {
+        var token = BeginMobileDestinationNavigation();
+        var version = _mobileDestinationNavigationVersion;
+        var vm = DataContext as MainViewModel;
+        if (vm is not null)
+            vm.IsBusy = true;
+
+        try
+        {
+            await LoadMobileDestinationFoldersAsync(folderId, token);
+            if (token.IsCancellationRequested || version != _mobileDestinationNavigationVersion || !MobileDestinationOverlay.IsVisible)
+                return;
+
+            _mobileDestinationFolderId = folderId;
+        }
+        finally
+        {
+            if (vm is not null && version == _mobileDestinationNavigationVersion)
+                vm.IsBusy = false;
+        }
+    }
+
+    private async Task LoadMobileDestinationFoldersAsync(string folderId, CancellationToken cancellationToken)
+    {
+        var selectedFolderIds = _mobileDestinationPendingItems
+            .Where(static x => x.IsFolder)
+            .Select(static x => x.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Use the destination-specific Graph query: it requests only folder metadata, no
+        // thumbnails/files payload. The service still follows @odata.nextLink, so a folder
+        // containing more than 200 children is not truncated to the first Graph page.
+        var folders = (await AppServices.OneDrive.GetChildFoldersAsync(folderId, cancellationToken))
+            .Where(x => !selectedFolderIds.Contains(x.Id))
+            .OrderBy(static x => x.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        cancellationToken.ThrowIfCancellationRequested();
+        _mobileDestinationFolders.Clear();
+        _mobileDestinationFolders.AddRange(folders);
+    }
+
+    private async void MobileDestinationFolder_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: DriveItemModel item } || !item.IsFolder ||
+            DataContext is not MainViewModel vm || string.IsNullOrWhiteSpace(item.Id))
+            return;
+
+        e.Handled = true;
+        var oldCount = _mobileDestinationBreadcrumbItems.Count;
+        _mobileDestinationBreadcrumbItems.Add(new BreadcrumbItem(item.Name, item.Id));
+        try
+        {
+            await NavigateMobileDestinationAsync(item.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by another tap/back/close.
+        }
+        catch (Exception ex)
+        {
+            // Only remove the breadcrumb we optimistically appended if it still belongs to
+            // this failed navigation; a newer navigation may already have replaced the path.
+            while (_mobileDestinationBreadcrumbItems.Count > oldCount)
+                _mobileDestinationBreadcrumbItems.RemoveAt(_mobileDestinationBreadcrumbItems.Count - 1);
+            vm.ErrorMessage = ex.Message;
+        }
+    }
+
+    private async void MobileDestinationBreadcrumb_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: BreadcrumbItem crumb } || string.IsNullOrWhiteSpace(crumb.ItemId) ||
+            DataContext is not MainViewModel vm)
+            return;
+
+        var index = _mobileDestinationBreadcrumbItems.IndexOf(crumb);
+        if (index < 0 || index == _mobileDestinationBreadcrumbItems.Count - 1)
+            return;
+
+        var oldPath = _mobileDestinationBreadcrumbItems.ToArray();
+        while (_mobileDestinationBreadcrumbItems.Count > index + 1)
+            _mobileDestinationBreadcrumbItems.RemoveAt(_mobileDestinationBreadcrumbItems.Count - 1);
+
+        try
+        {
+            await NavigateMobileDestinationAsync(crumb.ItemId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by another navigation.
+        }
+        catch (Exception ex)
+        {
+            _mobileDestinationBreadcrumbItems.Clear();
+            _mobileDestinationBreadcrumbItems.AddRange(oldPath);
+            vm.ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task<bool> GoBackMobileDestinationAsync()
+    {
+        if (!MobileDestinationOverlay.IsVisible || _mobileDestinationBreadcrumbItems.Count <= 1 ||
+            DataContext is not MainViewModel vm)
+            return false;
+
+        var oldPath = _mobileDestinationBreadcrumbItems.ToArray();
+        _mobileDestinationBreadcrumbItems.RemoveAt(_mobileDestinationBreadcrumbItems.Count - 1);
+        var parent = _mobileDestinationBreadcrumbItems[^1];
+        if (string.IsNullOrWhiteSpace(parent.ItemId))
+            return false;
+
+        try
+        {
+            await NavigateMobileDestinationAsync(parent.ItemId);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _mobileDestinationBreadcrumbItems.Clear();
+            _mobileDestinationBreadcrumbItems.AddRange(oldPath);
+            vm.ErrorMessage = ex.Message;
+            return true;
+        }
+    }
+
+    private async void MobileDestinationConfirm_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_mobileDestinationOperation == MobileDestinationOperation.None ||
+            string.IsNullOrWhiteSpace(_mobileDestinationFolderId) ||
+            DataContext is not MainViewModel vm)
+            return;
+
+        var operation = _mobileDestinationOperation;
+        var targetId = _mobileDestinationFolderId;
+        var pending = _mobileDestinationPendingItems.ToArray();
+        vm.IsBusy = true;
+        try
+        {
+            foreach (var item in pending)
+            {
+                if (operation == MobileDestinationOperation.Move)
+                    await AppServices.OneDrive.MoveAsync(item.Id, targetId);
+                else
+                    await AppServices.OneDrive.CopyAsync(item.Id, targetId);
+            }
+
+            vm.InvalidateFolderCacheForId(targetId);
+            vm.InvalidateFolderCacheForId(vm.CurrentFolderId);
+            CloseMobileDestinationPicker();
+            await vm.RefreshCurrentFolderAsync();
+            ClearListSelections();
+            vm.StatusText = operation == MobileDestinationOperation.Move
+                ? $"已移动 {pending.Length} 项"
+                : $"已提交 {pending.Length} 项复制任务";
+        }
+        catch (Exception ex)
+        {
+            vm.ErrorMessage = ex.Message;
+            vm.StatusText = operation == MobileDestinationOperation.Move ? "移动失败" : "复制失败";
+        }
+        finally
+        {
+            vm.IsBusy = false;
+        }
+    }
+
+    private void MobileDestinationCancel_Click(object? sender, RoutedEventArgs e) => CloseMobileDestinationPicker();
+
+    private void CloseMobileDestinationPicker()
+    {
+        Interlocked.Increment(ref _mobileDestinationNavigationVersion);
+        var navigationCts = Interlocked.Exchange(ref _mobileDestinationNavigationCts, null);
+        navigationCts?.Cancel();
+        navigationCts?.Dispose();
+
+        MobileDestinationOverlay.IsVisible = false;
+        _mobileDestinationOperation = MobileDestinationOperation.None;
+        _mobileDestinationFolderId = null;
+        _mobileDestinationPendingItems = Array.Empty<DriveItemModel>();
+        _mobileDestinationFolders.Clear();
+        _mobileDestinationBreadcrumbItems.Clear();
+        if (DataContext is MainViewModel vm)
+        {
+            vm.IsBusy = false;
+            if (vm.SelectionCount > 0)
+                ShowMobileSelectionActions(vm);
+        }
+    }
+
     private async void OpenSelectedButton_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel { SelectedItem: { } item } vm)
-            await vm.OpenItemAsync(item);
+            await OpenDriveItemAsync(vm, item);
     }
 
     private async void DownloadButton_Click(object? sender, RoutedEventArgs e)
@@ -1502,14 +2806,22 @@ public partial class MainView : UserControl
 
     private void DownloadAllFilesButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm)
+        if (DataContext is not MainViewModel)
             return;
 
-        vm.ShowConfirmation(
-            "下载所有 OneDrive 文件",
-            "此操作会递归下载 OneDrive 中的全部文件和文件夹，可能消耗大量网络流量和本地磁盘空间。是否继续？",
-            async () => await DownloadAllOneDriveAsync(vm),
-            useBusy: false);
+        DownloadAllConfirmOverlay.IsVisible = true;
+    }
+
+    private void CancelDownloadAllButton_Click(object? sender, RoutedEventArgs e)
+    {
+        DownloadAllConfirmOverlay.IsVisible = false;
+    }
+
+    private async void ConfirmDownloadAllButton_Click(object? sender, RoutedEventArgs e)
+    {
+        DownloadAllConfirmOverlay.IsVisible = false;
+        if (DataContext is MainViewModel vm)
+            await DownloadAllOneDriveAsync(vm);
     }
 
     private async Task DownloadAllOneDriveAsync(MainViewModel vm)
@@ -1530,30 +2842,38 @@ public partial class MainView : UserControl
         string? destinationBookmark = null;
         try { destinationBookmark = await destinationRoot.SaveBookmarkAsync(); } catch { }
 
-        var rootItems = await AppServices.OneDrive.GetChildrenAsync(null);
         var plans = new List<DownloadPlan>();
-        var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in rootItems)
-            await CollectDownloadPlanAsync(item, [], plans, folderPaths);
-
-        foreach (var path in folderPaths.OrderBy(static x => x.Count(c => c == '/')))
+        vm.IsBusy = true;
+        try
         {
-            using var created = await EnsureFolderPathAsync(destinationRoot, SplitRelativePath(path));
-        }
+            var rootItems = await AppServices.OneDrive.GetChildrenAsync(null);
+            var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in rootItems)
+                await CollectDownloadPlanAsync(item, [], plans, folderPaths);
 
-        foreach (var plan in plans)
-        {
-            plan.Transfer = vm.RegisterTransfer(plan.DisplayName, TransferDirection.Download);
-            vm.SetTransferResumeInfo(plan.Transfer, new TransferResumeInfo
+            foreach (var path in folderPaths.OrderBy(static x => x.Count(c => c == '/')))
             {
-                AccountId = vm.CurrentAccountId,
-                Kind = TransferResumeKind.DownloadToFolder,
-                OneDriveItemId = plan.Item.Id,
-                StorageBookmark = destinationBookmark,
-                RelativeFolderSegments = plan.FolderSegments.ToArray()
-            });
-            var captured = plan;
-            plan.Transfer.RetryAction = () => DownloadPlanItemAsync(vm, destinationRoot, captured);
+                using var created = await EnsureFolderPathAsync(destinationRoot, SplitRelativePath(path));
+            }
+
+            foreach (var plan in plans)
+            {
+                plan.Transfer = vm.RegisterTransfer(plan.DisplayName, TransferDirection.Download);
+                vm.SetTransferResumeInfo(plan.Transfer, new TransferResumeInfo
+                {
+                    AccountId = vm.CurrentAccountId,
+                    Kind = TransferResumeKind.DownloadToFolder,
+                    OneDriveItemId = plan.Item.Id,
+                    StorageBookmark = destinationBookmark,
+                    RelativeFolderSegments = plan.FolderSegments.ToArray()
+                });
+                var captured = plan;
+                plan.Transfer.RetryAction = () => DownloadPlanItemAsync(vm, destinationRoot, captured);
+            }
+        }
+        finally
+        {
+            vm.IsBusy = false;
         }
 
         foreach (var plan in plans)
@@ -1575,6 +2895,12 @@ public partial class MainView : UserControl
     private void PreviewImage_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MainViewModel vm || !vm.IsImagePreview)
+            return;
+
+        // Mobile touch is handled by Avalonia's pinch/swipe/scroll recognizers below.
+        // Capturing the first touch pointer here would prevent a second finger from
+        // joining a pinch gesture. Keep this low-level path for desktop mouse panning.
+        if (IsMobilePlatform && e.Pointer.Type == PointerType.Touch)
             return;
 
         var point = e.GetCurrentPoint(PreviewImageViewport);
@@ -1622,11 +2948,14 @@ public partial class MainView : UserControl
 
     private void PreviewImage_DoubleTapped(object? sender, TappedEventArgs e)
     {
+        CancelPreviewLongPress();
         if (DataContext is not MainViewModel vm || !vm.IsImagePreview)
             return;
 
         if (_previewAutoFit)
         {
+            if (IsMobilePlatform)
+                EnterMobilePreviewZoomMode(vm);
             _previewAutoFit = false;
             vm.SetPreviewZoomToActualSize();
             Canvas.SetLeft(PreviewImageElement, (PreviewImageViewport.Bounds.Width - vm.PreviewImageWidth) / 2);
@@ -1636,8 +2965,11 @@ public partial class MainView : UserControl
         {
             _previewAutoFit = true;
             FitPreviewImageToViewport(vm);
+            if (IsMobilePlatform && !IsCurrentPreviewGif(vm))
+                ExitMobilePreviewZoomMode(vm);
         }
 
+        UpdatePreviewTouchGestureMode(vm);
         e.Handled = true;
     }
 
@@ -1661,6 +2993,7 @@ public partial class MainView : UserControl
         var newZoom = Math.Max(0.01, vm.PreviewZoom);
         Canvas.SetLeft(PreviewImageElement, pointer.X - imageX * newZoom);
         Canvas.SetTop(PreviewImageElement, pointer.Y - imageY * newZoom);
+        UpdatePreviewTouchGestureMode(vm);
         e.Handled = true;
     }
 
@@ -1683,12 +3016,338 @@ public partial class MainView : UserControl
         vm.FitPreviewImage(width, height);
         Canvas.SetLeft(PreviewImageElement, (width - vm.PreviewImageWidth) / 2);
         Canvas.SetTop(PreviewImageElement, (height - vm.PreviewImageHeight) / 2);
+        UpdatePreviewTouchGestureMode(vm);
+    }
+
+    private void PreviewImage_Pinch(object? sender, PinchEventArgs e)
+    {
+        CancelPreviewLongPress();
+        if (!IsMobilePlatform || DataContext is not MainViewModel vm || !vm.IsImagePreview)
+            return;
+
+        _previewPinching = true;
+        if (!_mobilePreviewZoomMode)
+            EnterMobilePreviewZoomMode(vm);
+        _previewAutoFit = false;
+
+        var oldZoom = Math.Max(0.01, vm.PreviewZoom);
+        var oldLeft = GetCanvasCoordinate(PreviewImageElement, true,
+            (PreviewImageViewport.Bounds.Width - vm.PreviewImageWidth) / 2);
+        var oldTop = GetCanvasCoordinate(PreviewImageElement, false,
+            (PreviewImageViewport.Bounds.Height - vm.PreviewImageHeight) / 2);
+
+        var origin = e.ScaleOrigin;
+        var imageX = (origin.X - oldLeft) / oldZoom;
+        var imageY = (origin.Y - oldTop) / oldZoom;
+
+        var currentScale = Math.Max(0.01, e.Scale);
+        var factor = currentScale / Math.Max(0.01, _previewLastPinchScale);
+        _previewLastPinchScale = currentScale;
+        vm.AdjustPreviewZoom(factor);
+
+        var newZoom = Math.Max(0.01, vm.PreviewZoom);
+        Canvas.SetLeft(PreviewImageElement, origin.X - imageX * newZoom);
+        Canvas.SetTop(PreviewImageElement, origin.Y - imageY * newZoom);
+        ConstrainPreviewImageToViewport(vm);
+        UpdatePreviewTouchGestureMode(vm);
+        e.Handled = true;
+    }
+
+    private void PreviewImage_PinchEnded(object? sender, PinchEndedEventArgs e)
+    {
+        _previewLastPinchScale = 1.0;
+        _previewPinching = false;
+        if (DataContext is MainViewModel vm && vm.IsImagePreview)
+        {
+            ConstrainPreviewImageToViewport(vm);
+            if (IsMobilePlatform && IsPreviewImageFitted(vm) && !IsCurrentPreviewGif(vm))
+            {
+                _previewAutoFit = true;
+                ExitMobilePreviewZoomMode(vm);
+            }
+            UpdatePreviewTouchGestureMode(vm);
+        }
+        e.Handled = true;
+    }
+
+    private void PreviewImage_ScrollGesture(object? sender, ScrollGestureEventArgs e)
+    {
+        CancelPreviewLongPress();
+        if (!IsMobilePlatform || _previewPinching || DataContext is not MainViewModel vm ||
+            !vm.IsImagePreview || IsPreviewImageFitted(vm))
+            return;
+
+        var left = GetCanvasCoordinate(PreviewImageElement, true,
+            (PreviewImageViewport.Bounds.Width - vm.PreviewImageWidth) / 2);
+        var top = GetCanvasCoordinate(PreviewImageElement, false,
+            (PreviewImageViewport.Bounds.Height - vm.PreviewImageHeight) / 2);
+
+        // Avalonia's ScrollGesture delta follows scroll-content semantics (positive delta means
+        // the content viewport scrolls in the opposite direction). For a gallery image we want
+        // direct manipulation: drag your finger right/down and the enlarged image follows it.
+        Canvas.SetLeft(PreviewImageElement, left - e.Delta.X);
+        Canvas.SetTop(PreviewImageElement, top - e.Delta.Y);
+        ConstrainPreviewImageToViewport(vm);
+        e.Handled = true;
+    }
+
+    private bool IsPreviewImageFitted(MainViewModel vm)
+    {
+        var viewportWidth = PreviewImageViewport.Bounds.Width;
+        var viewportHeight = PreviewImageViewport.Bounds.Height;
+        return vm.PreviewImageWidth <= viewportWidth + 2 && vm.PreviewImageHeight <= viewportHeight + 2;
+    }
+
+    private void UpdatePreviewTouchGestureMode(MainViewModel vm)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        var fitted = !vm.IsImagePreview || IsPreviewImageFitted(vm);
+        var useCarousel = vm.IsImagePreview && !_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm);
+
+        // Carousel pages render their images with Stretch=Uniform, so the page is always
+        // viewport-fitted regardless of the hidden zoom canvas' PreviewImageWidth/Height.
+        // Using IsPreviewImageFitted here caused the first carousel navigation to disable
+        // IsSwipeEnabled as soon as the newly loaded full-resolution bitmap updated those
+        // hidden canvas dimensions. Keep carousel paging and zoom-canvas panning independent.
+        MobileImageCarousel.IsSwipeEnabled = useCarousel;
+        _previewScrollGestureRecognizer.CanHorizontallyScroll = vm.IsImagePreview && _mobilePreviewZoomMode && !fitted;
+        _previewScrollGestureRecognizer.CanVerticallyScroll = vm.IsImagePreview && _mobilePreviewZoomMode && !fitted;
+    }
+
+    private static bool IsCurrentPreviewGif(MainViewModel vm) =>
+        string.Equals(Path.GetExtension(vm.PreviewItem?.Name), ".gif", StringComparison.OrdinalIgnoreCase);
+
+    private void SyncMobileImageCarousel(MainViewModel vm)
+    {
+        if (!IsMobilePlatform || !vm.IsImagePreview)
+            return;
+
+        var images = vm.Items.Where(static x => x.IsFile && x.IsImage).ToArray();
+        var ids = images.Select(static x => x.Id).ToArray();
+        var itemsChanged = ids.Length != _mobileCarouselImageIds.Length ||
+            !ids.SequenceEqual(_mobileCarouselImageIds, StringComparer.Ordinal);
+
+        _syncingMobileImageCarousel = true;
+        try
+        {
+            if (itemsChanged)
+            {
+                _mobileCarouselImageIds = ids;
+                MobileImageCarousel.ItemsSource = images;
+            }
+
+            if (vm.PreviewItem is not null)
+            {
+                var index = Array.FindIndex(images, x => x.Id == vm.PreviewItem.Id);
+                if (index >= 0 && MobileImageCarousel.SelectedIndex != index)
+                    MobileImageCarousel.SelectedIndex = index;
+            }
+        }
+        finally
+        {
+            _syncingMobileImageCarousel = false;
+        }
+    }
+
+    private void ApplyMobileImagePreviewMode(MainViewModel vm)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        var showCarousel = vm.IsImagePreview && !_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm);
+        MobileImageCarousel.IsVisible = showCarousel;
+        PreviewZoomCanvas.IsVisible = vm.IsImagePreview && !showCarousel;
+        UpdatePreviewTouchGestureMode(vm);
+    }
+
+    private void EnterMobilePreviewZoomMode(MainViewModel vm)
+    {
+        if (!IsMobilePlatform || !vm.IsImagePreview)
+            return;
+
+        _mobilePreviewZoomMode = true;
+        MobileImageCarousel.IsSwipeEnabled = false;
+        MobileImageCarousel.IsVisible = false;
+        PreviewZoomCanvas.IsVisible = true;
+        if (_previewAutoFit)
+            FitPreviewImageToViewport(vm);
+    }
+
+    private void ExitMobilePreviewZoomMode(MainViewModel vm)
+    {
+        if (!IsMobilePlatform || !vm.IsImagePreview || IsCurrentPreviewGif(vm))
+            return;
+
+        _mobilePreviewZoomMode = false;
+        PreviewZoomCanvas.IsVisible = false;
+        MobileImageCarousel.IsVisible = true;
+        SyncMobileImageCarousel(vm);
+        MobileImageCarousel.IsSwipeEnabled = true;
+    }
+
+    private async void MobileImageCarousel_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        CancelPreviewLongPress();
+        if (!IsMobilePlatform || _syncingMobileImageCarousel || _mobilePreviewZoomMode ||
+            DataContext is not MainViewModel vm || !vm.IsImagePreview ||
+            MobileImageCarousel.SelectedItem is not DriveItemModel item ||
+            string.Equals(item.Id, vm.PreviewItem?.Id, StringComparison.Ordinal))
+            return;
+
+        // Carousel owns the direct-manipulation animation. Only after it commits the new page do
+        // we switch the preview model and upgrade that page from thumbnail/preload to full preview.
+        _previewAutoFit = true;
+        try
+        {
+            await vm.LoadPreviewAsync(item, preserveSlideshow: vm.IsSlideshowPlaying);
+        }
+        catch
+        {
+            // LoadPreviewAsync reports its own error state; keep the carousel responsive.
+        }
+    }
+
+    private void ConstrainPreviewImageToViewport(MainViewModel vm)
+    {
+        var viewportWidth = PreviewImageViewport.Bounds.Width;
+        var viewportHeight = PreviewImageViewport.Bounds.Height;
+        if (viewportWidth <= 1 || viewportHeight <= 1)
+            return;
+
+        var width = vm.PreviewImageWidth;
+        var height = vm.PreviewImageHeight;
+        var left = GetCanvasCoordinate(PreviewImageElement, true, (viewportWidth - width) / 2);
+        var top = GetCanvasCoordinate(PreviewImageElement, false, (viewportHeight - height) / 2);
+
+        left = width <= viewportWidth
+            ? (viewportWidth - width) / 2
+            : Math.Clamp(left, viewportWidth - width, 0);
+        top = height <= viewportHeight
+            ? (viewportHeight - height) / 2
+            : Math.Clamp(top, viewportHeight - height, 0);
+
+        Canvas.SetLeft(PreviewImageElement, left);
+        Canvas.SetTop(PreviewImageElement, top);
     }
 
     private static double GetCanvasCoordinate(Control control, bool isLeft, double fallback)
     {
         var value = isLeft ? Canvas.GetLeft(control) : Canvas.GetTop(control);
         return double.IsNaN(value) ? fallback : value;
+    }
+
+    private void PreviewMore_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        CancelPreviewLongPress();
+        OpenMobilePreviewActions();
+        e.Handled = true;
+    }
+
+    private void OpenMobilePreviewActions()
+    {
+        if (!IsMobilePlatform || MobilePreviewActionsOverlay.IsVisible ||
+            DataContext is not MainViewModel { IsPreviewVisible: true })
+            return;
+
+        // Native video surfaces are composed above Avalonia. Hide them while the
+        // Avalonia action panel is visible, just as the old ContextMenu path did.
+        _mobilePreviewActionsOverlayController = _embeddedMediaSession as IEmbeddedMediaOverlayController;
+        _mobilePreviewActionsOverlayController?.SetNativeOverlayVisible(false);
+        MobilePreviewActionsOverlay.IsVisible = true;
+    }
+
+    private void CloseMobilePreviewActions()
+    {
+        CancelPreviewLongPress();
+
+        if (!MobilePreviewActionsOverlay.IsVisible && _mobilePreviewActionsOverlayController is null)
+            return;
+
+        MobilePreviewActionsOverlay.IsVisible = false;
+        var overlayController = _mobilePreviewActionsOverlayController;
+        _mobilePreviewActionsOverlayController = null;
+
+        if (overlayController is not null)
+        {
+            Dispatcher.UIThread.Post(
+                () => overlayController.SetNativeOverlayVisible(true),
+                DispatcherPriority.Background);
+        }
+    }
+
+    private void MobilePreviewActionsBackdrop_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        CloseMobilePreviewActions();
+        e.Handled = true;
+    }
+
+    private void PreviewLongPress_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!IsMobilePlatform || e.Pointer.Type != PointerType.Touch ||
+            DataContext is not MainViewModel { IsPreviewVisible: true, IsImagePreview: true } ||
+            MobilePreviewActionsOverlay.IsVisible)
+            return;
+
+        _previewLongPressPending = true;
+        _previewLongPressStart = e.GetPosition(PreviewImageViewport);
+        _previewLongPressTimer.Stop();
+        _previewLongPressTimer.Start();
+    }
+
+    private void PreviewLongPress_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_previewLongPressPending)
+            return;
+
+        var current = e.GetPosition(PreviewImageViewport);
+        var dx = current.X - _previewLongPressStart.X;
+        var dy = current.Y - _previewLongPressStart.Y;
+
+        // 12 dp is well below a deliberate swipe/pan but large enough to tolerate
+        // small finger jitter during a hold.
+        if ((dx * dx) + (dy * dy) > 12 * 12 ||
+            _previewPinching)
+        {
+            CancelPreviewLongPress();
+        }
+    }
+
+    private void PreviewLongPress_PointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        CancelPreviewLongPress();
+
+    private void PreviewLongPressTimer_Tick(object? sender, EventArgs e)
+    {
+        _previewLongPressTimer.Stop();
+        if (!_previewLongPressPending ||
+            _previewPinching ||
+            DataContext is not MainViewModel { IsPreviewVisible: true, IsImagePreview: true })
+        {
+            CancelPreviewLongPress();
+            return;
+        }
+
+        _previewLongPressPending = false;
+        OpenMobilePreviewActions();
+    }
+
+    private void CancelPreviewLongPress()
+    {
+        _previewLongPressTimer.Stop();
+        _previewLongPressPending = false;
+    }
+
+    private void PreviewImage_ContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        // On phones, image long-press is reserved for direct manipulation and must not open a
+        // desktop-style context menu. The mobile ⋮ button and a stationary image long-press
+        // both open the in-page action panel. Desktop right-click still works normally.
+        if (IsMobilePlatform)
+            e.Handled = true;
     }
 
     private void PreviewPrevious_Click(object? sender, RoutedEventArgs e)
@@ -1705,18 +3364,73 @@ public partial class MainView : UserControl
 
     private void PreviewSlideshow_Click(object? sender, RoutedEventArgs e)
     {
+        CloseMobilePreviewActions();
         if (DataContext is MainViewModel vm)
             vm.ToggleSlideshowCommand.Execute(null);
     }
 
     private void PreviewDetails_Click(object? sender, RoutedEventArgs e)
     {
+        CloseMobilePreviewActions();
         if (DataContext is MainViewModel vm)
             vm.TogglePreviewDetailsCommand.Execute(null);
     }
 
+    private async void PreviewCache_Click(object? sender, RoutedEventArgs e)
+    {
+        CloseMobilePreviewActions();
+        if (DataContext is not MainViewModel { PreviewItem: { IsFile: true } item } vm)
+            return;
+
+        try
+        {
+            await vm.CacheItemsAsync(new[] { item });
+        }
+        catch (Exception ex)
+        {
+            vm.ErrorMessage = ex.Message;
+            vm.StatusText = "缓存失败";
+        }
+    }
+
+    private async void PreviewShare_Click(object? sender, RoutedEventArgs e)
+    {
+        CloseMobilePreviewActions();
+
+        if (DataContext is not MainViewModel { PreviewItem: { IsFile: true } item } vm)
+            return;
+
+        vm.IsBusy = true;
+        try
+        {
+            var link = await AppServices.OneDrive.CreateShareLinkAsync(item.Id);
+            if (AppServices.PlatformShareService is { } shareService)
+            {
+                await shareService.ShareTextAsync(item.Name, $"{item.Name}{Environment.NewLine}{link}");
+                vm.StatusText = "已打开系统分享面板";
+            }
+            else if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            {
+                var clipboardData = new DataTransfer();
+                clipboardData.Add(DataTransferItem.CreateText($"{item.Name}{Environment.NewLine}{link}"));
+                await clipboard.SetDataAsync(clipboardData);
+                vm.StatusText = "分享链接已复制到剪贴板";
+            }
+        }
+        catch (Exception ex)
+        {
+            vm.ErrorMessage = ex.Message;
+            vm.StatusText = "创建分享链接失败";
+        }
+        finally
+        {
+            vm.IsBusy = false;
+        }
+    }
+
     private async void PreviewDownload_Click(object? sender, RoutedEventArgs e)
     {
+        CloseMobilePreviewActions();
         if (DataContext is not MainViewModel { PreviewItem: { IsFile: true } item } vm)
             return;
 
@@ -1748,32 +3462,85 @@ public partial class MainView : UserControl
 
     private async void OpenMediaButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm)
+        await OpenCurrentPreviewWithSystemAppAsync();
+    }
+
+    private async void OpenPreviewWithSystemApp_Click(object? sender, RoutedEventArgs e)
+    {
+        await OpenCurrentPreviewWithSystemAppAsync();
+    }
+
+    private async Task OpenCurrentPreviewWithSystemAppAsync()
+    {
+        if (DataContext is not MainViewModel vm || vm.PreviewItem is not { IsFile: true } item)
             return;
 
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
+        var path = vm.PreviewCachedFilePath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            path = await vm.PrepareSystemOpenAsync(item);
+
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             return;
 
-        if (!string.IsNullOrWhiteSpace(vm.PreviewCachedFilePath) && File.Exists(vm.PreviewCachedFilePath))
+        if (await TryLaunchSystemFileAsync(path))
         {
-            try
-            {
-                using var storageFile = await topLevel.StorageProvider.TryGetFileFromPathAsync(vm.PreviewCachedFilePath);
-                if (storageFile is not null && await topLevel.Launcher.LaunchFileAsync(storageFile))
-                    return;
-            }
-            catch
-            {
-                // Sandboxed mobile/browser targets may not expose app-private paths through
-                // IStorageProvider. Fall back to the OneDrive download URL below.
-            }
+            vm.StatusText = $"已使用系统应用打开 {item.Name}";
+            vm.ClosePreviewCommand.Execute(null);
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(vm.PreviewMediaUrl) &&
-            Uri.TryCreate(vm.PreviewMediaUrl, UriKind.Absolute, out var uri))
+        vm.MarkSystemOpenUnsupported();
+    }
+
+    private async Task OpenWithSystemDefaultAsync(MainViewModel vm, DriveItemModel item)
+    {
+        var path = await vm.PrepareSystemOpenAsync(item);
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return;
+
+        if (await TryLaunchSystemFileAsync(path))
         {
-            await topLevel.Launcher.LaunchUriAsync(uri);
+            vm.StatusText = $"已使用系统应用打开 {item.Name}";
+            vm.ClosePreviewCommand.Execute(null);
+            return;
+        }
+
+        // Keep the already-cached file attached to the generic preview. The user can retry
+        // after installing/changing a default app without downloading the file again.
+        vm.MarkSystemOpenUnsupported();
+    }
+
+    private async Task<bool> TryLaunchSystemFileAsync(string localPath)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+            return false;
+
+        try
+        {
+            if (topLevel.StorageProvider is { } provider)
+            {
+                using var storageFile = await provider.TryGetFileFromPathAsync(localPath);
+                if (storageFile is not null && await topLevel.Launcher.LaunchFileAsync(storageFile))
+                    return true;
+            }
+        }
+        catch
+        {
+            // Continue to the non-sandboxed desktop fallback below. Android/iOS use
+            // LaunchFileAsync because the FileInfo extension is intentionally unsupported there.
+        }
+
+        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS() || OperatingSystem.IsBrowser())
+            return false;
+
+        try
+        {
+            return await topLevel.Launcher.LaunchFileInfoAsync(new FileInfo(localPath));
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1868,8 +3635,11 @@ public partial class MainView : UserControl
 
     private void ApplySettingsAcrylicBlur(double percent)
     {
+        if (IsMobilePlatform)
+            return;
+
         var normalized = Math.Clamp(double.IsFinite(percent) ? percent : 50, 0, 100);
-        // 50% maps to the previous Radius=22 appearance; 0% is sharp and 100% is strongly frosted.
+        // Desktop settings keeps the stronger slide-over acrylic treatment.
         SettingsAcrylicBackgroundImage.Effect = new BlurEffect
         {
             Radius = 44d * normalized / 100d
@@ -1889,7 +3659,34 @@ public partial class MainView : UserControl
         var radius = 28d * ratio;
         BackgroundImageLayer.Effect = radius <= 0.01 ? null : new BlurEffect { Radius = radius };
         BackgroundColorLayer.Effect = radius <= 0.01 ? null : new BlurEffect { Radius = radius };
+        MobileProfileBackgroundImage.Effect = radius <= 0.01 ? null : new BlurEffect { Radius = radius };
+        MobileTransferBackgroundImage.Effect = radius <= 0.01 ? null : new BlurEffect { Radius = radius };
+        MobileSettingsBackgroundImage.Effect = radius <= 0.01 ? null : new BlurEffect { Radius = radius };
         BackgroundScrimLayer.Opacity = 0.08 + (0.39 * ratio);
+        MobileProfileBackgroundScrim.Opacity = BackgroundScrimLayer.Opacity;
+        MobileTransferBackgroundScrim.Opacity = BackgroundScrimLayer.Opacity;
+        MobileSettingsBackgroundScrim.Opacity = BackgroundScrimLayer.Opacity;
+    }
+
+    private void ApplyStartupBackgroundShell(MainViewModel vm)
+    {
+        if (vm.Settings.BackgroundMode == WindowBackgroundMode.Color)
+        {
+            try
+            {
+                var color = Color.Parse(vm.Settings.BackgroundColor);
+                SetBackgroundBitmap(null);
+                SetBackgroundColor(new SolidColorBrush(color), preserveSolidColorAcrossTheme: true);
+                return;
+            }
+            catch
+            {
+                // Fall back to the theme background when a persisted color is invalid.
+            }
+        }
+
+        SetBackgroundBitmap(null);
+        ApplyDefaultBackgroundColor();
     }
 
     private async Task ApplyWindowBackgroundAsync()
@@ -1983,6 +3780,9 @@ public partial class MainView : UserControl
     private void SetBackgroundColor(IBrush brush, bool preserveSolidColorAcrossTheme = false)
     {
         SettingsAcrylicBase.Background = brush;
+        MobileProfileBackgroundColor.Background = brush;
+        MobileTransferBackgroundColor.Background = brush;
+        MobileSettingsBackgroundColor.Background = brush;
         if (TopLevel.GetTopLevel(this) is MainWindow window)
         {
             window.SetWindowBackgroundColor(brush, preserveSolidColorAcrossTheme);
@@ -1999,7 +3799,16 @@ public partial class MainView : UserControl
             // changes with Light/Dark and visually replaces/tints the selected HEX color.
             _backgroundScrimBinding?.Dispose();
             _backgroundScrimBinding = null;
+            _mobileProfileScrimBinding?.Dispose();
+            _mobileProfileScrimBinding = null;
+            _mobileTransferScrimBinding?.Dispose();
+            _mobileTransferScrimBinding = null;
+            _mobileSettingsScrimBinding?.Dispose();
+            _mobileSettingsScrimBinding = null;
             BackgroundScrimLayer.Background = brush;
+            MobileProfileBackgroundScrim.Background = brush;
+            MobileTransferBackgroundScrim.Background = brush;
+            MobileSettingsBackgroundScrim.Background = brush;
         }
         else
         {
@@ -2016,9 +3825,14 @@ public partial class MainView : UserControl
         }
 
         _backgroundScrimBinding?.Dispose();
-        _backgroundScrimBinding = BackgroundScrimLayer.Bind(
-            Border.BackgroundProperty,
-            this.GetResourceObservable("SystemControlBackgroundAltHighBrush"));
+        _mobileProfileScrimBinding?.Dispose();
+        _mobileTransferScrimBinding?.Dispose();
+        _mobileSettingsScrimBinding?.Dispose();
+        var backgroundResource = this.GetResourceObservable("SystemControlBackgroundAltHighBrush");
+        _backgroundScrimBinding = BackgroundScrimLayer.Bind(Border.BackgroundProperty, backgroundResource);
+        _mobileProfileScrimBinding = MobileProfileBackgroundScrim.Bind(Border.BackgroundProperty, backgroundResource);
+        _mobileTransferScrimBinding = MobileTransferBackgroundScrim.Bind(Border.BackgroundProperty, backgroundResource);
+        _mobileSettingsScrimBinding = MobileSettingsBackgroundScrim.Bind(Border.BackgroundProperty, backgroundResource);
     }
 
     private async Task LoadLocalImageBookmarkAsync(string bookmark)
@@ -2135,6 +3949,12 @@ public partial class MainView : UserControl
 
         SettingsAcrylicBackgroundImage.Source = bitmap;
         SettingsAcrylicBackgroundImage.IsVisible = bitmap is not null;
+        MobileSettingsBackgroundImage.Source = bitmap;
+        MobileSettingsBackgroundImage.IsVisible = bitmap is not null && IsMobilePlatform;
+        MobileProfileBackgroundImage.Source = bitmap;
+        MobileProfileBackgroundImage.IsVisible = bitmap is not null;
+        MobileTransferBackgroundImage.Source = bitmap;
+        MobileTransferBackgroundImage.IsVisible = bitmap is not null && IsMobilePlatform;
 
         if (bitmap is not null)
             UseThemeBackgroundFrost();

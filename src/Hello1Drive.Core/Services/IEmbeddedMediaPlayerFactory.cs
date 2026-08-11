@@ -15,3 +15,12 @@ public interface IEmbeddedMediaPlayerSession : IDisposable
 {
     Control View { get; }
 }
+/// <summary>
+/// Optional bridge for platform-native media surfaces that are composed above Avalonia popups.
+/// Temporarily hiding the native surface lets Avalonia menus render unobstructed.
+/// </summary>
+public interface IEmbeddedMediaOverlayController
+{
+    void SetNativeOverlayVisible(bool visible);
+}
+

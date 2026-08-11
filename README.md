@@ -33,15 +33,15 @@
 ### 文件展示与预览
 
 - 三种视图：**详细信息 / 大图标 / 超大图标**。
-- 详细信息列支持名称、类型、大小、修改时间排序；左侧排序菜单可直接选择名称/日期/大小/类型的升序或降序。
+- 详细信息列支持名称、大小、修改时间排序；设置中可指定全局默认排序（系统默认/日期/名称/大小升降序），每次修改全局默认都会清空并覆盖全部文件夹旧的独立排序。之后每个文件夹仍可单独覆盖，也可选择“跟随设置默认”或仅该目录使用“系统默认”。类型列仅显示，不提供排序。大小排序会为兼容部分 OneDrive 后端自动附加非索引查询 Prefer；若后端仍返回 `SMTotalFileStreamSize` 501，则仅该目录回退系统默认顺序。
 - 每一列按 **升序 → 降序 → 原有顺序** 三态循环。
 - 双击文件打开蒙层预览；点击预览卡片外部关闭。Desktop 右键、移动端长按文件可弹出打开/下载/重命名/删除/网页打开等常用操作菜单。
 - 文本文件使用 Hello1Drive 内置编辑器打开，并可直接保存回 OneDrive。
-- 图片 / 动态 GIF 在应用内蒙层预览，默认自动适应预览窗体；无滚动条，鼠标滚轮始终以指针所在位置为中心缩放，范围 1%–800%，缩放比例显示在预览区顶部中央；鼠标/触摸可拖拽平移。
+- 图片 / 动态 GIF 在应用内蒙层预览，默认自动适应预览窗体；无滚动条，鼠标滚轮始终以指针所在位置为中心缩放，范围 1%–800%，缩放比例显示在预览区顶部中央；鼠标/触摸可拖拽平移。手机端“更多”和图片静止长按共用居中深色操作面板，系统返回优先关闭操作面板；滑动翻页、双指缩放和放大后的拖动不会误触长按菜单。
 - 预览支持上一项/下一项按钮与键盘方向键/PageUp/PageDown；图片右键提供上一张、下一张、幻灯片、下载、详细信息，幻灯片间隔可在设置中调整。预览下载/解码过程中可直接关闭或在移动端按返回键取消。
 - 已打开文件使用本地持久缓存；再次打开时优先使用目录列表携带的版本标识校验，文件未变化则直接使用缓存，变化后才重新下载。图片/视频缩略图也使用独立的持久磁盘缓存：Desktop 位于程序目录 `cache/thumbnails`，移动端位于应用数据目录；重新启动后只要文件版本未变化，就直接从本地缩略图缓存显示，不再重新下载缩略图。设置中的“清除缓存”会同时清除原文件缓存和缩略图缓存。
-- 其它文件至少进入统一的蒙层信息预览。
-- Desktop 已内置基于 `LibVLCSharp.Avalonia` 的视频/音频播放器，直接播放 Hello1Drive 本地文件缓存，支持播放/暂停、进度拖动、音量/静音和键盘快进快退；Windows 发布包携带 LibVLC 原生运行时。Linux/macOS 若未检测到系统 LibVLC 会自动退回系统播放器。Android/iOS/Browser 暂沿用平台播放器回退。Avalonia 官方 `MediaPlayerControl` 需要 Pro 许可，详见 `docs/MEDIA_PREVIEW.md`。
+- 其它文件至少进入统一的蒙层信息预览，并提供“使用系统应用打开”。设置中“使用内置查看器”默认开启；关闭后，打开任意文件都会先写入持久缓存，再交给操作系统默认应用。系统无法处理该类型时保留预览页并显示“暂不支持”。Desktop LibVLC 视频自然播放结束后再次点击播放会从头重新播放。
+- Desktop 已内置基于 `LibVLCSharp.Avalonia` 的视频/音频播放器，直接播放 Hello1Drive 本地文件缓存；Android 使用原生 `VideoView`。视频控制栏统一把单个播放/暂停状态按钮放在进度条前面，Android 不再使用会自动带前进/后退键的系统 `MediaController`。不支持内置播放的平台/格式可使用系统默认应用打开，详见 `docs/MEDIA_PREVIEW.md`。
 
 ### 界面
 
@@ -71,7 +71,7 @@
 - 文件夹背景支持设置图片轮换时间，单位为分钟。
 - 本地图片 / 文件夹使用 Avalonia StorageProvider Bookmark 持久化授权，不依赖直接文件路径。
 - 可记住当前目录、显示/隐藏并记忆悬浮上传按钮位置、切换文件项背景是否透明，并提供清除缓存按钮；右键“缓存”文件/文件夹时，会同时预热图片/视频缩略图缓存，文件夹会递归处理子目录。
-- 可设置“删除前确认”开关，以及幻灯片切换时间。
+- 可设置“删除前确认”、“使用内置查看器”开关，以及幻灯片切换时间。
 - 可分别限制上传/下载速度（KB/s）。
 - 提供“下载所有 OneDrive 文件”，执行前会提示可能消耗大量流量与磁盘空间；确认后递归创建目录并加入传输列表。
 
@@ -173,28 +173,41 @@ dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -f net10.0-ios26.0 -r io
 
 ## 一键发布
 
-Windows 双击：
+### Windows：只运行根目录 CMD
+
+Windows 用户推荐直接双击项目根目录：
 
 ```bat
 one-click-publish.cmd
 ```
 
-Windows PowerShell：
+它是 Windows 的统一入口，会自动调用 `scripts\one-click-publish.ps1`。**不需要先运行 CMD，再单独运行 PS1。**
 
-```powershell
-./scripts/one-click-publish.ps1
+不带参数运行时会显示发布目标菜单。普通 Windows x64 电脑选择 `Windows x64` 即可。也可以直接从命令行指定：
+
+```bat
+one-click-publish.cmd win-x64
+one-click-publish.cmd windows
+one-click-publish.cmd desktop
+one-click-publish.cmd android
+one-click-publish.cmd browser
+one-click-publish.cmd all
 ```
 
-仅发布某一类：
+其中：
 
-```powershell
-./scripts/one-click-publish.ps1 -Target desktop
-./scripts/one-click-publish.ps1 -Target browser
-./scripts/one-click-publish.ps1 -Target android
-./scripts/one-click-publish.ps1 -Target ios
-```
+- `win-x64`：只发布 Windows x64，日常最推荐，速度最快。
+- `windows`：发布 Windows x64 + Windows ARM64。
+- `desktop`：发布 Windows / Linux / macOS 六个 Desktop RID。
+- `android`：只发布 Android。
+- `browser`：只发布 Browser。
+- `all`：发布全部可在当前机器完成的目标；Windows 上 iOS 会自动跳过。
 
-macOS / Linux：
+`scripts/one-click-publish.ps1` 是 CMD 调用的实际 PowerShell 实现。高级用户也可以直接执行，但普通 Windows 用户不需要直接运行它。该脚本现在保持 ASCII 内容，以兼容 Windows PowerShell 5.1；CMD 会优先使用 PowerShell 7 (`pwsh`)，不存在时再回退到 Windows PowerShell。
+
+### macOS / Linux
+
+使用：
 
 ```bash
 chmod +x ./scripts/one-click-publish.sh
@@ -218,8 +231,6 @@ linux-arm64
 osx-x64
 osx-arm64
 ```
-
-在非 macOS 系统执行 `all` 时，脚本会跳过 iOS；iOS Simulator 由 macOS 本机或 GitHub Actions 构建。
 
 ## GitHub Actions
 
@@ -273,3 +284,33 @@ Authorization Code + PKCE → SPA redirect → token endpoint → Microsoft Grap
 ### Browser / WASM 登录回调
 
 开发环境使用固定 SPA 重定向 URI：`http://localhost:5173/browser-auth`。请在 Microsoft Entra 的“单页应用程序”平台中注册该地址。桌面端仍使用 `http://localhost`。
+
+## 目录导航与视图记忆
+
+- OneDrive 目录加载支持可取消导航：子目录还在加载时按系统返回会立即取消当前请求并恢复父目录，不再等待请求完成。
+- 每个 Microsoft 账户下，每个 OneDrive 目录都会独立记住“详细信息 / 大图标 / 超大图标”视图；根目录同样独立记忆。
+- 尚未访问过的目录使用现有全局 ViewMode 作为首次默认值。
+
+### Android 滚动与预览过渡（2026-08）
+
+- 所有文件从列表进入预览页时增加轻量淡入过渡，图片、文本、视频和通用文件预览共用。
+- 手机缩略图改为 360 项有界解码 LRU：滚回刚看过的项目直接复用 Bitmap，不再主动清空为占位图。
+- 已存在磁盘缓存的缩略图允许在 fling 期间后台解码；未缓存的网络缩略图仍在靠近可视区域/滚动结束后加载。
+- 缩略图解码移出 UI Dispatcher，最终属性赋值才回到 UI 线程。
+- 手机滚动期间不再立即折叠/展开顶部和底部栏，避免把 Auto 行重排插进滚动帧；滚动静止后再提交显隐。
+- 更详细的分析见 `docs/ANDROID_SCROLL_PERFORMANCE.md`。
+
+- 移动/复制目标目录支持逐层浏览 OneDrive 任意层级文件夹；切换当前文件夹时自动清空当前文件夹搜索关键词。
+
+### 启动与加载体验
+
+- 启动增加 Hello1Drive 闪屏；缓存目录仍在后台立即恢复，闪屏不会等待 Graph 同步完成。
+- 所有不确定时长的加载状态统一为“环形进度 + 加载中”，加载层背景透明。
+- 文件夹进入只把首个 children 请求放在关键路径；childCount 缺失时后台补齐，缓存目录无 Loading 闪烁。
+- 手机根目录按系统返回会弹出关闭确认对话框；设置中的“下载所有 OneDrive 文件”也改为居中的确认对话框。
+
+- Windows 桌面端支持“开机启动”：登录 Windows 后使用 `--tray` 参数自动在系统托盘运行。
+
+### Android 后台传输
+
+Android 上传、下载和缓存任务在存在等待/运行中的传输时会启动 `dataSync` 前台服务，切换到其他 App 后继续执行，并通过系统通知显示当前任务数量。任务全部结束后服务会自动停止。Android 15+ 对 `dataSync` 前台服务有系统级运行时长限制，详见 `docs/ANDROID_BACKGROUND_TRANSFERS.md`。

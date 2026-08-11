@@ -16,8 +16,9 @@
                 Click="PlayPauseButton_Click" ToolTip.Tip="播放 / 暂停" />
         <TextBlock x:Name="CurrentTimeText" Grid.Column="1" Text="00:00" VerticalAlignment="Center" Foreground="White" MinWidth="44" />
         <Slider x:Name="PositionSlider" Grid.Column="2" Minimum="0" Maximum="1" Value="0"
-                VerticalAlignment="Center" PointerPressed="PositionSlider_PointerPressed"
-                PointerReleased="PositionSlider_PointerReleased" />
+                IsEnabled="False"
+                VerticalAlignment="Center"
+                ValueChanged="PositionSlider_ValueChanged" />
         <TextBlock x:Name="DurationText" Grid.Column="3" Text="00:00" VerticalAlignment="Center" Foreground="White" MinWidth="44" />
         <Button x:Name="MuteButton" Grid.Column="4" Width="34" Height="30" Padding="0"
                 Content="🔊" Foreground="#53D7E8" Background="#2053D7E8"

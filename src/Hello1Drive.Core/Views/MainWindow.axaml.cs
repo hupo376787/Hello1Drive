@@ -73,6 +73,22 @@ public partial class MainWindow : Window
         Close();
     }
 
+    public void HideToTray()
+    {
+        ShowInTaskbar = false;
+        Hide();
+    }
+
+    public void ShowFromTray()
+    {
+        ShowInTaskbar = true;
+        if (!IsVisible)
+            Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+    }
+
 
     private async void BreadcrumbButton_Click(object? sender, RoutedEventArgs e)
     {

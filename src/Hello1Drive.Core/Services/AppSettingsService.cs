@@ -79,6 +79,36 @@ public sealed class AppSettingsService
             : 50;
 
         Current.LastFolderBreadcrumbs ??= [];
+        Current.FolderSortRules ??= [];
+        Current.FolderSortRules = Current.FolderSortRules
+            .Where(x => !string.IsNullOrWhiteSpace(x.FolderKey) &&
+                        x.Column != FileSortColumn.LegacyType)
+            .GroupBy(x => x.FolderKey, StringComparer.Ordinal)
+            .Select(g => g.Last())
+            .ToList();
+        Current.FolderViewModes ??= [];
+        Current.FolderViewModes = Current.FolderViewModes
+            .Where(x => !string.IsNullOrWhiteSpace(x.FolderKey) &&
+                        Enum.IsDefined(typeof(FileViewMode), x.ViewMode))
+            .GroupBy(x => x.FolderKey, StringComparer.Ordinal)
+            .Select(g => g.Last())
+            .ToList();
+
+        if (!Enum.IsDefined(typeof(FileSortColumn), Current.DefaultSortColumn) ||
+            Current.DefaultSortColumn == FileSortColumn.LegacyType ||
+            !Enum.IsDefined(typeof(SortCycleState), Current.DefaultSortState))
+        {
+            Current.DefaultSortColumn = FileSortColumn.None;
+            Current.DefaultSortState = SortCycleState.Original;
+        }
+
+        if (Current.DefaultSortColumn == FileSortColumn.None ||
+            Current.DefaultSortState == SortCycleState.Original)
+        {
+            Current.DefaultSortColumn = FileSortColumn.None;
+            Current.DefaultSortState = SortCycleState.Original;
+        }
+
         Current.SlideshowIntervalSeconds = NormalizePositive(Current.SlideshowIntervalSeconds, 5, 1, 3600);
         Current.DownloadSpeedLimitKBps = NormalizePositive(Current.DownloadSpeedLimitKBps, 1024, 1, 1024 * 1024);
         Current.UploadSpeedLimitKBps = NormalizePositive(Current.UploadSpeedLimitKBps, 1024, 1, 1024 * 1024);

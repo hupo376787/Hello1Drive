@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("all", "desktop", "browser", "android", "ios")]
+    [ValidateSet("all", "desktop", "windows", "win-x64", "browser", "android", "ios")]
     [string]$Target = "all",
     [string]$Configuration = "Release",
     [string]$Version = "1.0.0"
@@ -25,10 +25,13 @@ function New-Zip([string]$Source, [string]$Zip) {
 }
 
 function Publish-Desktop {
-    $project = Join-Path $Root "src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj"
-    $rids = @("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
+    param(
+        [string[]]$Rids = @("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
+    )
 
-    foreach ($rid in $rids) {
+    $project = Join-Path $Root "src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj"
+
+    foreach ($rid in $Rids) {
         Write-Host "`n=== Desktop: $rid ===" -ForegroundColor Yellow
         $targetDir = Join-Path $Publish "desktop/$rid"
         $rawDir = if ($rid.StartsWith("osx-")) { Join-Path $targetDir "raw" } else { $targetDir }
@@ -68,7 +71,7 @@ function Publish-Desktop {
             Set-Content -Path (Join-Path $app "Contents/Info.plist") -Value $plist -Encoding UTF8
             Remove-Item $rawDir -Recurse -Force
             if (-not $IsMacOS) {
-                Write-Warning "从 Windows 复制 .app 到 macOS 后执行：chmod +x Hello1Drive.app/Contents/MacOS/Hello1Drive；正式发布建议在 macOS/CI runner 打包。"
+                Write-Warning "After copying the .app from Windows to macOS, run: chmod +x Hello1Drive.app/Contents/MacOS/Hello1Drive. For release builds, package on macOS/CI."
             }
         }
 
@@ -110,7 +113,7 @@ function Publish-Android {
 function Publish-iOS {
     Write-Host "`n=== iOS simulator ===" -ForegroundColor Yellow
     if (-not $IsMacOS) {
-        Write-Warning "iOS 需要 macOS + Xcode。当前系统不是 macOS，已跳过 iOS。"
+        Write-Warning "iOS publishing requires macOS + Xcode. iOS was skipped on this platform."
         return
     }
     $project = Join-Path $Root "src/Hello1Drive.iOS/Hello1Drive.iOS.csproj"
@@ -133,6 +136,8 @@ function Publish-iOS {
 }
 
 switch ($Target) {
+    "win-x64" { Publish-Desktop -Rids @("win-x64") }
+    "windows" { Publish-Desktop -Rids @("win-x64", "win-arm64") }
     "desktop" { Publish-Desktop }
     "browser" { Publish-Browser }
     "android" { Publish-Android }

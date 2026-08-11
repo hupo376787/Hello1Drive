@@ -14,6 +14,7 @@ namespace Hello1Drive.Services;
 public sealed class ThumbnailCacheService
 {
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _itemLocks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ThumbnailCacheIndexEntry> _memoryIndex = new(StringComparer.Ordinal);
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -38,6 +39,22 @@ public sealed class ThumbnailCacheService
 
         try
         {
+            var versionedPath = GetVersionedContentPath(item.Id, item.VersionToken);
+            if (File.Exists(versionedPath))
+            {
+                path = versionedPath;
+                _memoryIndex[item.Id] = new ThumbnailCacheIndexEntry(item.VersionToken, versionedPath);
+                return true;
+            }
+
+            if (_memoryIndex.TryGetValue(item.Id, out var indexed) &&
+                string.Equals(indexed.VersionToken, item.VersionToken, StringComparison.Ordinal) &&
+                File.Exists(indexed.ContentPath))
+            {
+                path = indexed.ContentPath;
+                return true;
+            }
+
             var metadataPath = GetMetadataPath(item.Id);
             if (!File.Exists(metadataPath))
                 return false;
@@ -53,6 +70,24 @@ public sealed class ThumbnailCacheService
             }
 
             path = metadata.ContentPath;
+
+            // Migrate the legacy fixed filename lazily. New-version cache hits can then be
+            // validated with one File.Exists() and no JSON read/parse during a scroll.
+            try
+            {
+                var migratedPath = GetVersionedContentPath(item.Id, item.VersionToken);
+                if (!string.Equals(path, migratedPath, StringComparison.Ordinal) && !File.Exists(migratedPath))
+                {
+                    File.Copy(path, migratedPath, overwrite: false);
+                    path = migratedPath;
+                }
+            }
+            catch
+            {
+                // The legacy cache remains valid even if migration cannot be completed.
+            }
+
+            _memoryIndex[item.Id] = new ThumbnailCacheIndexEntry(metadata.VersionToken, path);
             if (DateTimeOffset.UtcNow - metadata.LastAccessUtc > TimeSpan.FromMinutes(10))
                 TouchMetadata(metadataPath, metadata);
             return true;
@@ -94,9 +129,9 @@ public sealed class ThumbnailCacheService
             TryCreateDirectory(itemDirectory);
             CleanItemDirectory(itemDirectory);
 
-            // Keep the original encoded thumbnail bytes. Avalonia Bitmap detects the
-            // image format from the stream, so an artificial extension is unnecessary.
-            var finalPath = Path.Combine(itemDirectory, "thumbnail.bin");
+            // Version the content filename so a future cache lookup can validate it with a
+            // single File.Exists() instead of opening/parsing metadata.json for every item.
+            var finalPath = GetVersionedContentPath(item.Id, item.VersionToken);
             var tempPath = Path.Combine(itemDirectory, "thumbnail.tmp");
             await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, finalPath, overwrite: true);
@@ -112,6 +147,7 @@ public sealed class ThumbnailCacheService
                 LastAccessUtc = DateTimeOffset.UtcNow
             }, cancellationToken).ConfigureAwait(false);
 
+            _memoryIndex[item.Id] = new ThumbnailCacheIndexEntry(item.VersionToken, finalPath);
             return finalPath;
         }
         finally
@@ -125,6 +161,7 @@ public sealed class ThumbnailCacheService
         if (string.IsNullOrWhiteSpace(itemId))
             return;
 
+        _memoryIndex.TryRemove(itemId, out _);
         try
         {
             var directory = GetItemDirectory(itemId);
@@ -139,6 +176,7 @@ public sealed class ThumbnailCacheService
 
     public void Clear()
     {
+        _memoryIndex.Clear();
         try
         {
             if (Directory.Exists(CacheRoot))
@@ -193,6 +231,8 @@ public sealed class ThumbnailCacheService
 
     private string GetItemDirectory(string itemId) => Path.Combine(CacheRoot, Hash(itemId));
     private string GetMetadataPath(string itemId) => Path.Combine(GetItemDirectory(itemId), "metadata.json");
+    private string GetVersionedContentPath(string itemId, string versionToken) =>
+        Path.Combine(GetItemDirectory(itemId), $"thumbnail-{Hash(versionToken)[..20]}.bin");
 
     private static string Hash(string value)
     {
@@ -247,6 +287,8 @@ public sealed class ThumbnailCacheService
             // Best effort; the new thumbnail write may still succeed.
         }
     }
+
+    private sealed record ThumbnailCacheIndexEntry(string VersionToken, string ContentPath);
 
     private sealed class ThumbnailCacheMetadata
     {

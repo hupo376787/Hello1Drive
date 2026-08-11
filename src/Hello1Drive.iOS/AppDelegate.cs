@@ -11,7 +11,7 @@ public class AppDelegate : AvaloniaAppDelegate<App>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
-        AppServices.Configure(new IosAuthenticationService());
+        AppServices.Configure(new IosAuthenticationService(), platformShareService: new IosPlatformShareService());
         return base.CustomizeAppBuilder(builder).LogToTrace();
     }
 }

@@ -7,7 +7,8 @@ public enum FolderNavigationReason
     Back,
     Breadcrumb,
     Root,
-    Refresh
+    Refresh,
+    Sort
 }
 
 public sealed class FolderNavigationEventArgs : EventArgs

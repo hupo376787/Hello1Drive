@@ -16,7 +16,7 @@
           <SolidColorBrush x:Key="HelloIconNavigationBrush" Color="#3B82F6" />
           <SolidColorBrush x:Key="HelloIconHomeBrush" Color="#2563EB" />
           <SolidColorBrush x:Key="HelloIconRefreshBrush" Color="#0F9D8A" />
-          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#E79B18" />
+          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#F4B32C" />
           <SolidColorBrush x:Key="HelloIconDownloadBrush" Color="#0EA5C8" />
           <SolidColorBrush x:Key="HelloIconViewBrush" Color="#7C3AED" />
           <SolidColorBrush x:Key="HelloIconSortBrush" Color="#F97316" />
@@ -42,7 +42,7 @@
           <SolidColorBrush x:Key="HelloIconNavigationBrush" Color="#78A9FF" />
           <SolidColorBrush x:Key="HelloIconHomeBrush" Color="#6EA8FF" />
           <SolidColorBrush x:Key="HelloIconRefreshBrush" Color="#43D3B2" />
-          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#FFC857" />
+          <SolidColorBrush x:Key="HelloIconFolderBrush" Color="#FFD86A" />
           <SolidColorBrush x:Key="HelloIconDownloadBrush" Color="#4DD6E7" />
           <SolidColorBrush x:Key="HelloIconViewBrush" Color="#B69CFF" />
           <SolidColorBrush x:Key="HelloIconSortBrush" Color="#FFAA5C" />
@@ -207,9 +207,9 @@
     </Style>
 
     <Style Selector="Button.fab">
-      <Setter Property="Width" Value="36" />
-      <Setter Property="Height" Value="36" />
-      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Width" Value="48" />
+      <Setter Property="Height" Value="48" />
+      <Setter Property="CornerRadius" Value="24" />
       <Setter Property="Background" Value="{DynamicResource HelloAccentBrush}" />
       <Setter Property="Foreground" Value="White" />
       <Setter Property="BorderThickness" Value="0" />
@@ -257,7 +257,7 @@
       <Setter Property="Padding" Value="9,3" />
       <Setter Property="CornerRadius" Value="7" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Background" Value="#18000000" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
@@ -272,6 +272,13 @@
       <Setter Property="StrokeLineCap" Value="Round" />
       <Setter Property="StrokeJoin" Value="Round" />
       <Setter Property="Fill" Value="Transparent" />
+    </Style>
+    <!-- Folder-plus and details-list are centered by the button ContentPresenter itself.
+         Keep this legacy class neutral: the previous -0.75px optical offset made both glyphs sit too high. -->
+    <Style Selector="Path.toolbarIcon.opticalUp">
+      <Setter Property="RenderTransform">
+        <TranslateTransform Y="0" />
+      </Setter>
     </Style>
 
     <Style Selector="Path.menuIcon">
@@ -339,7 +346,7 @@
       <Setter Property="MinHeight" Value="30" />
       <Setter Property="CornerRadius" Value="7" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Background" Value="#18000000" />
+      <Setter Property="Background" Value="Transparent" />
     </Style>
 
     <Style Selector="ListBox.fileList">
@@ -389,6 +396,7 @@
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="ListBox.transferList ListBoxItem">
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Margin" Value="0" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />

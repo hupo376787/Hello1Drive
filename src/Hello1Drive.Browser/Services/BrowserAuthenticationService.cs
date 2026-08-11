@@ -8,17 +8,28 @@ namespace Hello1Drive.Browser.Services;
 [SupportedOSPlatform("browser")]
 public sealed class BrowserAuthenticationService : IAuthenticationService
 {
+    private readonly SemaphoreSlim _tokenGate = new(1, 1);
+
     private static string ScopeText => string.Join(' ', AppConfig.GraphScopes);
 
     public async Task<string?> GetAccessTokenAsync(bool interactive, CancellationToken cancellationToken = default)
     {
-        var token = await BrowserAuthInterop.GetAccessTokenAsync(AppConfig.ClientId, ScopeText);
-        if (!string.IsNullOrWhiteSpace(token) || !interactive)
-            return string.IsNullOrWhiteSpace(token) ? null : token;
+        await _tokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            var token = await BrowserAuthInterop.GetAccessTokenAsync(AppConfig.ClientId, ScopeText);
+            if (!string.IsNullOrWhiteSpace(token) || !interactive)
+                return string.IsNullOrWhiteSpace(token) ? null : token;
 
-        // This normally redirects the page. On the callback page InitializeAsync() processes the code.
-        token = await BrowserAuthInterop.LoginAsync(AppConfig.ClientId, ScopeText);
-        return string.IsNullOrWhiteSpace(token) ? null : token;
+            // Only an explicit interactive request may start a redirect. The callback is
+            // consumed by getAccessToken() exactly once after the WASM app restarts.
+            token = await BrowserAuthInterop.LoginAsync(AppConfig.ClientId, ScopeText);
+            return string.IsNullOrWhiteSpace(token) ? null : token;
+        }
+        finally
+        {
+            _tokenGate.Release();
+        }
     }
 
     public bool TryHandleProtocolActivation(Uri uri) => false;

@@ -5,10 +5,15 @@ public static class AppServices
     private static IAuthenticationService? _authentication;
     private static IOneDriveService? _oneDrive;
     private static IEmbeddedMediaPlayerFactory? _mediaPlayerFactory;
+    private static IPlatformShareService? _platformShareService;
+    private static IPlatformAppLifecycleService? _platformAppLifecycleService;
+    private static IStartupRegistrationService? _startupRegistrationService;
+    private static ITransferBackgroundService? _transferBackgroundService;
     private static readonly AppSettingsService _settings = new();
     private static readonly FileCacheService _fileCache = new();
     private static readonly ThumbnailCacheService _thumbnailCache = new();
     private static readonly TransferPersistenceService _transferPersistence = new();
+    private static readonly StartupSnapshotService _startupSnapshot = new();
 
     public static IAuthenticationService Authentication =>
         _authentication ?? throw new InvalidOperationException("Authentication service has not been configured by the platform head.");
@@ -20,12 +25,27 @@ public static class AppServices
     public static FileCacheService FileCache => _fileCache;
     public static ThumbnailCacheService ThumbnailCache => _thumbnailCache;
     public static TransferPersistenceService TransferPersistence => _transferPersistence;
+    public static StartupSnapshotService StartupSnapshot => _startupSnapshot;
     public static IEmbeddedMediaPlayerFactory? MediaPlayerFactory => _mediaPlayerFactory;
+    public static IPlatformShareService? PlatformShareService => _platformShareService;
+    public static IPlatformAppLifecycleService? PlatformAppLifecycleService => _platformAppLifecycleService;
+    public static IStartupRegistrationService? StartupRegistrationService => _startupRegistrationService;
+    public static ITransferBackgroundService? TransferBackgroundService => _transferBackgroundService;
 
-    public static void Configure(IAuthenticationService authentication, IEmbeddedMediaPlayerFactory? mediaPlayerFactory = null)
+    public static void Configure(
+        IAuthenticationService authentication,
+        IEmbeddedMediaPlayerFactory? mediaPlayerFactory = null,
+        IPlatformShareService? platformShareService = null,
+        IPlatformAppLifecycleService? platformAppLifecycleService = null,
+        IStartupRegistrationService? startupRegistrationService = null,
+        ITransferBackgroundService? transferBackgroundService = null)
     {
         _authentication = authentication;
         _oneDrive = new OneDriveService(authentication);
         _mediaPlayerFactory = mediaPlayerFactory;
+        _platformShareService = platformShareService;
+        _platformAppLifecycleService = platformAppLifecycleService;
+        _startupRegistrationService = startupRegistrationService;
+        _transferBackgroundService = transferBackgroundService;
     }
 }
