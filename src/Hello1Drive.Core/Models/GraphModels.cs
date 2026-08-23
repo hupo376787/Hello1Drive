@@ -13,6 +13,26 @@ public sealed class GraphCollectionResponse<T>
     public string? NextLink { get; set; }
 }
 
+public sealed class GraphDeltaCollectionResponse<T>
+{
+    [JsonPropertyName("value")]
+    public List<T> Value { get; set; } = [];
+
+    [JsonPropertyName("@odata.nextLink")]
+    public string? NextLink { get; set; }
+
+    [JsonPropertyName("@odata.deltaLink")]
+    public string? DeltaLink { get; set; }
+}
+
+public sealed class DriveDeltaPage
+{
+    public IReadOnlyList<DriveItemModel> Items { get; init; } = Array.Empty<DriveItemModel>();
+    public string? NextLink { get; init; }
+    public string? DeltaLink { get; init; }
+    public bool ResyncRequired { get; init; }
+    public string? ResyncLink { get; init; }
+}
 
 public sealed class DriveItemPage
 {
@@ -168,18 +188,35 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     [JsonPropertyName("specialFolder")]
     public SpecialFolderFacet? SpecialFolder { get; set; }
 
+    [JsonPropertyName("parentReference")]
+    public ParentReferenceFacet? ParentReference { get; set; }
+
+    [JsonPropertyName("deleted")]
+    public DeletedFacet? Deleted { get; set; }
+
+    [JsonPropertyName("root")]
+    public RootFacet? Root { get; set; }
+
     [JsonPropertyName("thumbnails")]
     public List<ThumbnailSetModel> Thumbnails { get; set; } = [];
 
     private Bitmap? _thumbnailImage;
     private Bitmap? _galleryImage;
     private bool _isMobileSelected;
+    private bool _isMobileSelectionMode;
 
     [JsonIgnore]
     public bool IsMobileSelected
     {
         get => _isMobileSelected;
         set => SetProperty(ref _isMobileSelected, value);
+    }
+
+    [JsonIgnore]
+    public bool IsMobileSelectionMode
+    {
+        get => _isMobileSelectionMode;
+        set => SetProperty(ref _isMobileSelectionMode, value);
     }
 
     [JsonIgnore]
@@ -234,6 +271,8 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
 
     public bool IsFolder => Folder is not null || RemoteItem?.Folder is not null || IsPersonalVault;
     public bool IsFile => !IsFolder;
+    public bool IsDeleted => Deleted is not null;
+    public bool IsDriveRoot => Root is not null;
     public int ChildCount => Folder?.ChildCount ?? RemoteItem?.Folder?.ChildCount ?? 0;
     public string MimeType => File?.MimeType ?? RemoteItem?.File?.MimeType ?? string.Empty;
     public string Extension => Path.GetExtension(Name);
@@ -390,6 +429,26 @@ public sealed class ThumbnailModel
 
     [JsonPropertyName("url")]
     public string? Url { get; set; }
+}
+
+
+public sealed class ParentReferenceFacet
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("driveId")]
+    public string? DriveId { get; set; }
+}
+
+public sealed class DeletedFacet
+{
+    [JsonPropertyName("state")]
+    public string? State { get; set; }
+}
+
+public sealed class RootFacet
+{
 }
 
 public sealed class FolderFacet

@@ -5,11 +5,13 @@ This build keeps the desktop interaction model unchanged and gives Android/iOS a
 ## File interaction
 
 - Tap a file or folder: open it.
-- Long-press: start selection mode and select the pressed item.
-- While selection mode is active, tapping another item toggles that item without relying on `ListBox` native touch selection.
+- Stationary long-press: start selection mode and select only the pressed item. Any real scroll gesture or more than 6 logical pixels of touch movement cancels the pending hold.
+- While selection mode is active, tapping another item toggles that item without relying on `ListBox` native touch selection. Phone drag-range selection is intentionally disabled so a slow scroll cannot expand the selection accidentally.
 - Mobile file tiles suppress desktop context-menu gestures.
 
 ## Scrolling
+
+- Mobile scroll completion follows Avalonia `ScrollGestureEnded`, which includes the inertia tail. Toolbar/status layout changes are deferred until that terminal gesture event instead of being triggered by a short `ScrollChanged` timeout.
 
 - Android/iOS use `ItemsRepeater` for the details, large-icon and extra-large-icon views.
 - Large icon views use `UniformGridLayout`, so only visible tiles are materialized instead of realizing the whole folder with `WrapPanel`.
@@ -53,3 +55,9 @@ The mobile/desktop bottom status bar now shows only the current displayed item c
 - When Settings is opened from the mobile account page, Back returns to the account page before returning to the file list.
 - The mobile preview action panel uses `下载` and `缓存` as separate actions. The same panel is opened from the More button and from a stationary image long-press.
 - The mobile transfer page mirrors the same configurable app background rather than using a standalone opaque page color.
+
+## Mobile selection mode
+
+- A normal tap opens an item; a stationary long-press enters multi-selection.
+- While selection mode is active, every visible file item shows a circular checkbox in its upper-right corner. Selected items use a filled blue circle with a white check mark; unselected items keep an outlined circle.
+- The file-list background context menu is desktop-only. Android/iOS long-pressing empty list space does not open a context menu.

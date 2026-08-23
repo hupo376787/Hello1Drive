@@ -116,5 +116,5 @@ public partial class App : Application
     }
 
     private static MainViewModel CreateMainViewModel() =>
-        new(AppServices.OneDrive, AppServices.Authentication, AppServices.Settings, AppServices.FileCache, AppServices.ThumbnailCache, AppServices.TransferPersistence, AppServices.StartupSnapshot, AppServices.StartupRegistrationService, AppServices.TransferBackgroundService);
+        new(AppServices.OneDrive, AppServices.Authentication, AppServices.Settings, AppServices.FileCache, AppServices.ThumbnailCache, AppServices.TransferPersistence, AppServices.StartupSnapshot, AppServices.LocalDriveIndex, AppServices.StartupRegistrationService, AppServices.TransferBackgroundService);
 }

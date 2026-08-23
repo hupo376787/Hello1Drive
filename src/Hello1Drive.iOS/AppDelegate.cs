@@ -11,7 +11,10 @@ public class AppDelegate : AvaloniaAppDelegate<App>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
-        AppServices.Configure(new IosAuthenticationService(), platformShareService: new IosPlatformShareService());
+        AppServices.Configure(
+            new IosAuthenticationService(),
+            platformShareService: new IosPlatformShareService(),
+            nativeMobileFileListFactory: new IosNativeMobileFileListFactory());
         return base.CustomizeAppBuilder(builder).LogToTrace();
     }
 }

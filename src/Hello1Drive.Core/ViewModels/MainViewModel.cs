@@ -23,10 +23,24 @@ public partial class MainViewModel : ViewModelBase
     private const long TextPreviewLimit = 8L * 1024 * 1024;
     private static readonly TimeSpan FolderCacheValidationInterval = TimeSpan.FromSeconds(30);
     private static bool IsMobilePlatform => OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
-    private static int CurrentFolderPageSize => IsMobilePlatform ? 160 : 120;
+    private static bool UsesNativeMobileFileList => OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
+    // Both desktop and mobile use Graph's full 200-item page. The visual surfaces are virtualized
+    // and their logical slot count is established independently from page arrival, so a larger page
+    // reduces Graph/request churn without forcing 200 controls to be realized at once.
+    private const int CurrentFolderPageSize = 200;
     private volatile bool _mobileListScrolling;
+    private volatile bool _desktopListScrolling;
+    private volatile HashSet<int> _desktopThumbnailVisibleSlotIndices = new();
+    private volatile HashSet<string> _desktopThumbnailWantedIds = new(StringComparer.Ordinal);
     private int _mobileThumbnailWindowFrom = -1;
     private int _mobileThumbnailWindowToExclusive = -1;
+    private int _mobileThumbnailVisibleFrom = -1;
+    private int _mobileThumbnailVisibleToExclusive = -1;
+    private bool _mobileThumbnailWindowWasScrolling;
+    // Immutable-by-convention snapshots replaced as a whole on the UI thread. Background thumbnail
+    // workers only read them, so stale off-screen work can cheaply self-cancel after a long fling.
+    private volatile HashSet<string> _mobileThumbnailWantedIds = new(StringComparer.Ordinal);
+    private volatile HashSet<string> _mobileThumbnailVisibleIds = new(StringComparer.Ordinal);
 
     private readonly IOneDriveService _oneDrive;
     private readonly IAuthenticationService _authentication;
@@ -35,6 +49,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ThumbnailCacheService _thumbnailCache;
     private readonly TransferPersistenceService _transferPersistence;
     private readonly StartupSnapshotService _startupSnapshot;
+    private readonly LocalDriveIndexService _localDriveIndex;
     private readonly IStartupRegistrationService? _startupRegistrationService;
     private readonly ITransferBackgroundService? _transferBackgroundService;
     private readonly List<DriveItemModel> _allItems = [];
@@ -51,24 +66,33 @@ public partial class MainViewModel : ViewModelBase
     private long _folderNavigationVersion;
     private long _folderNavigationBusyVersion;
     private CancellationTokenSource? _folderNavigationCts;
-    private CancellationTokenSource? _loadMoreCts;
+    private CancellationTokenSource? _folderMetadataSyncCts;
+    private CancellationTokenSource? _driveIndexSyncCts;
     private readonly List<DriveItemModel> _selectedItems = [];
     private Func<string?, Task>? _promptAction;
     private bool _promptUseBusy = true;
     private bool _initialized;
     private CancellationTokenSource? _thumbnailLoadCts;
-    private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.Ordinal);
+    private long _thumbnailLoadGeneration;
+    private readonly ConcurrentDictionary<string, long> _thumbnailLoadsInFlight = new(StringComparer.Ordinal);
+    // These gates are shared by every thumbnail batch. A per-batch SemaphoreSlim lets several
+    // 90ms viewport batches overlap and silently defeats the intended concurrency limit.
+    private readonly SemaphoreSlim _mobileThumbnailWorkGate = new(2, 2);
+    private readonly SemaphoreSlim _mobileFlingThumbnailGate = new(1, 1);
+    private readonly SemaphoreSlim _desktopThumbnailWorkGate = new(6, 6);
     private int _previewImagePixelWidth;
     private int _previewImagePixelHeight;
     private AnimatedGifData? _gifAnimation;
     private int _gifFrameIndex;
     private readonly DispatcherTimer _gifTimer = new();
     private readonly DispatcherTimer _slideshowTimer = new();
+    private readonly DispatcherTimer _driveIndexRefreshTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private CancellationTokenSource? _previewLoadCts;
     private CancellationTokenSource? _previewPrefetchCts;
     private string? _nextChildrenLink;
     private CancellationTokenSource? _transferPersistenceCts;
     private CancellationTokenSource? _cacheStatusRefreshCts;
+    private CancellationTokenSource? _startupSnapshotSaveCts;
     private readonly SemaphoreSlim _cacheTransferGate = new(2, 2);
     private FolderNavigationReason _nextNavigationReason = FolderNavigationReason.Initial;
     private bool _syncingBackgroundColor;
@@ -79,6 +103,12 @@ public partial class MainViewModel : ViewModelBase
     private string _startupSnapshotAccountId = string.Empty;
 
     public AvaloniaList<DriveItemModel> Items { get; } = [];
+    // Shared fixed-slot collection used by every file surface. The historic MobileItems name is
+    // retained for source compatibility; desktop repeaters bind through VirtualItems.
+    public AvaloniaList<VirtualDriveItemSlot> MobileItems { get; } = [];
+    public AvaloniaList<VirtualDriveItemSlot> VirtualItems => MobileItems;
+    public bool UseNativeAndroidFileList => OperatingSystem.IsAndroid();
+    public bool UseAvaloniaMobileFileList => IsMobilePlatform && !UsesNativeMobileFileList;
     public ObservableCollection<BreadcrumbItem> Breadcrumbs { get; } = [];
     public ObservableCollection<TransferItemModel> Transfers { get; } = [];
 
@@ -144,7 +174,6 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool limitUploadSpeed;
     [ObservableProperty] private double uploadSpeedLimitKBps = 1024;
     [ObservableProperty] private bool hasMoreItems;
-    [ObservableProperty] private bool isLoadingMore;
 
     [ObservableProperty] private bool isPreviewVisible;
     [ObservableProperty] private PreviewKind previewKind;
@@ -223,7 +252,7 @@ public partial class MainViewModel : ViewModelBase
     public int CacheTransferCount => Transfers.Count(x => x.Direction == TransferDirection.Cache);
     public string TransferSummaryText => $"上传 {UploadTransferCount} · 下载 {DownloadTransferCount} · 缓存 {CacheTransferCount}" +
                                          (ActiveTransferCount > 0 ? $" · {ActiveTransferCount} 个进行中" : string.Empty);
-    public string ItemCountText => $"{(_currentFolderTotalItemCount ?? Items.Count)} 项";
+    public string ItemCountText => $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 项";
 
     private void SetCurrentFolderTotalItemCount(int? total)
     {
@@ -235,11 +264,60 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ItemCountText));
     }
 
+    public bool IsMobileListScrolling => _mobileListScrolling;
+    public bool IsDesktopListScrolling => _desktopListScrolling;
+
     public void SetMobileListScrolling(bool value)
     {
-        if (IsMobilePlatform)
-            _mobileListScrolling = value;
+        if (!IsMobilePlatform || _mobileListScrolling == value)
+            return;
+
+        _mobileListScrolling = value;
+        if (value)
+        {
+            // The moment a new fling begins, abort thumbnail work for the old resting viewport.
+            // Otherwise two slow cloud thumbnail downloads can occupy the shared mobile gate while
+            // the user has already jumped hundreds of rows away. Idle recovery will immediately
+            // restart only the thumbnails that belong to the final resting viewport.
+            CancelThumbnailLoading();
+        }
     }
+
+    public void SetDesktopListScrolling(bool value)
+    {
+        if (IsMobilePlatform || _desktopListScrolling == value)
+            return;
+
+        _desktopListScrolling = value;
+        if (value)
+        {
+            // Desktop used to enqueue thumbnails for every loaded item/page. Dragging the scroll
+            // thumb hundreds of rows then had to wait behind that obsolete queue. A new scrollbar
+            // gesture cancels those workers; the final realized viewport will restart only what is
+            // actually visible.
+            CancelThumbnailLoading();
+        }
+    }
+
+    public int GetMobileItemIndex(DriveItemModel item)
+    {
+        if (!IsMobilePlatform || item is null)
+            return -1;
+
+        for (var i = 0; i < MobileItems.Count; i++)
+        {
+            var candidate = MobileItems[i].Item;
+            if (candidate is not null &&
+                (ReferenceEquals(candidate, item) || string.Equals(candidate.Id, item.Id, StringComparison.Ordinal)))
+                return i;
+        }
+        return -1;
+    }
+
+    public DriveItemModel? GetMobileItemAtIndex(int index) =>
+        index >= 0 && index < MobileItems.Count ? MobileItems[index].Item : null;
+
+    public bool MobileSelectionModeActive { get; set; }
     public string CloseConfirmationMessage => ActiveTransferCount > 0
         ? $"当前还有 {ActiveTransferCount} 个传输任务正在等待或进行中。关闭后任务列表会保存，可恢复的任务会在下次打开 Hello1Drive 时自动继续。确定关闭吗？"
         : "确定关闭软件吗？";
@@ -247,6 +325,16 @@ public partial class MainViewModel : ViewModelBase
     public string? CurrentFolderId => Breadcrumbs.LastOrDefault()?.ItemId;
     public string CurrentAccountId { get; private set; } = string.Empty;
     public IReadOnlyList<DriveItemModel> SelectedItemsSnapshot => _selectedItems.ToArray();
+    public IReadOnlyList<DriveItemModel> LoadedItems => _allItems;
+
+    public DriveItemModel[] GetVisibleLoadedItemsSnapshot()
+    {
+        var keyword = SearchText.Trim();
+        return string.IsNullOrWhiteSpace(keyword)
+            ? _allItems.ToArray()
+            : _allItems.Where(item => item.Name.Contains(keyword, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+    }
+
     public AppSettings Settings => _settingsService.Current;
 
     private WindowBackgroundMode CurrentBackgroundMode => SelectedBackgroundModeText switch
@@ -267,6 +355,7 @@ public partial class MainViewModel : ViewModelBase
         ThumbnailCacheService thumbnailCache,
         TransferPersistenceService transferPersistence,
         StartupSnapshotService startupSnapshot,
+        LocalDriveIndexService localDriveIndex,
         IStartupRegistrationService? startupRegistrationService = null,
         ITransferBackgroundService? transferBackgroundService = null)
     {
@@ -277,11 +366,14 @@ public partial class MainViewModel : ViewModelBase
         _thumbnailCache = thumbnailCache;
         _transferPersistence = transferPersistence;
         _startupSnapshot = startupSnapshot;
+        _localDriveIndex = localDriveIndex;
         _startupRegistrationService = startupRegistrationService;
         _transferBackgroundService = transferBackgroundService;
         _gifTimer.Tick += GifTimer_Tick;
         _slideshowTimer.Tick += SlideshowTimer_Tick;
+        _driveIndexRefreshTimer.Tick += DriveIndexRefreshTimer_Tick;
         Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ItemCountText));
+        MobileItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ItemCountText));
         Breadcrumbs.Add(new BreadcrumbItem("OneDrive", null));
         LoadSettingsIntoProperties();
         ApplyTransferRateLimits();
@@ -545,6 +637,24 @@ public partial class MainViewModel : ViewModelBase
             SearchText = string.Empty;
     }
 
+    private async Task<string?> GetSilentAccessTokenWithRetryAsync()
+    {
+        var attempt = 0;
+        while (true)
+        {
+            try
+            {
+                return await _authentication.GetAccessTokenAsync(interactive: false).ConfigureAwait(true);
+            }
+            catch (Exception ex) when (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+                var delay = TimeSpan.FromSeconds(Math.Min(8.0, 0.5 * Math.Pow(2, Math.Min(attempt++, 4))));
+                await Task.Delay(delay).ConfigureAwait(true);
+            }
+        }
+    }
+
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -560,7 +670,7 @@ public partial class MainViewModel : ViewModelBase
             StatusText = "已显示本地缓存 · 正在同步 OneDrive";
             try
             {
-                var token = await _authentication.GetAccessTokenAsync(interactive: false);
+                var token = await GetSilentAccessTokenWithRetryAsync();
                 if (string.IsNullOrWhiteSpace(token))
                 {
                     ClearRestoredStartupState();
@@ -572,10 +682,18 @@ public partial class MainViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                // A valid local snapshot is still useful when startup happens offline. Keep it
-                // visible instead of replacing the screen with a blocking failure page.
-                ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
-                StatusText = "已显示本地缓存 · 暂时无法同步";
+                // A valid local snapshot remains the UI while the read-side transport retries.
+                // Never surface raw TLS/DNS/socket wording to end users.
+                if (IsTransientNetworkFailure(ex))
+                {
+                    ErrorMessage = null;
+                    StatusText = "已显示本地缓存";
+                }
+                else
+                {
+                    ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
+                    StatusText = "已显示本地缓存 · 暂时无法同步";
+                }
             }
 
             return;
@@ -583,7 +701,7 @@ public partial class MainViewModel : ViewModelBase
 
         await RunBusyAsync(async () =>
         {
-            var token = await _authentication.GetAccessTokenAsync(interactive: false);
+            var token = await GetSilentAccessTokenWithRetryAsync();
             if (string.IsNullOrWhiteSpace(token))
             {
                 IsAuthenticated = false;
@@ -634,7 +752,12 @@ public partial class MainViewModel : ViewModelBase
         QuotaTotalBytes = 0;
         CancelThumbnailLoading();
         ResetMobileThumbnailWindow();
+        ResetDesktopThumbnailViewport();
+        Interlocked.Exchange(ref _folderMetadataSyncCts, null)?.Cancel();
+        Interlocked.Exchange(ref _driveIndexSyncCts, null)?.Cancel();
+        _driveIndexRefreshTimer.Stop();
         Items.Clear();
+        ClearMobileSlots();
         ClearFolderCache();
         Breadcrumbs.Clear();
         Breadcrumbs.Add(new BreadcrumbItem("OneDrive", null));
@@ -906,8 +1029,15 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = ex.Message;
-            StatusText = "操作失败";
+            if (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+            }
+            else
+            {
+                ErrorMessage = ex.Message;
+                StatusText = "操作失败";
+            }
         }
     }
 
@@ -1120,9 +1250,17 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             transfer.State = TransferState.Failed;
-            transfer.Message = ex.Message;
-            ErrorMessage = ex.Message;
-            StatusText = $"上传失败：{fileName}";
+            if (IsTransientNetworkFailure(ex))
+            {
+                transfer.Message = "网络暂时不可用，可重新尝试";
+                ErrorMessage = null;
+            }
+            else
+            {
+                transfer.Message = ex.Message;
+                ErrorMessage = ex.Message;
+                StatusText = $"上传失败：{fileName}";
+            }
         }
         finally
         {
@@ -1166,9 +1304,17 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             transfer.State = TransferState.Failed;
-            transfer.Message = ex.Message;
-            ErrorMessage = ex.Message;
-            StatusText = $"下载失败：{item.Name}";
+            if (IsTransientNetworkFailure(ex))
+            {
+                transfer.Message = "网络暂时不可用，可重新尝试";
+                ErrorMessage = null;
+            }
+            else
+            {
+                transfer.Message = ex.Message;
+                ErrorMessage = ex.Message;
+                StatusText = $"下载失败：{item.Name}";
+            }
         }
         finally
         {
@@ -1198,8 +1344,16 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             transfer.State = TransferState.Failed;
-            transfer.Message = ex.Message;
-            ErrorMessage = ex.Message;
+            if (IsTransientNetworkFailure(ex))
+            {
+                transfer.Message = "网络暂时不可用，可重新尝试";
+                ErrorMessage = null;
+            }
+            else
+            {
+                transfer.Message = ex.Message;
+                ErrorMessage = ex.Message;
+            }
             RaiseTransferSummary();
         }
     }
@@ -1567,7 +1721,8 @@ public partial class MainViewModel : ViewModelBase
                         PreviewImage = _gifAnimation.Frames[0];
                         _previewImagePixelWidth = _gifAnimation.PixelWidth;
                         _previewImagePixelHeight = _gifAnimation.PixelHeight;
-                        PreviewZoom = 1.0;
+                        if (!IsMobilePlatform)
+                            PreviewZoom = 1.0;
                         UpdatePreviewImageSize();
                         PreviewKind = PreviewKind.Image;
                         PreviewStatus = string.Empty;
@@ -1595,7 +1750,11 @@ public partial class MainViewModel : ViewModelBase
 
                 _previewImagePixelWidth = PreviewImage.PixelSize.Width;
                 _previewImagePixelHeight = PreviewImage.PixelSize.Height;
-                PreviewZoom = 1.0;
+                // On phones the carousel is already showing the fitted page. Do not publish a
+                // transient 100% value before MainView can calculate the new viewport fit ratio.
+                // Keeping the previous fitted ratio for this tiny hand-off avoids the visible flash.
+                if (!IsMobilePlatform)
+                    PreviewZoom = 1.0;
                 UpdatePreviewImageSize();
                 PreviewKind = PreviewKind.Image;
                 PreviewStatus = string.Empty;
@@ -1623,8 +1782,16 @@ public partial class MainViewModel : ViewModelBase
         {
             if (!cancellationToken.IsCancellationRequested)
             {
-                PreviewStatus = "预览加载失败";
-                ErrorMessage = ex.Message;
+                if (IsTransientNetworkFailure(ex))
+                {
+                    ErrorMessage = null;
+                    PreviewStatus = string.Empty;
+                }
+                else
+                {
+                    PreviewStatus = "预览加载失败";
+                    ErrorMessage = ex.Message;
+                }
             }
         }
         finally
@@ -1678,8 +1845,16 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            PreviewStatus = "文件缓存失败";
-            ErrorMessage = ex.Message;
+            if (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+                PreviewStatus = string.Empty;
+            }
+            else
+            {
+                PreviewStatus = "文件缓存失败";
+                ErrorMessage = ex.Message;
+            }
             return null;
         }
         finally
@@ -1743,7 +1918,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void StartAdjacentImagePrefetch(DriveItemModel current)
     {
-        var images = Items.Where(static x => x.IsImage).ToArray();
+        var images = GetVisibleLoadedItemsSnapshot().Where(static x => x.IsImage).ToArray();
         var index = Array.FindIndex(images, x => x.Id == current.Id);
         if (index < 0)
             return;
@@ -1895,7 +2070,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task MovePreviewAsync(int delta, bool imagesOnly, bool wrap)
     {
-        var sequence = Items.Where(x => x.IsFile && (!imagesOnly || x.IsImage)).ToArray();
+        var sequence = GetVisibleLoadedItemsSnapshot().Where(x => x.IsFile && (!imagesOnly || x.IsImage)).ToArray();
         if (sequence.Length == 0)
             return;
 
@@ -1957,6 +2132,7 @@ public partial class MainViewModel : ViewModelBase
 
     public void AdjustPreviewZoom(double factor) => SetPreviewZoom(PreviewZoom * factor);
     public void SetPreviewZoomToActualSize() => SetPreviewZoom(1.0);
+    public void SetPreviewZoomAbsolute(double value) => SetPreviewZoom(value);
 
     public void FitPreviewImage(double availableWidth, double availableHeight)
     {
@@ -2033,7 +2209,7 @@ public partial class MainViewModel : ViewModelBase
         if (!IsMobilePlatform)
             return;
 
-        var images = Items.Where(static x => x.IsImage).ToArray();
+        var images = GetVisibleLoadedItemsSnapshot().Where(static x => x.IsImage).ToArray();
         var currentIndex = Array.FindIndex(images, x => x.Id == current.Id);
         if (currentIndex < 0)
             return;
@@ -2054,7 +2230,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void DisposeGalleryImagesDeferred()
     {
-        var bitmaps = Items
+        var bitmaps = _allItems
             .Where(static x => x.GalleryImage is not null)
             .Select(x =>
             {
@@ -2264,10 +2440,17 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            // A folder page may fail while previously discovered files are already queued.
-            // Keep those rows/tasks intact and surface only the enumeration error.
-            ErrorMessage = ex.Message;
-            StatusText = jobs.Count > 0 ? "部分缓存任务已加入，后续文件获取失败" : "缓存任务准备失败";
+            // Read-side Graph calls normally stay inside the automatic retry loop. If a transient
+            // transport failure still escapes a lower layer, keep existing jobs and stay silent.
+            if (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+            }
+            else
+            {
+                ErrorMessage = ex.Message;
+                StatusText = jobs.Count > 0 ? "部分缓存任务已加入，后续文件获取失败" : "缓存任务准备失败";
+            }
         }
     }
 
@@ -2421,14 +2604,24 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearCacheAsync()
     {
+        // Stop writers before deleting the metadata index; otherwise an in-flight delta/folder
+        // enumeration could persist the just-cleared cache again a moment later.
+        Interlocked.Exchange(ref _folderMetadataSyncCts, null)?.Cancel();
+        Interlocked.Exchange(ref _driveIndexSyncCts, null)?.Cancel();
         _fileCache.Clear();
         _thumbnailCache.Clear();
+        if (!string.IsNullOrWhiteSpace(CurrentAccountId))
+            _localDriveIndex.ClearAccount(CurrentAccountId);
+        else
+            _localDriveIndex.ClearAll();
         ClearFolderCache();
         UpdateCacheStatus();
 
         if (IsAuthenticated)
         {
             await RunBusyAsync(() => LoadCurrentFolderAsync(forceRemote: true));
+            if (!string.IsNullOrWhiteSpace(CurrentAccountId))
+                _ = StartDriveIndexSynchronizationAsync(CurrentAccountId);
             StatusText = "缓存已清除";
         }
         else
@@ -2626,7 +2819,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Decode only thumbnails already present in the persistent thumbnail cache. No network
         // request is started here, so the restored screen stays responsive before MSAL finishes.
-        if (IsMobilePlatform)
+        if (IsMobilePlatform && !UsesNativeMobileFileList)
         {
             var cachedThumbs = restoredItems
                 .Where(x => x.SupportsThumbnail && _thumbnailCache.TryGetCachedPath(x, out _))
@@ -2635,15 +2828,8 @@ public partial class MainViewModel : ViewModelBase
             if (cachedThumbs.Length > 0)
                 StartThumbnailLoading(cachedThumbs);
         }
-        else
-        {
-            var cachedThumbs = restoredItems
-                .Where(x => x.SupportsThumbnail && _thumbnailCache.TryGetCachedPath(x, out _))
-                .Take(96)
-                .ToArray();
-            if (cachedThumbs.Length > 0)
-                StartThumbnailLoading(cachedThumbs);
-        }
+        // Desktop thumbnails are queued from the actually realized ItemsRepeater viewport after
+        // layout. Never construct a 96/200/thousands-item task batch during first paint.
     }
 
     private void RestoreRememberedStartupBreadcrumbs()
@@ -2692,9 +2878,7 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             await LoadCurrentFolderAsync(forceRemote: true);
-            StatusText = HasMoreItems
-                ? $"已加载 {_allItems.Count} 项 · 向下滚动继续加载"
-                : $"{_allItems.Count} 个项目";
+            StatusText = $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 个项目";
         }
         catch when (Breadcrumbs.Count > 1)
         {
@@ -2708,14 +2892,30 @@ public partial class MainViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
-                StatusText = "已显示本地缓存 · 暂时无法同步";
+                if (IsTransientNetworkFailure(ex))
+                {
+                    ErrorMessage = null;
+                    StatusText = "已显示本地缓存";
+                }
+                else
+                {
+                    ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
+                    StatusText = "已显示本地缓存 · 暂时无法同步";
+                }
             }
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
-            StatusText = "已显示本地缓存 · 暂时无法同步";
+            if (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+                StatusText = "已显示本地缓存";
+            }
+            else
+            {
+                ErrorMessage = $"OneDrive 同步失败：{ex.Message}";
+                StatusText = "已显示本地缓存 · 暂时无法同步";
+            }
         }
     }
 
@@ -2740,12 +2940,54 @@ public partial class MainViewModel : ViewModelBase
             Breadcrumbs = Breadcrumbs
                 .Select(x => new RememberedBreadcrumb { Name = x.Name, ItemId = x.ItemId })
                 .ToList(),
-            Items = _allItems.Select(StartupDriveItem.FromModel).ToList(),
-            NextLink = _nextChildrenLink,
+            // Every platform now rebuilds the complete logical extent from TotalItemCount and
+            // LocalDriveIndex. The startup snapshot therefore only needs one first-paint page;
+            // serializing thousands of duplicate metadata rows would slow desktop startup too.
+            Items = _allItems.Take(CurrentFolderPageSize)
+                .Select(StartupDriveItem.FromModel)
+                .ToList(),
+            NextLink = null,
             TotalItemCount = _currentFolderTotalItemCount
         };
 
         await _startupSnapshot.SaveAsync(snapshot);
+    }
+
+    private void ScheduleStartupSnapshotSave()
+    {
+        var next = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _startupSnapshotSaveCts, next);
+        previous?.Cancel();
+        _ = SaveStartupSnapshotAfterListIdleAsync(next);
+    }
+
+    private async Task SaveStartupSnapshotAfterListIdleAsync(CancellationTokenSource request)
+    {
+        try
+        {
+            // The snapshot is a startup optimization, not part of the paging critical path.
+            // Coalesce rapid page arrivals and, on phones, wait until inertia has stopped so the
+            // model projection never steals time from a scroll frame.
+            await Task.Delay(IsMobilePlatform ? 450 : 250, request.Token);
+            while ((IsMobilePlatform && _mobileListScrolling) ||
+                   (!IsMobilePlatform && _desktopListScrolling))
+            {
+                await Task.Delay(IsMobilePlatform ? 220 : 120, request.Token);
+            }
+
+            request.Token.ThrowIfCancellationRequested();
+            await SaveStartupSnapshotAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer page/navigation snapshot superseded this delayed save.
+        }
+        finally
+        {
+            if (ReferenceEquals(_startupSnapshotSaveCts, request))
+                _startupSnapshotSaveCts = null;
+            request.Dispose();
+        }
     }
 
     private void ClearRestoredStartupState(bool clearAuthenticationState = true)
@@ -2753,8 +2995,11 @@ public partial class MainViewModel : ViewModelBase
         _startupSnapshotRestored = false;
         _startupSnapshotAccountId = string.Empty;
         _startupSnapshot.Clear();
+        var pendingSnapshotSave = Interlocked.Exchange(ref _startupSnapshotSaveCts, null);
+        pendingSnapshotSave?.Cancel();
         CancelThumbnailLoading();
         ResetMobileThumbnailWindow();
+        ResetDesktopThumbnailViewport();
         ClearFolderCache();
         Items.Clear();
         Breadcrumbs.Clear();
@@ -2797,6 +3042,8 @@ public partial class MainViewModel : ViewModelBase
         UserEmail = user.DisplayEmail;
         CurrentAccountId = resolvedAccountId;
         IsAuthenticated = true;
+        await _localDriveIndex.EnsureAccountLoadedAsync(CurrentAccountId);
+        _driveIndexRefreshTimer.Start();
 
         if (drive.Quota?.Total is > 0 && drive.Quota.Used is not null)
         {
@@ -2821,7 +3068,30 @@ public partial class MainViewModel : ViewModelBase
 
             // The cached folder is already on screen. Revalidate it without a busy overlay so
             // startup feels immediate even when Graph needs several seconds to answer.
+            var restoredFolderId = CurrentFolderId;
+            var restoredCacheKey = FolderCacheKey(restoredFolderId);
+            var restoredNavigationVersion = _folderNavigationVersion;
+            var restoredLocalSnapshot = await _localDriveIndex
+                .GetFolderAsync(CurrentAccountId, restoredFolderId, GetGraphOrderBy())
+                .ConfigureAwait(true);
+            if (restoredLocalSnapshot is not null &&
+                restoredNavigationVersion == _folderNavigationVersion &&
+                FolderCacheKey(CurrentFolderId) == restoredCacheKey &&
+                restoredLocalSnapshot.Items.Count >= _allItems.Count)
+            {
+                StoreFolderCache(restoredCacheKey, restoredLocalSnapshot.Items, null, restoredLocalSnapshot.TotalCount);
+                if (_folderCache.TryGetValue(restoredCacheKey, out var restoredEntry))
+                    restoredEntry.LastValidatedUtc = restoredLocalSnapshot.LastSyncedUtc ?? DateTimeOffset.MinValue;
+                SetCurrentFolderTotalItemCount(restoredLocalSnapshot.TotalCount);
+                ApplyFolderItems(restoredLocalSnapshot.Items, restoredLocalSnapshot.TotalCount);
+            }
+            else if (restoredLocalSnapshot is not null)
+            {
+                DisposeItemThumbnails(restoredLocalSnapshot.Items);
+            }
+
             _ = RefreshRestoredFolderInBackgroundAsync();
+            _ = StartDriveIndexSynchronizationAsync(CurrentAccountId);
             _ = SaveStartupSnapshotAsync();
             return;
         }
@@ -2867,7 +3137,197 @@ public partial class MainViewModel : ViewModelBase
             await LoadCurrentFolderAsync(forceRemote: true);
         }
 
+        _ = StartDriveIndexSynchronizationAsync(CurrentAccountId);
         _ = SaveStartupSnapshotAsync();
+    }
+
+    private void DriveIndexRefreshTimer_Tick(object? sender, EventArgs e)
+    {
+        // Delta is a low-priority cache-coherency pass. Never stack periodic runs or interrupt
+        // a full initial scan; the next five-minute tick is sufficient.
+        if (!IsAuthenticated || string.IsNullOrWhiteSpace(CurrentAccountId) ||
+            Volatile.Read(ref _driveIndexSyncCts) is not null)
+            return;
+
+        _ = StartDriveIndexSynchronizationAsync(CurrentAccountId);
+    }
+
+    private async Task StartDriveIndexSynchronizationAsync(string accountId)
+    {
+        if (!IsAuthenticated || string.IsNullOrWhiteSpace(accountId))
+            return;
+
+        var request = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _driveIndexSyncCts, request);
+        previous?.Cancel();
+        var token = request.Token;
+
+        try
+        {
+            // Current-folder first paint and touch scrolling always win. The drive-wide index is
+            // deliberately background work and carries no thumbnails/file bodies.
+            await Task.Delay(IsMobilePlatform ? 1400 : 650, token).ConfigureAwait(false);
+            await WaitForDriveIndexQuietWindowAsync(token).ConfigureAwait(false);
+
+            var rootItemId = _localDriveIndex.GetRootItemId(accountId);
+            if (string.IsNullOrWhiteSpace(rootItemId))
+            {
+                var root = await _oneDrive.GetItemMetadataAsync(null, token).ConfigureAwait(false);
+                rootItemId = root.Id;
+            }
+            if (string.IsNullOrWhiteSpace(rootItemId))
+                return;
+
+            var deltaLink = _localDriveIndex.GetDeltaLink(accountId);
+            if (string.IsNullOrWhiteSpace(deltaLink))
+            {
+                await RunFullDriveIndexScanAsync(accountId, rootItemId, null, token).ConfigureAwait(false);
+                return;
+            }
+
+            var changes = new List<DriveItemModel>();
+            var cursor = deltaLink;
+            string? finalDeltaLink = null;
+            while (!string.IsNullOrWhiteSpace(cursor))
+            {
+                token.ThrowIfCancellationRequested();
+                await WaitForDriveIndexQuietWindowAsync(token).ConfigureAwait(false);
+                var page = await _oneDrive.GetDriveDeltaPageAsync(cursor, 200, token).ConfigureAwait(false);
+                if (page.ResyncRequired)
+                {
+                    await RunFullDriveIndexScanAsync(accountId, rootItemId, page.ResyncLink, token).ConfigureAwait(false);
+                    return;
+                }
+
+                changes.AddRange(page.Items);
+                if (!string.IsNullOrWhiteSpace(page.NextLink))
+                {
+                    cursor = page.NextLink;
+                    continue;
+                }
+
+                finalDeltaLink = page.DeltaLink;
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(finalDeltaLink))
+            {
+                await WaitForDriveIndexQuietWindowAsync(token).ConfigureAwait(false);
+                await _localDriveIndex.ApplyIncrementalDeltaAsync(
+                    accountId,
+                    rootItemId,
+                    changes,
+                    finalDeltaLink,
+                    token).ConfigureAwait(false);
+
+                if (changes.Count > 0)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (!IsAuthenticated || !string.Equals(CurrentAccountId, accountId, StringComparison.Ordinal) ||
+                            SelectionCount > 0 || _mobileListScrolling ||
+                            Volatile.Read(ref _folderMetadataSyncCts) is not null)
+                            return;
+
+                        var folderId = CurrentFolderId;
+                        StartFolderMetadataSync(
+                            folderId,
+                            FolderCacheKey(folderId),
+                            _folderNavigationVersion,
+                            GetGraphOrderBy(),
+                            seedItems: null,
+                            nextLink: null,
+                            streamIntoPlaceholders: false);
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // A logout/new sync superseded this index run.
+        }
+        catch
+        {
+            // The index is an offline/performance layer. Network or delta-token failures must not
+            // affect normal browsing; the next session/refresh will try again.
+        }
+        finally
+        {
+            if (ReferenceEquals(_driveIndexSyncCts, request))
+                Interlocked.CompareExchange(ref _driveIndexSyncCts, null, request);
+            request.Dispose();
+        }
+    }
+
+    private async Task WaitForDriveIndexQuietWindowAsync(CancellationToken cancellationToken)
+    {
+        while ((IsMobilePlatform && _mobileListScrolling) ||
+               (!IsMobilePlatform && _desktopListScrolling) ||
+               Volatile.Read(ref _folderMetadataSyncCts) is not null)
+        {
+            // Folder navigation / touch rendering is latency-sensitive. A drive-wide delta pass is
+            // durable cache maintenance, so it yields between every Graph page and before JSON
+            // persistence instead of competing with an active folder enumeration or fling.
+            await Task.Delay(180, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunFullDriveIndexScanAsync(
+        string accountId,
+        string rootItemId,
+        string? firstLink,
+        CancellationToken cancellationToken)
+    {
+        var latest = new Dictionary<string, DriveItemModel>(StringComparer.Ordinal);
+        var cursor = firstLink;
+        string? finalDeltaLink = null;
+        var restarted = false;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await WaitForDriveIndexQuietWindowAsync(cancellationToken).ConfigureAwait(false);
+            var page = await _oneDrive.GetDriveDeltaPageAsync(cursor, 200, cancellationToken).ConfigureAwait(false);
+            if (page.ResyncRequired)
+            {
+                if (restarted)
+                    return;
+                restarted = true;
+                latest.Clear();
+                cursor = page.ResyncLink;
+                continue;
+            }
+
+            foreach (var item in page.Items)
+            {
+                if (string.IsNullOrWhiteSpace(item.Id))
+                    continue;
+                if (item.IsDeleted)
+                    latest.Remove(item.Id);
+                else
+                    latest[item.Id] = item; // Delta may return one item more than once; last wins.
+            }
+
+            if (!string.IsNullOrWhiteSpace(page.NextLink))
+            {
+                cursor = page.NextLink;
+                continue;
+            }
+
+            finalDeltaLink = page.DeltaLink;
+            break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(finalDeltaLink))
+        {
+            await WaitForDriveIndexQuietWindowAsync(cancellationToken).ConfigureAwait(false);
+            await _localDriveIndex.ReplaceFromFullDeltaAsync(
+                accountId,
+                rootItemId,
+                latest.Values.ToArray(),
+                finalDeltaLink,
+                cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private CancellationTokenSource BeginFolderNavigation(FolderNavigationReason reason)
@@ -2877,14 +3337,13 @@ public partial class MainViewModel : ViewModelBase
         RememberCurrentFolderViewMode();
         _ = _settingsService.SaveAsync();
 
-        // Stop work that belongs to the folder we are leaving. In particular, old thumbnail
-        // requests and a pending "load more" page must not compete with the new folder's first
-        // children request on a mobile connection.
+        // Stop work that belongs to the folder we are leaving. Old thumbnail requests and the
+        // folder's background metadata enumerator must not compete with the new first page.
         CancelThumbnailLoading();
         ResetMobileThumbnailWindow();
-        var previousLoadMore = Interlocked.Exchange(ref _loadMoreCts, null);
-        previousLoadMore?.Cancel();
-        IsLoadingMore = false;
+        ResetDesktopThumbnailViewport();
+        var previousMetadataSync = Interlocked.Exchange(ref _folderMetadataSyncCts, null);
+        previousMetadataSync?.Cancel();
 
         // Folder navigation is superseding: a second navigation (especially Back) must cancel
         // the outstanding Graph request instead of waiting for it to finish.
@@ -2919,19 +3378,107 @@ public partial class MainViewModel : ViewModelBase
             _nextChildrenLink = cached.NextLink;
             HasMoreItems = !string.IsNullOrWhiteSpace(_nextChildrenLink);
             SetCurrentFolderTotalItemCount(cached.TotalItemCount);
-            ApplyFolderItems(cached.Items);
+            ApplyFolderItems(cached.Items, cached.TotalItemCount);
             FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
 
-            // Cached back/forward navigation is intentionally network-free. This preserves
-            // both the loaded pages and exact scroll position; the toolbar Refresh command
-            // is the explicit way to revalidate a directory listing.
+            // Back/forward navigation is instant from memory. A cache entry may represent a
+            // first-visit enumeration that was cancelled when the user navigated away. In that
+            // case its continuation link must resume immediately; otherwise the stable tail would
+            // remain placeholders until an explicit refresh. Complete entries only revalidate when
+            // stale. Scrolling itself never owns pagination.
+            if (!string.IsNullOrWhiteSpace(cached.NextLink))
+            {
+                StartFolderMetadataSync(
+                    folderId,
+                    cacheKey,
+                    navigationVersion,
+                    orderBy,
+                    seedItems: cached.Items,
+                    nextLink: cached.NextLink,
+                    streamIntoPlaceholders: true);
+            }
+            else if (now - cached.LastValidatedUtc >= FolderCacheValidationInterval)
+            {
+                StartFolderMetadataSync(
+                    folderId,
+                    cacheKey,
+                    navigationVersion,
+                    orderBy,
+                    seedItems: null,
+                    nextLink: null,
+                    streamIntoPlaceholders: false);
+            }
             return;
         }
 
-        // The first children page is the only request on the folder-opening critical path.
-        // ChildCount is already known for most clicked folders from the parent listing; for
-        // root/unknown counts, metadata is refreshed after the list is visible instead of
-        // delaying navigation behind a second Graph round-trip.
+        // Persistent local index is the normal fast path after the first visit / first delta scan.
+        // It gives the UI a complete logical folder immediately, before any network request.
+        LocalFolderIndexSnapshot? localSnapshot = null;
+        if (!forceRemote && !string.IsNullOrWhiteSpace(CurrentAccountId))
+        {
+            localSnapshot = await _localDriveIndex
+                .GetFolderAsync(CurrentAccountId, folderId, orderBy, cancellationToken)
+                .ConfigureAwait(true);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+            {
+                if (localSnapshot is not null)
+                    DisposeItemThumbnails(localSnapshot.Items);
+                return;
+            }
+        }
+
+        if (localSnapshot is not null)
+        {
+            _nextChildrenLink = null;
+            HasMoreItems = false;
+
+            // The item that was tapped (or the parent metadata index) may know a larger childCount
+            // than this folder has locally materialized. Never shrink that known logical extent just
+            // because the child itself has not been enumerated yet. The unloaded tail remains stable
+            // lightweight slots and is filled by the background metadata stream below.
+            var localTotalCount = Math.Max(localSnapshot.TotalCount, _currentFolderTotalItemCount ?? 0);
+            SetCurrentFolderTotalItemCount(localTotalCount);
+            StoreFolderCache(cacheKey, localSnapshot.Items, null, localTotalCount);
+            if (_folderCache.TryGetValue(cacheKey, out var indexedEntry))
+            {
+                indexedEntry.LastValidatedUtc = localSnapshot.LastSyncedUtc ?? DateTimeOffset.MinValue;
+                if (string.IsNullOrWhiteSpace(orderBy) && !localSnapshot.HasServerDefaultOrder)
+                    indexedEntry.LastValidatedUtc = DateTimeOffset.MinValue;
+            }
+            ApplyFolderItems(localSnapshot.Items, localTotalCount);
+            StatusText = $"{localTotalCount} 个项目";
+            FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
+
+            var stale = localSnapshot.LastSyncedUtc is null ||
+                        DateTimeOffset.UtcNow - localSnapshot.LastSyncedUtc.Value >= FolderCacheValidationInterval ||
+                        (string.IsNullOrWhiteSpace(orderBy) && !localSnapshot.HasServerDefaultOrder);
+
+            // A locally known-but-not-enumerated folder (normally learned from its parent's
+            // childCount) must stream page one into its existing slots. A complete cached folder can
+            // revalidate off-screen and swap only if metadata actually changed.
+            if (!localSnapshot.IsComplete || stale)
+            {
+                StartFolderMetadataSync(
+                    folderId,
+                    cacheKey,
+                    navigationVersion,
+                    orderBy,
+                    seedItems: null,
+                    nextLink: null,
+                    streamIntoPlaceholders: !localSnapshot.IsComplete);
+            }
+            return;
+        }
+
+        // First-ever visit: only page one is on the critical path. folder.childCount (normally
+        // inherited from the parent row) creates a stable mobile slot array immediately; all
+        // remaining metadata pages continue in the background without any LoadMore UI. When the
+        // count is unknown (commonly the root), request folder metadata in parallel with page one
+        // so a fast count response can establish the final extent without adding startup latency.
+        Task<int?>? totalCountTask = _currentFolderTotalItemCount is null
+            ? TryGetFolderTotalItemCountAsync(folderId, cancellationToken)
+            : null;
         var sizeSortFallback = false;
         DriveItemPage page;
         try
@@ -2944,12 +3491,10 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (GraphOrderByNotSupportedException) when (SortColumn == FileSortColumn.Size)
         {
-            // A few OneDrive consumer backends still reject size ordering even with the
-            // non-indexed-query Prefer header. Do not leave the folder unusable or keep a
-            // broken remembered rule: fall back to the API's original order for this folder.
             SortColumn = FileSortColumn.None;
             SortState = SortCycleState.Original;
             await PersistCurrentFolderSortRuleAsync();
+            orderBy = null;
             sizeSortFallback = true;
             page = await _oneDrive.GetChildrenPageAsync(
                 folderId,
@@ -2967,84 +3512,352 @@ public partial class MainViewModel : ViewModelBase
         _nextChildrenLink = page.NextLink;
         HasMoreItems = page.HasMore;
         var totalCount = _currentFolderTotalItemCount;
+        if (totalCount is null && totalCountTask?.IsCompletedSuccessfully == true)
+            totalCount = totalCountTask.Result;
         if (totalCount is null && !page.HasMore)
             totalCount = page.Items.Count;
         SetCurrentFolderTotalItemCount(totalCount);
         StoreFolderCache(cacheKey, page.Items, page.NextLink, totalCount);
-        ApplyFolderItems(page.Items);
+        ApplyFolderItems(page.Items, totalCount);
         if (sizeSortFallback)
             StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
         FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
 
         if (totalCount is null && page.HasMore)
-            _ = RefreshFolderTotalCountInBackgroundAsync(folderId, cacheKey, navigationVersion);
+        {
+            if (totalCountTask is not null)
+                _ = ApplyFolderTotalCountTaskAsync(totalCountTask, cacheKey, navigationVersion);
+            else
+                _ = RefreshFolderTotalCountInBackgroundAsync(folderId, cacheKey, navigationVersion);
+        }
+
+        if (page.HasMore)
+        {
+            StartFolderMetadataSync(
+                folderId,
+                cacheKey,
+                navigationVersion,
+                orderBy,
+                seedItems: page.Items,
+                nextLink: page.NextLink,
+                streamIntoPlaceholders: true);
+        }
+        else if (!string.IsNullOrWhiteSpace(CurrentAccountId))
+        {
+            _ = _localDriveIndex.SaveFolderAsync(
+                CurrentAccountId,
+                folderId,
+                _localDriveIndex.GetRootItemId(CurrentAccountId),
+                orderBy,
+                page.Items,
+                page.Items.Count);
+        }
     }
 
-    public async Task LoadMoreCurrentFolderAsync()
+    public Task LoadMoreCurrentFolderAsync()
     {
-        if (IsLoadingMore || string.IsNullOrWhiteSpace(_nextChildrenLink) || !IsAuthenticated)
+        // Kept for API/backward compatibility. Paging is no longer coupled to ScrollChanged:
+        // folder metadata is continuously enumerated by StartFolderMetadataSync after page one.
+        return Task.CompletedTask;
+    }
+
+    private void StartFolderMetadataSync(
+        string? folderId,
+        string cacheKey,
+        long navigationVersion,
+        string? orderBy,
+        IReadOnlyList<DriveItemModel>? seedItems,
+        string? nextLink,
+        bool streamIntoPlaceholders)
+    {
+        if (!IsAuthenticated || string.IsNullOrWhiteSpace(CurrentAccountId))
             return;
 
-        var cacheKey = FolderCacheKey(CurrentFolderId);
-        var navigationVersion = _folderNavigationVersion;
-        var nextLink = _nextChildrenLink;
-        var loadMoreCts = new CancellationTokenSource();
-        var previousLoadMore = Interlocked.Exchange(ref _loadMoreCts, loadMoreCts);
-        previousLoadMore?.Cancel();
-        IsLoadingMore = true;
+        var next = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _folderMetadataSyncCts, next);
+        previous?.Cancel();
+
+        var accountId = CurrentAccountId;
+        _ = RunFolderMetadataSyncAsync(
+            accountId,
+            folderId,
+            cacheKey,
+            navigationVersion,
+            orderBy,
+            seedItems,
+            nextLink,
+            streamIntoPlaceholders,
+            next);
+    }
+
+    private async Task WaitForMetadataPresentationWindowAsync(
+        DateTime notBeforeUtc,
+        CancellationToken cancellationToken)
+    {
+        // Reserve the first few hundred milliseconds after folder presentation for input/rendering
+        // on both form factors. On desktop a scrollbar-thumb drag can jump thousands of logical
+        // slots immediately; a 200-slot metadata burst landing in that same frame is just as visible
+        // as it is during a phone fling.
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var scrolling = IsMobilePlatform ? _mobileListScrolling : _desktopListScrolling;
+            var now = DateTime.UtcNow;
+            if (!scrolling && now >= notBeforeUtc)
+            {
+                // Give the first post-idle frame to input/render/current-viewport thumbnail
+                // recovery, then re-check in case a new gesture started meanwhile.
+                await Task.Delay(IsMobilePlatform ? 70 : 45, cancellationToken).ConfigureAwait(false);
+                scrolling = IsMobilePlatform ? _mobileListScrolling : _desktopListScrolling;
+                if (!scrolling && DateTime.UtcNow >= notBeforeUtc)
+                    return;
+            }
+
+            var remainingMs = Math.Max(0, (notBeforeUtc - now).TotalMilliseconds);
+            var delayMs = (int)Math.Clamp(remainingMs > 0 ? Math.Min(remainingMs, 80) : 80, 24, 80);
+            await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunFolderMetadataSyncAsync(
+        string accountId,
+        string? folderId,
+        string cacheKey,
+        long navigationVersion,
+        string? orderBy,
+        IReadOnlyList<DriveItemModel>? seedItems,
+        string? nextLink,
+        bool streamIntoPlaceholders,
+        CancellationTokenSource request)
+    {
+        var token = request.Token;
+        var collected = seedItems?.ToList() ?? [];
+        var cursor = nextLink;
+        // Page one is already on-screen for a normal first visit. Hold page-two-and-later UI
+        // mutation briefly so a user can start scrolling immediately without competing with a
+        // burst of slot updates. An incomplete local-only folder still gets page one as soon as
+        // the user is not actively scrolling.
+        var presentationNotBeforeUtc = DateTime.UtcNow.AddMilliseconds(seedItems is null ? 120 : 360);
         try
         {
-            var page = await _oneDrive.GetChildrenPageAsync(
-                CurrentFolderId, nextLink, CurrentFolderPageSize, loadMoreCts.Token);
-            if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+            if (seedItems is null)
             {
-                DisposeItemThumbnails(page.Items);
-                return;
+                DriveItemPage first;
+                try
+                {
+                    first = await _oneDrive.GetChildrenPageAsync(
+                        folderId,
+                        pageSize: CurrentFolderPageSize,
+                        cancellationToken: token,
+                        orderBy: orderBy).ConfigureAwait(false);
+                }
+                catch (GraphOrderByNotSupportedException)
+                {
+                    // A cached size-sorted folder remains usable even if this particular backend
+                    // temporarily refuses that server order. An explicit user refresh can choose
+                    // a different sort; background synchronization itself should stay silent.
+                    return;
+                }
+
+                collected.AddRange(first.Items);
+                cursor = first.NextLink;
+
+                // This path is used when the local index knows the folder/count but has not yet
+                // enumerated its children. Fill page one into the already-created fixed slots as
+                // soon as it arrives; otherwise slots 0..N would remain placeholders until the
+                // complete enumeration finished.
+                if (streamIntoPlaceholders)
+                {
+                    var firstApplied = false;
+                    while (!firstApplied)
+                    {
+                        await WaitForMetadataPresentationWindowAsync(presentationNotBeforeUtc, token).ConfigureAwait(false);
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            if (navigationVersion != _folderNavigationVersion ||
+                                FolderCacheKey(CurrentFolderId) != cacheKey)
+                            {
+                                firstApplied = true;
+                                return;
+                            }
+
+                            if ((IsMobilePlatform && _mobileListScrolling) ||
+                                (!IsMobilePlatform && _desktopListScrolling))
+                                return;
+
+                            AppendBackgroundMetadataPage(0, first.Items, first.NextLink);
+                            firstApplied = true;
+                        }, DispatcherPriority.Background);
+                    }
+                }
             }
 
-            _nextChildrenLink = page.NextLink;
-            HasMoreItems = page.HasMore;
-            if (_folderCache.TryGetValue(cacheKey, out var entry))
+            while (!string.IsNullOrWhiteSpace(cursor))
             {
-                entry.Items.AddRange(page.Items);
-                entry.NextLink = page.NextLink;
-                if (!page.HasMore && entry.TotalItemCount is null)
-                    entry.TotalItemCount = entry.Items.Count;
-                entry.LastAccessUtc = DateTimeOffset.UtcNow;
+                token.ThrowIfCancellationRequested();
+                var offset = collected.Count;
+                var page = await _oneDrive.GetChildrenPageAsync(
+                    folderId,
+                    cursor,
+                    CurrentFolderPageSize,
+                    token,
+                    orderBy: null).ConfigureAwait(false);
+                collected.AddRange(page.Items);
+                cursor = page.NextLink;
+
+                if (streamIntoPlaceholders)
+                {
+                    var applied = false;
+                    while (!applied)
+                    {
+                        await WaitForMetadataPresentationWindowAsync(presentationNotBeforeUtc, token).ConfigureAwait(false);
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            if (navigationVersion != _folderNavigationVersion ||
+                                FolderCacheKey(CurrentFolderId) != cacheKey)
+                            {
+                                applied = true; // Navigation changed; stop retrying this old page.
+                                return;
+                            }
+
+                            if ((IsMobilePlatform && _mobileListScrolling) ||
+                                (!IsMobilePlatform && _desktopListScrolling))
+                                return;
+
+                            AppendBackgroundMetadataPage(offset, page.Items, page.NextLink);
+                            applied = true;
+                        }, DispatcherPriority.Background);
+                    }
+                }
             }
 
-            _allItems.AddRange(page.Items);
-            foreach (var pageItem in page.Items)
-            {
-                if (!string.IsNullOrWhiteSpace(pageItem.Id))
-                    _currentItemIds.Add(pageItem.Id);
-            }
-            if (!page.HasMore && _currentFolderTotalItemCount is null)
-                SetCurrentFolderTotalItemCount(_allItems.Count);
-            AppendLoadedPageToVisibleItems(page.Items);
-            StatusText = HasMoreItems ? $"已加载 {_allItems.Count} 项 · 向下滚动继续加载" : $"{_allItems.Count} 个项目";
-            if (!IsMobilePlatform)
-                StartThumbnailLoading(page.Items);
+            token.ThrowIfCancellationRequested();
+            var finalCount = collected.Count;
 
-            _ = SaveStartupSnapshotAsync();
+            // JSON index persistence and completed-folder reconciliation are cache maintenance,
+            // not part of an active gesture. Keep that CPU/disk work out of both a phone fling and
+            // a desktop scrollbar-thumb drag.
+            while ((IsMobilePlatform && _mobileListScrolling) ||
+                   (!IsMobilePlatform && _desktopListScrolling))
+            {
+                await Task.Delay(80, token).ConfigureAwait(false);
+            }
+
+            await _localDriveIndex.SaveFolderAsync(
+                accountId,
+                folderId,
+                _localDriveIndex.GetRootItemId(accountId),
+                orderBy,
+                collected,
+                finalCount,
+                token).ConfigureAwait(false);
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (navigationVersion != _folderNavigationVersion ||
+                    FolderCacheKey(CurrentFolderId) != cacheKey)
+                    return;
+
+                _nextChildrenLink = null;
+                HasMoreItems = false;
+                SetCurrentFolderTotalItemCount(finalCount);
+
+                if (streamIntoPlaceholders)
+                {
+                    ReconcileMobileSlotCount(finalCount);
+                    if (_folderCache.TryGetValue(cacheKey, out var entry))
+                    {
+                        entry.NextLink = null;
+                        entry.TotalItemCount = finalCount;
+                        entry.LastAccessUtc = DateTimeOffset.UtcNow;
+                        entry.LastValidatedUtc = DateTimeOffset.UtcNow;
+                    }
+                    StatusText = $"{finalCount} 个项目";
+                    ScheduleStartupSnapshotSave();
+                }
+                else
+                {
+                    // If the server says nothing visible changed, retain the exact same model/slot
+                    // instances. That avoids a needless collection reset after every cache validation.
+                    if (FolderItemsEquivalent(_allItems, collected))
+                    {
+                        if (_folderCache.TryGetValue(cacheKey, out var unchangedEntry))
+                        {
+                            unchangedEntry.NextLink = null;
+                            unchangedEntry.TotalItemCount = finalCount;
+                            unchangedEntry.LastAccessUtc = DateTimeOffset.UtcNow;
+                            unchangedEntry.LastValidatedUtc = DateTimeOffset.UtcNow;
+                        }
+                        DisposeItemThumbnails(collected);
+                        StatusText = $"{finalCount} 个项目";
+                        ScheduleStartupSnapshotSave();
+                        return;
+                    }
+
+                    // Do not reshuffle items under a user's active long-press selection. The new
+                    // metadata is already durable in LocalDriveIndex and will be shown on the next
+                    // navigation/refresh; preserving selection is more important than a live reorder.
+                    if (SelectionCount > 0)
+                    {
+                        DisposeItemThumbnails(collected);
+                        StatusText = $"{finalCount} 个项目";
+                        return;
+                    }
+
+                    StoreFolderCache(cacheKey, collected, null, finalCount);
+                    ApplyFolderItems(collected, finalCount);
+                    StatusText = $"{finalCount} 个项目";
+                }
+            }, DispatcherPriority.Background);
         }
-        catch (OperationCanceledException) when (loadMoreCts.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            // Folder navigation or a newer page request superseded this one.
+            // Navigation superseded this folder's background enumeration.
         }
-        catch (Exception ex)
+        catch
         {
-            ErrorMessage = $"加载更多失败：{ex.Message}";
+            // Local metadata is already usable. Background cloud synchronization must never turn
+            // an offline / temporarily throttled folder into an error surface.
         }
         finally
         {
-            if (ReferenceEquals(_loadMoreCts, loadMoreCts))
-            {
-                Interlocked.CompareExchange(ref _loadMoreCts, null, loadMoreCts);
-                IsLoadingMore = false;
-            }
-            loadMoreCts.Dispose();
+            if (ReferenceEquals(_folderMetadataSyncCts, request))
+                Interlocked.CompareExchange(ref _folderMetadataSyncCts, null, request);
+            request.Dispose();
         }
+    }
+
+    private void AppendBackgroundMetadataPage(int offset, IReadOnlyList<DriveItemModel> pageItems, string? nextLink)
+    {
+        _nextChildrenLink = nextLink;
+        HasMoreItems = !string.IsNullOrWhiteSpace(nextLink);
+
+        if (_folderCache.TryGetValue(FolderCacheKey(CurrentFolderId), out var entry))
+        {
+            entry.Items.AddRange(pageItems);
+            entry.NextLink = nextLink;
+            entry.LastAccessUtc = DateTimeOffset.UtcNow;
+        }
+
+        _allItems.AddRange(pageItems);
+        foreach (var pageItem in pageItems)
+        {
+            if (!string.IsNullOrWhiteSpace(pageItem.Id))
+                _currentItemIds.Add(pageItem.Id);
+            pageItem.IsMobileSelectionMode = MobileSelectionModeActive;
+        }
+
+        if (IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText))
+        {
+            ApplyFilterAndSort();
+        }
+        else
+        {
+            AppendLoadedPageToVisibleItems(pageItems);
+            FillMobileSlots(offset, pageItems);
+        }
+
     }
 
     private async Task RefreshFolderInBackgroundAsync(string? folderId, string cacheKey, long navigationVersion)
@@ -3087,6 +3900,40 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    private async Task ApplyFolderTotalCountTaskAsync(
+        Task<int?> totalCountTask,
+        string cacheKey,
+        long navigationVersion)
+    {
+        try
+        {
+            var total = await totalCountTask.ConfigureAwait(false);
+            if (total is null)
+                return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                    return;
+
+                SetCurrentFolderTotalItemCount(total);
+                if (string.IsNullOrWhiteSpace(SearchText))
+                    ReconcileMobileSlotCount(Math.Max(total.Value, _allItems.Count));
+                if (_folderCache.TryGetValue(cacheKey, out var entry))
+                    entry.TotalItemCount = total;
+                ScheduleStartupSnapshotSave();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigation superseded the parallel count request.
+        }
+        catch
+        {
+            // Count metadata is optional; background enumeration still discovers the final count.
+        }
+    }
+
     private async Task RefreshFolderTotalCountInBackgroundAsync(
         string? folderId,
         string cacheKey,
@@ -3104,9 +3951,11 @@ public partial class MainViewModel : ViewModelBase
                     return;
 
                 SetCurrentFolderTotalItemCount(total);
+                if (string.IsNullOrWhiteSpace(SearchText))
+                    ReconcileMobileSlotCount(Math.Max(total.Value, _allItems.Count));
                 if (_folderCache.TryGetValue(cacheKey, out var entry))
                     entry.TotalItemCount = total;
-                _ = SaveStartupSnapshotAsync();
+                ScheduleStartupSnapshotSave();
             });
         }
         catch
@@ -3135,11 +3984,13 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void ApplyFolderItems(IReadOnlyList<DriveItemModel> items)
+    private void ApplyFolderItems(IReadOnlyList<DriveItemModel> items, int? totalItemCount = null)
     {
         CancelThumbnailLoading();
         ResetMobileThumbnailWindow();
+        ResetDesktopThumbnailViewport();
         Items.Clear();
+        ClearMobileSlots();
         _allItems.Clear();
         _currentItemIds.Clear();
         _allItems.AddRange(items);
@@ -3147,13 +3998,15 @@ public partial class MainViewModel : ViewModelBase
         {
             if (!string.IsNullOrWhiteSpace(item.Id))
                 _currentItemIds.Add(item.Id);
+            item.IsMobileSelectionMode = MobileSelectionModeActive;
         }
+
+        if (totalItemCount is not null)
+            SetCurrentFolderTotalItemCount(totalItemCount);
         ApplyFilterAndSort();
         CurrentLocation = string.Join(" / ", Breadcrumbs.Select(x => x.Name));
-        StatusText = HasMoreItems ? $"已加载 {_allItems.Count} 项 · 向下滚动继续加载" : $"{_allItems.Count} 个项目";
+        StatusText = $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 个项目";
         SetSelectedItems([]);
-        if (!IsMobilePlatform)
-            StartThumbnailLoading(items);
         if (RememberLastFolder)
         {
             CaptureCurrentFolderMemory();
@@ -3161,7 +4014,108 @@ public partial class MainViewModel : ViewModelBase
         }
 
         if (IsAuthenticated && !string.IsNullOrWhiteSpace(CurrentAccountId))
-            _ = SaveStartupSnapshotAsync();
+            ScheduleStartupSnapshotSave();
+    }
+
+    private void ClearMobileSlots()
+    {
+        foreach (var slot in MobileItems)
+            slot.Dispose();
+        MobileItems.Clear();
+    }
+
+    private void RebuildMobileSlots(int totalCount, IReadOnlyList<DriveItemModel> loadedItems)
+    {
+        totalCount = Math.Max(totalCount, loadedItems.Count);
+        var slots = new VirtualDriveItemSlot[totalCount];
+        for (var i = 0; i < totalCount; i++)
+            slots[i] = new VirtualDriveItemSlot(i, i < loadedItems.Count ? loadedItems[i] : null);
+
+        ClearMobileSlots();
+        MobileItems.AddRange(slots);
+    }
+
+    private void FillMobileSlots(int startIndex, IReadOnlyList<DriveItemModel> pageItems)
+    {
+        if (pageItems.Count == 0)
+            return;
+
+        var required = startIndex + pageItems.Count;
+        if (required > MobileItems.Count)
+        {
+            var newSlots = new List<VirtualDriveItemSlot>(required - MobileItems.Count);
+            for (var i = MobileItems.Count; i < required; i++)
+                newSlots.Add(new VirtualDriveItemSlot(i));
+            MobileItems.AddRange(newSlots);
+        }
+
+        var viewportCandidates = new List<DriveItemModel>();
+        var intersectsThumbnailWindow = IsMobilePlatform && !UsesNativeMobileFileList &&
+                                        startIndex < _mobileThumbnailWindowToExclusive &&
+                                        startIndex + pageItems.Count > _mobileThumbnailWindowFrom;
+        var desktopVisibleSlots = _desktopThumbnailVisibleSlotIndices;
+        var desktopVisibleIds = !IsMobilePlatform
+            ? new HashSet<string>(_desktopThumbnailWantedIds, StringComparer.Ordinal)
+            : null;
+        for (var i = 0; i < pageItems.Count; i++)
+        {
+            var index = startIndex + i;
+            var item = pageItems[i];
+            MobileItems[index].SetItem(item);
+
+            if (IsMobilePlatform && !UsesNativeMobileFileList &&
+                index >= _mobileThumbnailVisibleFrom &&
+                index < _mobileThumbnailVisibleToExclusive &&
+                item.SupportsThumbnail && !item.HasThumbnailImage &&
+                (!_mobileListScrolling || _thumbnailCache.TryGetCachedPath(item, out _)))
+            {
+                viewportCandidates.Add(item);
+            }
+            else if (!IsMobilePlatform &&
+                     desktopVisibleSlots.Contains(index) &&
+                     item.SupportsThumbnail && !item.HasThumbnailImage &&
+                     (!_desktopListScrolling || _thumbnailCache.TryGetCachedPath(item, out _)))
+            {
+                if (!string.IsNullOrWhiteSpace(item.Id))
+                    desktopVisibleIds!.Add(item.Id);
+                viewportCandidates.Add(item);
+            }
+        }
+
+        if (intersectsThumbnailWindow)
+            RefreshMobileThumbnailWantedIds();
+
+        if (!IsMobilePlatform && desktopVisibleIds is not null)
+            _desktopThumbnailWantedIds = desktopVisibleIds;
+
+        if (viewportCandidates.Count > 0)
+        {
+            StartThumbnailLoading(
+                viewportCandidates,
+                requireVisibleOnMobile: IsMobilePlatform,
+                requireVisibleOnDesktop: !IsMobilePlatform);
+        }
+    }
+
+    private void ReconcileMobileSlotCount(int finalCount)
+    {
+        finalCount = Math.Max(0, finalCount);
+        if (MobileItems.Count < finalCount)
+        {
+            var newSlots = new List<VirtualDriveItemSlot>(finalCount - MobileItems.Count);
+            for (var i = MobileItems.Count; i < finalCount; i++)
+                newSlots.Add(new VirtualDriveItemSlot(i));
+            MobileItems.AddRange(newSlots);
+        }
+        else
+        {
+            while (MobileItems.Count > finalCount)
+            {
+                var last = MobileItems[^1];
+                last.Dispose();
+                MobileItems.RemoveAt(MobileItems.Count - 1);
+            }
+        }
     }
 
     private void StoreFolderCache(string cacheKey, IReadOnlyList<DriveItemModel> items, string? nextLink = null, int? totalItemCount = null)
@@ -3178,7 +4132,9 @@ public partial class MainViewModel : ViewModelBase
         TrimFolderCache(cacheKey);
     }
 
-    private bool HasFolderCache(string? folderId) => _folderCache.ContainsKey(FolderCacheKey(folderId));
+    private bool HasFolderCache(string? folderId) =>
+        _folderCache.ContainsKey(FolderCacheKey(folderId)) ||
+        (!string.IsNullOrWhiteSpace(CurrentAccountId) && _localDriveIndex.HasFolder(CurrentAccountId, folderId));
 
     private void InvalidateCurrentFolderCache() => InvalidateFolderCache(CurrentFolderId);
 
@@ -3195,6 +4151,8 @@ public partial class MainViewModel : ViewModelBase
             DisposeItemThumbnails(entry.Items);
         _folderCache.Clear();
         _allItems.Clear();
+        Items.Clear();
+        ClearMobileSlots();
         _currentItemIds.Clear();
         _nextChildrenLink = null;
         HasMoreItems = false;
@@ -3242,10 +4200,101 @@ public partial class MainViewModel : ViewModelBase
 
     private static string FolderCacheKey(string? folderId) => folderId ?? "__ROOT__";
 
-    private void StartThumbnailLoading(IReadOnlyList<DriveItemModel> items)
+    private bool IsDesktopThumbnailWanted(DriveItemModel item)
     {
+        if (IsMobilePlatform || string.IsNullOrWhiteSpace(item.Id))
+            return true;
+
+        return _desktopThumbnailWantedIds.Contains(item.Id);
+    }
+
+    private bool IsMobileThumbnailWanted(DriveItemModel item)
+    {
+        if (!IsMobilePlatform || _mobileThumbnailWindowFrom < 0 || _mobileThumbnailWindowToExclusive <= _mobileThumbnailWindowFrom)
+            return true;
+
+        return _mobileThumbnailWantedIds.Contains(item.Id);
+    }
+
+    private bool IsMobileThumbnailVisible(DriveItemModel item)
+    {
+        if (!IsMobilePlatform)
+            return true;
+
+        var visible = _mobileThumbnailVisibleIds;
+        if (visible.Count > 0)
+            return visible.Contains(item.Id);
+
+        if (_mobileThumbnailVisibleFrom < 0 || _mobileThumbnailVisibleToExclusive <= _mobileThumbnailVisibleFrom)
+            return true;
+
+        return false;
+    }
+
+    private void RefreshMobileThumbnailWantedIds()
+    {
+        if (!IsMobilePlatform || _mobileThumbnailWindowFrom < 0 || _mobileThumbnailWindowToExclusive <= _mobileThumbnailWindowFrom)
+        {
+            _mobileThumbnailWantedIds = new HashSet<string>(StringComparer.Ordinal);
+            _mobileThumbnailVisibleIds = new HashSet<string>(StringComparer.Ordinal);
+            return;
+        }
+
+        var wanted = new HashSet<string>(StringComparer.Ordinal);
+        var visible = new HashSet<string>(StringComparer.Ordinal);
+        var from = Math.Max(0, _mobileThumbnailWindowFrom);
+        var toExclusive = Math.Min(MobileItems.Count, _mobileThumbnailWindowToExclusive);
+        var visibleFrom = Math.Max(from, _mobileThumbnailVisibleFrom);
+        var visibleToExclusive = Math.Min(toExclusive, _mobileThumbnailVisibleToExclusive);
+
+        for (var i = from; i < toExclusive; i++)
+        {
+            var item = MobileItems[i].Item;
+            if (item is null || string.IsNullOrWhiteSpace(item.Id))
+                continue;
+
+            wanted.Add(item.Id);
+            if (i >= visibleFrom && i < visibleToExclusive)
+                visible.Add(item.Id);
+        }
+
+        _mobileThumbnailWantedIds = wanted;
+        _mobileThumbnailVisibleIds = visible;
+    }
+
+    private bool TryRegisterThumbnailLoad(string itemId, long generation)
+    {
+        while (true)
+        {
+            if (_thumbnailLoadsInFlight.TryAdd(itemId, generation))
+                return true;
+
+            if (!_thumbnailLoadsInFlight.TryGetValue(itemId, out var existingGeneration))
+                continue;
+
+            if (existingGeneration == generation)
+                return false;
+
+            // A cancelled generation must never block the final viewport. Replace the stale
+            // marker immediately; the old worker's finally block only removes its own generation.
+            if (_thumbnailLoadsInFlight.TryUpdate(itemId, generation, existingGeneration))
+                return true;
+        }
+    }
+
+    private void StartThumbnailLoading(
+        IReadOnlyList<DriveItemModel> items,
+        bool requireVisibleOnMobile = false,
+        bool requireVisibleOnDesktop = false)
+    {
+        // Android's file surface is a native RecyclerView. Its adapter owns thumbnail loading
+        // and decodes directly into Android bitmaps, so never create Avalonia Bitmap work for it.
+        if (UsesNativeMobileFileList && requireVisibleOnMobile)
+            return;
+
+        var generation = Volatile.Read(ref _thumbnailLoadGeneration);
         var mediaItems = items
-            .Where(x => x.SupportsThumbnail && !x.HasThumbnailImage && _thumbnailLoadsInFlight.TryAdd(x.Id, 0))
+            .Where(x => x.SupportsThumbnail && !x.HasThumbnailImage && TryRegisterThumbnailLoad(x.Id, generation))
             .ToArray();
         if (mediaItems.Length == 0)
             return;
@@ -3256,18 +4305,32 @@ public partial class MainViewModel : ViewModelBase
             cts = new CancellationTokenSource();
             _thumbnailLoadCts = cts;
         }
-        _ = LoadThumbnailsInBackgroundAsync(mediaItems, cts.Token);
+        _ = LoadThumbnailsInBackgroundAsync(
+            mediaItems,
+            requireVisibleOnMobile,
+            requireVisibleOnDesktop,
+            generation,
+            cts.Token);
     }
 
     private async Task LoadThumbnailsInBackgroundAsync(
         IReadOnlyList<DriveItemModel> items,
+        bool requireVisibleOnMobile,
+        bool requireVisibleOnDesktop,
+        long generation,
         CancellationToken cancellationToken)
     {
-        // Keep concurrent thumbnail downloads modest so large photo folders stay responsive
-        // and do not flood Microsoft Graph / the thumbnail CDN with hundreds of requests.
-        var concurrency = IsMobilePlatform ? 2 : 6;
-        using var gate = new SemaphoreSlim(concurrency);
-        var tasks = items.Select(item => LoadThumbnailForItemAsync(item, gate, cancellationToken));
+        // Capture the batch mode once. All batches share the same worker gates below, so repeated
+        // 90ms viewport updates cannot multiply the actual decode/download concurrency.
+        var serializeMobileBatch = IsMobilePlatform && _mobileListScrolling;
+        var tasks = items.Select(item =>
+            LoadThumbnailForItemAsync(
+                item,
+                serializeMobileBatch,
+                requireVisibleOnMobile,
+                requireVisibleOnDesktop,
+                generation,
+                cancellationToken));
 
         try
         {
@@ -3287,14 +4350,39 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task LoadThumbnailForItemAsync(
         DriveItemModel item,
-        SemaphoreSlim gate,
+        bool serializeMobileBatch,
+        bool requireVisibleOnMobile,
+        bool requireVisibleOnDesktop,
+        long generation,
         CancellationToken cancellationToken)
     {
-        var gateAcquired = false;
+        var workGate = IsMobilePlatform ? _mobileThumbnailWorkGate : _desktopThumbnailWorkGate;
+        var flingGate = serializeMobileBatch ? _mobileFlingThumbnailGate : null;
+        var workGateAcquired = false;
+        var flingGateAcquired = false;
         try
         {
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            gateAcquired = true;
+            if (IsMobilePlatform &&
+                (requireVisibleOnMobile ? !IsMobileThumbnailVisible(item) : !IsMobileThumbnailWanted(item)))
+                return;
+            if (!IsMobilePlatform && requireVisibleOnDesktop && !IsDesktopThumbnailWanted(item))
+                return;
+            if (flingGate is not null)
+            {
+                await flingGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                flingGateAcquired = true;
+            }
+
+            await workGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            workGateAcquired = true;
+
+            // A long fling can enqueue several old disk-cache decodes. Re-check after the shared
+            // gate so the final resting viewport is never stuck behind stale off-screen work.
+            if (IsMobilePlatform &&
+                (requireVisibleOnMobile ? !IsMobileThumbnailVisible(item) : !IsMobileThumbnailWanted(item)))
+                return;
+            if (!IsMobilePlatform && requireVisibleOnDesktop && !IsDesktopThumbnailWanted(item))
+                return;
 
             var hadDiskCache = _thumbnailCache.TryGetCachedPath(item, out var cachedPath);
             if (!hadDiskCache)
@@ -3345,7 +4433,11 @@ public partial class MainViewModel : ViewModelBase
             {
                 // Use the O(1) id set rather than List.Contains() on every thumbnail completion.
                 // In thousand-item folders the old linear check became measurable UI-thread work.
-                if (cancellationToken.IsCancellationRequested || !_currentItemIds.Contains(item.Id))
+                if (cancellationToken.IsCancellationRequested || !_currentItemIds.Contains(item.Id) ||
+                    (IsMobilePlatform && (requireVisibleOnMobile
+                        ? !IsMobileThumbnailVisible(item)
+                        : !IsMobileThumbnailWanted(item))) ||
+                    (!IsMobilePlatform && requireVisibleOnDesktop && !IsDesktopThumbnailWanted(item)))
                 {
                     bitmap?.Dispose();
                     bitmap = null;
@@ -3370,9 +4462,15 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
-            _thumbnailLoadsInFlight.TryRemove(item.Id, out _);
-            if (gateAcquired)
-                gate.Release();
+            if (_thumbnailLoadsInFlight.TryGetValue(item.Id, out var activeGeneration) &&
+                activeGeneration == generation)
+            {
+                _thumbnailLoadsInFlight.TryRemove(item.Id, out _);
+            }
+            if (workGateAcquired)
+                workGate.Release();
+            if (flingGateAcquired)
+                flingGate!.Release();
         }
     }
 
@@ -3443,6 +4541,10 @@ public partial class MainViewModel : ViewModelBase
 
     private void CancelThumbnailLoading()
     {
+        // Move to a fresh logical generation before cancelling. StartThumbnailLoading can then
+        // replace stale in-flight markers immediately instead of waiting for cancelled workers
+        // to unwind their network/decode awaits.
+        Interlocked.Increment(ref _thumbnailLoadGeneration);
         var cts = _thumbnailLoadCts;
         _thumbnailLoadCts = null;
         if (cts is null)
@@ -3460,6 +4562,12 @@ public partial class MainViewModel : ViewModelBase
 
     private void AppendLoadedPageToVisibleItems(IReadOnlyList<DriveItemModel> pageItems)
     {
+        // Every visible file surface renders the stable slot collection directly. Items remains a
+        // non-visual compatibility shadow on desktop only; updating it can no longer change scroll
+        // extent or force the realized ItemsRepeater elements to be recreated.
+        if (IsMobilePlatform)
+            return;
+
         // The default/original view preserves Graph order. Rebuilding Items with Clear()+Add()
         // every time a page arrives forces a large virtualized control to throw away realized
         // elements and is very noticeable during a touch fling. Append only the new tail instead.
@@ -3480,53 +4588,198 @@ public partial class MainViewModel : ViewModelBase
         ApplyFilterAndSort();
     }
 
-    public void UpdateMobileThumbnailWindow(int startIndex, int visibleCount)
+    public void UpdateDesktopRealizedThumbnails(
+        IReadOnlyList<int> visibleSlotIndices,
+        IReadOnlyList<DriveItemModel> visibleItems,
+        bool allowNetwork)
     {
-        if (!IsMobilePlatform || Items.Count == 0)
+        if (IsMobilePlatform)
             return;
 
-        var buffer = Math.Max(16, visibleCount);
-        var from = Math.Max(0, startIndex - buffer);
-        var toExclusive = Math.Min(Items.Count, startIndex + visibleCount + buffer);
+        _desktopThumbnailVisibleSlotIndices = new HashSet<int>(visibleSlotIndices);
 
-        _mobileThumbnailWindowFrom = from;
-        _mobileThumbnailWindowToExclusive = toExclusive;
-
-        // Keep decoded thumbnails around in a bounded LRU instead of clearing them when they
-        // leave the viewport. Touch the current window so it cannot be the next eviction victim.
-        for (var i = from; i < toExclusive; i++)
+        var exactIds = new HashSet<string>(StringComparer.Ordinal);
+        var exactItems = new List<DriveItemModel>(visibleItems.Count);
+        foreach (var item in visibleItems)
         {
-            var item = Items[i];
+            if (item is null || string.IsNullOrWhiteSpace(item.Id) || !exactIds.Add(item.Id))
+                continue;
+            exactItems.Add(item);
+        }
+
+        _desktopThumbnailWantedIds = exactIds;
+        if (exactItems.Count == 0)
+            return;
+
+        var candidates = exactItems
+            .Where(item => item.SupportsThumbnail && !item.HasThumbnailImage &&
+                           (allowNetwork || _thumbnailCache.TryGetCachedPath(item, out _)))
+            .ToArray();
+        if (candidates.Length > 0)
+        {
+            StartThumbnailLoading(
+                candidates,
+                requireVisibleOnDesktop: true);
+        }
+    }
+
+    public void UpdateMobileRealizedThumbnails(IReadOnlyList<DriveItemModel> visibleItems)
+    {
+        if (!IsMobilePlatform || UsesNativeMobileFileList || visibleItems.Count == 0)
+            return;
+
+        // Offset/row-pitch math is only an estimate for UniformGridLayout because MinItemHeight is
+        // a minimum, not a promise of the final arranged row height. After a long fling even a tiny
+        // per-row difference can point the thumbnail scheduler at the wrong slots. At rest the view
+        // supplies the actually realized controls, making this set authoritative for network work.
+        var exactVisible = new HashSet<string>(StringComparer.Ordinal);
+        var exactItems = new List<DriveItemModel>(visibleItems.Count);
+        foreach (var item in visibleItems)
+        {
+            if (item is null || string.IsNullOrWhiteSpace(item.Id) || !exactVisible.Add(item.Id))
+                continue;
+
+            exactItems.Add(item);
             if (item.ThumbnailImage is not null)
                 TouchMobileThumbnail(item);
         }
 
-        var candidates = Items
-            .Skip(from)
-            .Take(toExclusive - from)
-            .Where(x => x.SupportsThumbnail && !x.HasThumbnailImage)
-            .ToArray();
-
-        if (candidates.Length == 0)
+        if (exactItems.Count == 0)
             return;
 
-        if (_mobileListScrolling)
+        _mobileThumbnailVisibleIds = exactVisible;
+
+        // Keep current realized items valid even if the approximate buffered index window drifted.
+        var wanted = new HashSet<string>(_mobileThumbnailWantedIds, StringComparer.Ordinal);
+        wanted.UnionWith(exactVisible);
+        _mobileThumbnailWantedIds = wanted;
+
+        var candidates = exactItems
+            .Where(item => item.SupportsThumbnail && !item.HasThumbnailImage &&
+                           (!_mobileListScrolling || _thumbnailCache.TryGetCachedPath(item, out _)))
+            .ToArray();
+        if (candidates.Length > 0)
+            StartThumbnailLoading(candidates, requireVisibleOnMobile: true);
+    }
+
+    public void UpdateMobileThumbnailWindow(int startIndex, int visibleCount, bool forceRescan = false)
+    {
+        if (!IsMobilePlatform || UsesNativeMobileFileList || MobileItems.Count == 0)
+            return;
+
+        var buffer = Math.Max(16, visibleCount);
+        var from = Math.Max(0, startIndex - buffer);
+        var visibleFrom = Math.Max(from, startIndex);
+        var visibleToExclusive = Math.Min(MobileItems.Count, startIndex + visibleCount);
+        var toExclusive = Math.Min(MobileItems.Count, startIndex + visibleCount + buffer);
+        var scrolling = _mobileListScrolling;
+
+        var previousFrom = _mobileThumbnailWindowFrom;
+        var previousToExclusive = _mobileThumbnailWindowToExclusive;
+        var previousScrolling = _mobileThumbnailWindowWasScrolling;
+
+        // ScrollChanged may fire once per rendered frame while the estimated item window only
+        // changes every row. A forced idle retry intentionally bypasses this guard so a metadata
+        // page that arrived just after the previous scan can still start its thumbnail work.
+        if (!forceRescan &&
+            from == previousFrom &&
+            toExclusive == previousToExclusive &&
+            scrolling == previousScrolling)
         {
-            // During a fling only hydrate items that already exist in the persistent disk cache.
-            // This mirrors native image loaders: memory/disk hits are allowed to bind while
-            // scrolling, but new network work waits until the gesture settles.
-            candidates = candidates
-                .Where(x => _thumbnailCache.TryGetCachedPath(x, out _))
-                .ToArray();
+            return;
         }
 
-        StartThumbnailLoading(candidates);
+        _mobileThumbnailWindowFrom = from;
+        _mobileThumbnailWindowToExclusive = toExclusive;
+        _mobileThumbnailVisibleFrom = visibleFrom;
+        _mobileThumbnailVisibleToExclusive = visibleToExclusive;
+        _mobileThumbnailWindowWasScrolling = scrolling;
+        RefreshMobileThumbnailWantedIds();
+
+        var visibleCandidates = new List<DriveItemModel>(Math.Min(32, Math.Max(0, visibleToExclusive - visibleFrom)));
+        var cachedPrefetchCandidates = new List<DriveItemModel>(Math.Min(32, Math.Max(0, toExclusive - from)));
+        var candidateIds = new HashSet<string>(StringComparer.Ordinal);
+
+        void ProcessRange(int rangeFrom, int rangeToExclusive, bool visibleRange)
+        {
+            rangeFrom = Math.Max(from, rangeFrom);
+            rangeToExclusive = Math.Min(toExclusive, rangeToExclusive);
+            if (rangeFrom >= rangeToExclusive)
+                return;
+
+            for (var i = rangeFrom; i < rangeToExclusive; i++)
+            {
+                var item = MobileItems[i].Item;
+                if (item is null)
+                    continue;
+
+                if (item.ThumbnailImage is not null)
+                    TouchMobileThumbnail(item);
+
+                if (!item.SupportsThumbnail || item.HasThumbnailImage || !candidateIds.Add(item.Id))
+                    continue;
+
+                var hasDiskCache = _thumbnailCache.TryGetCachedPath(item, out _);
+
+                // Network thumbnail work is reserved for the actual visible screen. The buffer
+                // only decodes persistent disk hits, so it can never occupy both mobile workers
+                // while the user's final viewport is still waiting for cloud thumbnails.
+                if (visibleRange)
+                {
+                    if (!scrolling || hasDiskCache)
+                        visibleCandidates.Add(item);
+                }
+                else if (hasDiskCache)
+                {
+                    cachedPrefetchCandidates.Add(item);
+                }
+            }
+        }
+
+        var previousWindowValid = previousFrom >= 0 && previousToExclusive > previousFrom;
+        var scrollStateChanged = scrolling != previousScrolling;
+        var disjointWindow = previousWindowValid &&
+                             (toExclusive <= previousFrom || from >= previousToExclusive);
+
+        if (forceRescan || !previousWindowValid || scrollStateChanged || !scrolling || disjointWindow)
+        {
+            // The final visible screen must win over prefetch buffers. After a large fling this
+            // starts exactly what the user is looking at before above/below-buffer work.
+            ProcessRange(visibleFrom, visibleToExclusive, visibleRange: true);
+            ProcessRange(visibleToExclusive, toExclusive, visibleRange: false);
+            ProcessRange(from, visibleFrom, visibleRange: false);
+        }
+        else
+        {
+            // While flinging, only inspect newly entering edges. Stale queued workers self-cancel
+            // against _mobileThumbnailWantedIds once the viewport has moved away.
+            if (toExclusive > previousToExclusive)
+                ProcessRange(Math.Max(previousToExclusive, from), toExclusive, visibleRange: false);
+            if (from < previousFrom)
+                ProcessRange(from, Math.Min(previousFrom, toExclusive), visibleRange: false);
+        }
+
+        if (visibleCandidates.Count > 0)
+            StartThumbnailLoading(visibleCandidates, requireVisibleOnMobile: true);
+        if (cachedPrefetchCandidates.Count > 0)
+            StartThumbnailLoading(cachedPrefetchCandidates);
+    }
+
+    private void ResetDesktopThumbnailViewport()
+    {
+        _desktopThumbnailVisibleSlotIndices = new HashSet<int>();
+        _desktopThumbnailWantedIds = new HashSet<string>(StringComparer.Ordinal);
     }
 
     private void ResetMobileThumbnailWindow()
     {
         _mobileThumbnailWindowFrom = -1;
         _mobileThumbnailWindowToExclusive = -1;
+        _mobileThumbnailVisibleFrom = -1;
+        _mobileThumbnailVisibleToExclusive = -1;
+        _mobileThumbnailWindowWasScrolling = false;
+        _mobileThumbnailWantedIds = new HashSet<string>(StringComparer.Ordinal);
+        _mobileThumbnailVisibleIds = new HashSet<string>(StringComparer.Ordinal);
     }
 
     private void ApplyFilterAndSort()
@@ -3536,12 +4789,44 @@ public partial class MainViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(keyword))
             source = source.Where(x => x.Name.Contains(keyword, StringComparison.CurrentCultureIgnoreCase));
 
-        // Sorting is intentionally limited to fields that OneDrive can order server-side.
-        // This keeps paging globally ordered even in folders containing thousands of items.
-
+        // Sorting is kept server/global-index consistent. The persistent local index applies the
+        // same order before a folder is shown; newly streamed Graph pages already arrive in that
+        // order, so the UI never repeatedly re-sorts a growing partial list.
+        var visible = source.ToArray();
         ResetMobileThumbnailWindow();
-        Items.Clear();
-        Items.AddRange(source);
+        ResetDesktopThumbnailViewport();
+
+        var slotCount = string.IsNullOrWhiteSpace(keyword)
+            ? Math.Max(_currentFolderTotalItemCount ?? visible.Length, visible.Length)
+            : visible.Length;
+        RebuildMobileSlots(slotCount, visible);
+
+        // Items is retained as a compatibility/read-only shadow for older integrations. Desktop UI
+        // no longer binds to it, so Graph pages cannot grow the desktop scroll extent in chunks.
+        if (!IsMobilePlatform)
+        {
+            Items.Clear();
+            Items.AddRange(visible);
+        }
+    }
+
+    internal static bool IsTransientNetworkFailure(Exception ex)
+    {
+        if (ex is OperationCanceledException)
+            return false;
+
+        if (ex is HttpRequestException http)
+        {
+            if (http.StatusCode is null)
+                return true;
+
+            var code = (int)http.StatusCode.Value;
+            return code is 408 or 425 or 429 || code >= 500;
+        }
+
+        // TLS/DNS/socket failures are commonly wrapped by the authentication stack or file-cache
+        // helpers. Walk the inner-exception chain instead of ever exposing their raw English text.
+        return ex.InnerException is not null && IsTransientNetworkFailure(ex.InnerException);
     }
 
     private async Task<Exception?> RunFolderNavigationAsync(
@@ -3568,8 +4853,15 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             failure = ex;
-            if (!(suppressChildrenOnNonFolderError && ex is GraphChildrenOnNonFolderException) &&
-                busyVersion == _folderNavigationBusyVersion)
+            if (IsTransientNetworkFailure(ex))
+            {
+                // Read-side Graph calls already retry continuously in OneDriveService. If a lower
+                // layer still reports a transient transport failure, keep the current/local view and
+                // stay silent rather than showing an SSL/DNS/socket message to the user.
+                ErrorMessage = null;
+            }
+            else if (!(suppressChildrenOnNonFolderError && ex is GraphChildrenOnNonFolderException) &&
+                     busyVersion == _folderNavigationBusyVersion)
             {
                 ErrorMessage = ex.Message;
                 StatusText = "操作失败";
@@ -3605,8 +4897,15 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = ex.Message;
-            StatusText = "操作失败";
+            if (IsTransientNetworkFailure(ex))
+            {
+                ErrorMessage = null;
+            }
+            else
+            {
+                ErrorMessage = ex.Message;
+                StatusText = "操作失败";
+            }
         }
         finally
         {

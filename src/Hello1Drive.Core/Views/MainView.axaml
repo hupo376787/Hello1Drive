@@ -11,7 +11,7 @@
                 <Grid Classes="fileItemSurface"
                       ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}"
                       ColumnSpacing="6" Height="46" Margin="0"
-                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" DoubleTapped="FileItem_DoubleTapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
                   <Border Grid.ColumnSpan="5" CornerRadius="5" Background="{DynamicResource HelloExplorerSelectionBrush}"
                           IsVisible="{Binding IsMobileSelected}" IsHitTestVisible="False" />
                   <Grid.ContextMenu>
@@ -42,8 +42,19 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="26" Height="26" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                              Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+                        <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <Viewbox Width="30" Height="30" Stretch="Uniform">
@@ -133,18 +144,40 @@
                 </Grid>
               </DataTemplate>
 
-<DataTemplate x:Key="MobileDetailsFileItemTemplate" x:DataType="models:DriveItemModel">
+<DataTemplate x:Key="MobileDetailsFileItemTemplate" x:DataType="models:VirtualDriveItemSlot">
   <Grid Classes="fileItemSurface" ColumnDefinitions="42,*,76" ColumnSpacing="6" Height="46" Margin="0"
         PointerPressed="FileItem_PointerPressed"
+        PointerReleased="FileItem_PointerReleased"
         Tapped="FileItem_Tapped" ContextRequested="FileItem_ContextRequested">
     <Border Grid.ColumnSpan="3" CornerRadius="5" Background="{DynamicResource HelloExplorerSelectionBrush}"
             IsVisible="{Binding IsMobileSelected}" IsHitTestVisible="False" />
+    <Border Grid.ColumnSpan="3" Margin="7,7,8,7" CornerRadius="6" Background="#10000000"
+            IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+    <Grid Grid.ColumnSpan="3" Width="24" Height="24" Margin="0,3,6,0"
+          HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="20"
+          IsVisible="{Binding IsMobileSelectionMode}" IsHitTestVisible="False">
+      <Ellipse Fill="#66000000" Stroke="White" StrokeThickness="1.8" />
+      <Ellipse Fill="#2F80ED" Stroke="White" StrokeThickness="1.8" IsVisible="{Binding IsMobileSelected}" />
+      <Path Data="M6.5,12.5 L10.2,16 L17.8,8.2" Stroke="White" StrokeThickness="2.2"
+            StrokeLineCap="Round" StrokeJoin="Round" IsVisible="{Binding IsMobileSelected}" />
+    </Grid>
     <Grid Grid.Column="0" Width="36" Height="36" HorizontalAlignment="Center" VerticalAlignment="Center">
       <Grid IsVisible="{Binding HasNoThumbnailImage}">
         <Viewbox Width="27" Height="27" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                  IsVisible="{Binding IsFolder}">
-          <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+          <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
         </Viewbox>
         <Grid IsVisible="{Binding ShowMobileFileBadge}" HorizontalAlignment="Center" VerticalAlignment="Center">
           <Border Width="25" Height="30" Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="1" CornerRadius="5" />
@@ -178,21 +211,43 @@
   </Grid>
 </DataTemplate>
 
-<DataTemplate x:Key="MobileLargeFileItemTemplate" x:DataType="models:DriveItemModel">
-  <Border Classes="fileItemSurface" Margin="0" Padding="6" CornerRadius="9" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+<DataTemplate x:Key="MobileLargeFileItemTemplate" x:DataType="models:VirtualDriveItemSlot">
+  <Border Classes="fileItemSurface" Margin="0" Padding="6" CornerRadius="9" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ClipToBounds="True"
           PointerPressed="FileItem_PointerPressed"
+          PointerReleased="FileItem_PointerReleased"
           Tapped="FileItem_Tapped" ContextRequested="FileItem_ContextRequested">
     <Grid RowDefinitions="*,Auto,Auto" RowSpacing="3">
       <Border Grid.RowSpan="3" CornerRadius="9" Background="{DynamicResource HelloExplorerSelectionBrush}"
               IsVisible="{Binding IsMobileSelected}" IsHitTestVisible="False" />
-      <Grid Grid.Row="0" Margin="2,2,2,4">
+      <Border Grid.RowSpan="3" Margin="5" CornerRadius="9" Background="#10000000"
+              IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+      <Grid Grid.RowSpan="3" Width="24" Height="24" Margin="0,4,4,0"
+            HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="20"
+            IsVisible="{Binding IsMobileSelectionMode}" IsHitTestVisible="False">
+        <Ellipse Fill="#66000000" Stroke="White" StrokeThickness="1.8" />
+        <Ellipse Fill="#2F80ED" Stroke="White" StrokeThickness="1.8" IsVisible="{Binding IsMobileSelected}" />
+        <Path Data="M6.5,12.5 L10.2,16 L17.8,8.2" Stroke="White" StrokeThickness="2.2"
+              StrokeLineCap="Round" StrokeJoin="Round" IsVisible="{Binding IsMobileSelected}" />
+      </Grid>
+      <Grid Grid.Row="0" Margin="2,2,2,4" ClipToBounds="True">
         <Grid IsVisible="{Binding HasNoThumbnailImage}">
-          <Viewbox Stretch="Uniform" Margin="14,8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+          <Viewbox Width="72" Height="72" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                    IsVisible="{Binding IsFolder}">
-            <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                  Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+            <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
           </Viewbox>
-          <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Stretch="Uniform" Margin="19,10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Width="72" Height="86" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Grid Width="58" Height="70">
               <Border Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="1.3" CornerRadius="9" />
               <Border Height="19" Background="#64748B" VerticalAlignment="Bottom" CornerRadius="0,0,9,9" />
@@ -200,7 +255,7 @@
                          HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,5" />
             </Grid>
           </Viewbox>
-          <Viewbox IsVisible="{Binding IsImage}" Stretch="Uniform" Margin="14,8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Viewbox IsVisible="{Binding IsImage}" Width="78" Height="78" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Canvas Width="32" Height="32">
               <Border Width="28" Height="28" Canvas.Left="2" Canvas.Top="2"
                       Background="#EEF7FF" BorderBrush="#8EC5FF" BorderThickness="1.2" CornerRadius="7" />
@@ -224,21 +279,43 @@
   </Border>
 </DataTemplate>
 
-<DataTemplate x:Key="MobileExtraLargeFileItemTemplate" x:DataType="models:DriveItemModel">
-  <Border Classes="fileItemSurface" Margin="0" Padding="8" CornerRadius="11" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+<DataTemplate x:Key="MobileExtraLargeFileItemTemplate" x:DataType="models:VirtualDriveItemSlot">
+  <Border Classes="fileItemSurface" Margin="0" Padding="8" CornerRadius="11" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ClipToBounds="True"
           PointerPressed="FileItem_PointerPressed"
+          PointerReleased="FileItem_PointerReleased"
           Tapped="FileItem_Tapped" ContextRequested="FileItem_ContextRequested">
     <Grid RowDefinitions="*,Auto,Auto" RowSpacing="4">
       <Border Grid.RowSpan="3" CornerRadius="11" Background="{DynamicResource HelloExplorerSelectionBrush}"
               IsVisible="{Binding IsMobileSelected}" IsHitTestVisible="False" />
-      <Grid Grid.Row="0" Margin="2,2,2,5">
+      <Border Grid.RowSpan="3" Margin="6" CornerRadius="11" Background="#10000000"
+              IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+      <Grid Grid.RowSpan="3" Width="26" Height="26" Margin="0,5,5,0"
+            HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="20"
+            IsVisible="{Binding IsMobileSelectionMode}" IsHitTestVisible="False">
+        <Ellipse Fill="#66000000" Stroke="White" StrokeThickness="1.8" />
+        <Ellipse Fill="#2F80ED" Stroke="White" StrokeThickness="1.8" IsVisible="{Binding IsMobileSelected}" />
+        <Path Data="M7,13.5 L11,17.2 L19.2,8.8" Stroke="White" StrokeThickness="2.3"
+              StrokeLineCap="Round" StrokeJoin="Round" IsVisible="{Binding IsMobileSelected}" />
+      </Grid>
+      <Grid Grid.Row="0" Margin="2,2,2,5" ClipToBounds="True">
         <Grid IsVisible="{Binding HasNoThumbnailImage}">
-          <Viewbox Stretch="Uniform" Margin="16,8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+          <Viewbox Width="102" Height="102" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                    IsVisible="{Binding IsFolder}">
-            <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                  Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+            <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
           </Viewbox>
-          <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Stretch="Uniform" Margin="22,10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Width="104" Height="124" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Grid Width="82" Height="98">
               <Border Background="#F8FAFC" BorderBrush="#C7D2E4" BorderThickness="1.5" CornerRadius="12" />
               <Border Height="25" Background="#64748B" VerticalAlignment="Bottom" CornerRadius="0,0,12,12" />
@@ -246,7 +323,7 @@
                          HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,7" />
             </Grid>
           </Viewbox>
-          <Viewbox IsVisible="{Binding IsImage}" Stretch="Uniform" Margin="16,8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Viewbox IsVisible="{Binding IsImage}" Width="110" Height="110" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Canvas Width="32" Height="32">
               <Border Width="28" Height="28" Canvas.Left="2" Canvas.Top="2"
                       Background="#EEF7FF" BorderBrush="#8EC5FF" BorderThickness="1.2" CornerRadius="7" />
@@ -272,7 +349,7 @@
 
 <DataTemplate x:Key="LargeFileItemTemplate" x:DataType="models:DriveItemModel">
               <Border Classes="fileItemSurface" Height="154" Margin="0" Padding="10" CornerRadius="10" HorizontalAlignment="Stretch"
-                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" DoubleTapped="FileItem_DoubleTapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
                 <Border.ContextMenu>
                   <ContextMenu>
                     <MenuItem Header="打开" Click="FileContext_Open_Click">
@@ -304,8 +381,19 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="82" Height="82" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                              Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+                        <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <Viewbox Width="82" Height="82" Stretch="Uniform">
@@ -393,7 +481,7 @@
             </DataTemplate>
 <DataTemplate x:Key="ExtraLargeFileItemTemplate" x:DataType="models:DriveItemModel">
               <Border Classes="fileItemSurface" Height="204" Margin="0" Padding="12" CornerRadius="12" HorizontalAlignment="Stretch"
-                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
+                      InputElement.IsHoldingEnabled="True" PointerPressed="FileItem_PointerPressed" Tapped="FileItem_Tapped" DoubleTapped="FileItem_DoubleTapped" Holding="FileItem_Holding" ContextRequested="FileItem_ContextRequested">
                 <Border.ContextMenu>
                   <ContextMenu>
                     <MenuItem Header="打开" Click="FileContext_Open_Click">
@@ -425,8 +513,19 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="116" Height="116" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Path Fill="{DynamicResource HelloIconFolderBrush}"
-                              Data="M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z" />
+                        <Canvas Width="20" Height="18">
+                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
+                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
+                                  Background="#F4B114" CornerRadius="2.3" />
+                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
+                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
+                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
+                                  Background="#FFD34B" CornerRadius="2.45" />
+                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
+                                  Background="#FFE990" CornerRadius="0.55" />
+                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
+                                  Background="#E1A011" CornerRadius="0.35" />
+                        </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <Viewbox Width="116" Height="116" Stretch="Uniform">
@@ -512,6 +611,36 @@
                 </Grid>
               </Border>
             </DataTemplate>
+
+    <!-- Desktop uses the same fixed logical slots as mobile. The actual desktop file template is
+         hosted only after metadata for that index exists; unloaded tail slots keep the scroll extent
+         stable without creating a full DriveItemModel or thumbnail object. -->
+    <DataTemplate x:Key="DesktopDetailsSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
+      <Grid Height="46" ClipToBounds="True">
+        <Border Margin="7,7,8,7" CornerRadius="6" Background="#10000000"
+                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource DetailsFileItemTemplate}"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate x:Key="DesktopLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
+      <Grid Height="162" ClipToBounds="True">
+        <Border Margin="7" CornerRadius="10" Background="#10000000"
+                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource LargeFileItemTemplate}"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate x:Key="DesktopExtraLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
+      <Grid Height="212" ClipToBounds="True">
+        <Border Margin="8" CornerRadius="12" Background="#10000000"
+                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
+        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource ExtraLargeFileItemTemplate}"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+      </Grid>
+    </DataTemplate>
   </UserControl.Resources>
 
   <Grid x:Name="RootGrid" ClipToBounds="True">
@@ -560,7 +689,8 @@
       <!-- Desktop first-row toolbar is hosted by MainWindow inside the custom title bar. -->
 
       <!-- Mobile toolbar -->
-      <Border x:Name="MobileTopToolbar" Grid.Row="0" Padding="5,2" Background="Transparent" MinHeight="34"
+      <Border x:Name="MobileTopToolbar" Grid.Row="0" Padding="5,2" Background="Transparent" MinHeight="0"
+              ClipToBounds="True"
               BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1"
               IsVisible="{OnFormFactor Desktop=False, Mobile=True}">
         <StackPanel Spacing="8">
@@ -619,10 +749,12 @@
       <!-- File action toolbar. Primary actions stay left-aligned in Home / Refresh / Download / New / Rename / Delete order. -->
       <Border x:Name="FileActionToolbar" Grid.Row="1"
               Padding="{OnFormFactor Desktop='6,0', Mobile='5,2'}"
-              MinHeight="{OnFormFactor Desktop=34, Mobile=34}"
+              MinHeight="{OnFormFactor Desktop=34, Mobile=0}"
+              ClipToBounds="{OnFormFactor Desktop=False, Mobile=True}"
               Background="Transparent" IsVisible="{Binding ShowToolbar}"
               BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
-        <Grid RowDefinitions="{OnFormFactor Desktop='*,0', Mobile='Auto,Auto'}" ColumnDefinitions="*,Auto"
+        <Grid
+              RowDefinitions="{OnFormFactor Desktop='*,0', Mobile='Auto,Auto'}" ColumnDefinitions="*,Auto"
               ColumnSpacing="10" RowSpacing="4" VerticalAlignment="Stretch">
           <!-- Left side of the toolbar: primary file actions in Explorer-like order. -->
           <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="5"
@@ -656,8 +788,7 @@
               <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
               <Button.Flyout>
                 <MenuFlyout>
-                  <MenuItem Header="跟随设置默认" Tag="Inherit:Default" Click="SortMenu_Click" />
-                  <MenuItem Header="系统默认" Tag="None:Original" Click="SortMenu_Click" />
+                  <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
                   <Separator />
                   <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
                   <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
@@ -701,21 +832,8 @@
                 <Path Classes="toolbarIcon iconDanger" Data="M3,4 H11 M5,4 V2.5 H9 V4 M4,5.5 L4.6,12 H9.4 L10,5.5 M6,6.7 V10 M8,6.7 V10" />
               </Button>
               <Border Width="1" Margin="4,4" Background="{DynamicResource SystemControlForegroundBaseLowBrush}" />
-              <Button Classes="viewMode" ToolTip.Tip="排序">
+              <Button Classes="viewMode" ToolTip.Tip="排序" Click="MobileSortButton_Click">
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
-                <Button.Flyout>
-                  <MenuFlyout>
-                    <MenuItem Header="跟随设置默认" Tag="Inherit:Default" Click="SortMenu_Click" />
-                    <MenuItem Header="系统默认" Tag="None:Original" Click="SortMenu_Click" />
-                    <Separator />
-                    <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
-                  </MenuFlyout>
-                </Button.Flyout>
               </Button>
               <Button Classes="viewMode" ToolTip.Tip="详细信息" Tag="Details" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></Button>
               <Button Classes="viewMode" ToolTip.Tip="大图标" Tag="LargeIcons" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></Button>
@@ -746,8 +864,7 @@
             </MenuItem>
             <MenuItem Header="排序方式">
               <MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M2,3 H11 M4,7 H11 M6,11 H11" /></MenuItem.Icon>
-              <MenuItem Header="跟随设置默认" Tag="Inherit:Default" Click="SortMenu_Click" />
-              <MenuItem Header="系统默认" Tag="None:Original" Click="SortMenu_Click" />
+              <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
               <Separator />
               <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
               <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
@@ -770,15 +887,16 @@
         </Grid.ContextMenu>
         <!-- Details -->
         <Grid IsVisible="{Binding IsDetailsView}" RowDefinitions="Auto,*">
-          <Border Grid.Row="0" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
+          <Border x:Name="DetailsHeaderBorder" Grid.Row="0" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
                   Background="Transparent">
             <Grid ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}" ColumnSpacing="6">
-              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序" HorizontalContentAlignment="Center" Padding="0">
+              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序"
+                      HorizontalContentAlignment="Center" Padding="0"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
                 <Button.Flyout>
                   <MenuFlyout>
-                    <MenuItem Header="跟随设置默认" Tag="Inherit:Default" Click="SortMenu_Click" />
-                    <MenuItem Header="系统默认" Tag="None:Original" Click="SortMenu_Click" />
+                    <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
                     <Separator />
                     <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
                     <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
@@ -788,6 +906,12 @@
                     <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
                   </MenuFlyout>
                 </Button.Flyout>
+              </Button>
+              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序"
+                      HorizontalContentAlignment="Center" Padding="0"
+                      IsVisible="{OnFormFactor Desktop=False, Mobile=True}"
+                      Click="MobileSortButton_Click">
+                <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
               </Button>
               <Button Grid.Column="1" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Name" Click="SortHeader_Click">
                 <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="名称"/><TextBlock Text="{Binding NameSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
@@ -805,20 +929,27 @@
             </Grid>
           </Border>
 
-          <ListBox x:Name="DetailsList" Grid.Row="1" Classes="fileList" ItemsSource="{Binding Items}" Margin="0,0,4,0"
-                   ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                   SelectionMode="Multiple" SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped" ItemTemplate="{StaticResource DetailsFileItemTemplate}"
-                   IsVisible="{OnFormFactor Desktop=True, Mobile=False}" />
+          <ScrollViewer x:Name="DesktopDetailsScrollViewer" Grid.Row="1" Margin="0,0,4,0"
+                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                        IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
+                        ScrollChanged="FileListScrollViewer_ScrollChanged">
+            <ItemsRepeater x:Name="DesktopDetailsRepeater" ItemsSource="{Binding VirtualItems}"
+                           ItemTemplate="{StaticResource DesktopDetailsSlotTemplate}">
+              <ItemsRepeater.Layout>
+                <StackLayout Spacing="0" />
+              </ItemsRepeater.Layout>
+            </ItemsRepeater>
+          </ScrollViewer>
 
           <RefreshContainer Grid.Row="1"
-                            IsVisible="{OnFormFactor Desktop=False, Mobile=True}"
+                            IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                             RefreshRequested="MobileRefreshContainer_RefreshRequested">
             <ScrollViewer x:Name="MobileDetailsScrollViewer"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"
                           ScrollChanged="FileListScrollViewer_ScrollChanged">
-              <ItemsRepeater ItemsSource="{Binding Items}" ItemTemplate="{StaticResource MobileDetailsFileItemTemplate}">
+              <ItemsRepeater x:Name="MobileDetailsRepeater" ItemsSource="{Binding MobileItems}" ItemTemplate="{StaticResource MobileDetailsFileItemTemplate}">
                 <ItemsRepeater.Layout>
                   <StackLayout Spacing="0" />
                 </ItemsRepeater.Layout>
@@ -829,24 +960,27 @@
 
         <!-- Large icons -->
         <Grid IsVisible="{Binding IsLargeIconView}">
-<ListBox x:Name="LargeIconList" Classes="fileList iconFileList" ItemsSource="{Binding Items}" SelectionMode="Multiple" Margin="0,0,4,0"
-                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped" ItemTemplate="{StaticResource LargeFileItemTemplate}"
-                 IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
-          <ListBox.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" ItemWidth="152" ItemHeight="162" /></ItemsPanelTemplate>
-          </ListBox.ItemsPanel>
-        </ListBox>
+<ScrollViewer x:Name="DesktopLargeIconScrollViewer" Margin="0,0,4,0"
+                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
+                      ScrollChanged="FileListScrollViewer_ScrollChanged">
+          <ItemsRepeater x:Name="DesktopLargeIconRepeater" ItemsSource="{Binding VirtualItems}"
+                         ItemTemplate="{StaticResource DesktopLargeSlotTemplate}">
+            <ItemsRepeater.Layout>
+              <UniformGridLayout MinItemWidth="152" MinItemHeight="162" MinColumnSpacing="4" MinRowSpacing="4" />
+            </ItemsRepeater.Layout>
+          </ItemsRepeater>
+        </ScrollViewer>
 
 
-          <RefreshContainer IsVisible="{OnFormFactor Desktop=False, Mobile=True}"
+          <RefreshContainer IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                             RefreshRequested="MobileRefreshContainer_RefreshRequested">
             <ScrollViewer x:Name="MobileLargeIconScrollViewer"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"
                           ScrollChanged="FileListScrollViewer_ScrollChanged" SizeChanged="MobileIconScrollViewer_SizeChanged">
-              <ItemsRepeater x:Name="MobileLargeIconRepeater" ItemsSource="{Binding Items}" ItemTemplate="{StaticResource MobileLargeFileItemTemplate}">
+              <ItemsRepeater x:Name="MobileLargeIconRepeater" ItemsSource="{Binding MobileItems}" ItemTemplate="{StaticResource MobileLargeFileItemTemplate}">
                 <ItemsRepeater.Layout>
                   <UniformGridLayout MinItemWidth="108" MinItemHeight="146"
                                      MinColumnSpacing="4" MinRowSpacing="4" />
@@ -858,24 +992,27 @@
 
         <!-- Extra large icons -->
         <Grid IsVisible="{Binding IsExtraLargeIconView}">
-<ListBox x:Name="ExtraLargeIconList" Classes="fileList iconFileList" ItemsSource="{Binding Items}" SelectionMode="Multiple" Margin="0,0,4,0"
-                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 SelectionChanged="ItemsList_SelectionChanged" DoubleTapped="ItemsList_DoubleTapped" ItemTemplate="{StaticResource ExtraLargeFileItemTemplate}"
-                 IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
-          <ListBox.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" ItemWidth="220" ItemHeight="212" /></ItemsPanelTemplate>
-          </ListBox.ItemsPanel>
-        </ListBox>
+<ScrollViewer x:Name="DesktopExtraLargeIconScrollViewer" Margin="0,0,4,0"
+                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
+                      ScrollChanged="FileListScrollViewer_ScrollChanged">
+          <ItemsRepeater x:Name="DesktopExtraLargeIconRepeater" ItemsSource="{Binding VirtualItems}"
+                         ItemTemplate="{StaticResource DesktopExtraLargeSlotTemplate}">
+            <ItemsRepeater.Layout>
+              <UniformGridLayout MinItemWidth="220" MinItemHeight="212" MinColumnSpacing="4" MinRowSpacing="4" />
+            </ItemsRepeater.Layout>
+          </ItemsRepeater>
+        </ScrollViewer>
 
 
-          <RefreshContainer IsVisible="{OnFormFactor Desktop=False, Mobile=True}"
+          <RefreshContainer IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                             RefreshRequested="MobileRefreshContainer_RefreshRequested">
             <ScrollViewer x:Name="MobileExtraLargeIconScrollViewer"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"
                           ScrollChanged="FileListScrollViewer_ScrollChanged" SizeChanged="MobileIconScrollViewer_SizeChanged">
-              <ItemsRepeater x:Name="MobileExtraLargeIconRepeater" ItemsSource="{Binding Items}" ItemTemplate="{StaticResource MobileExtraLargeFileItemTemplate}">
+              <ItemsRepeater x:Name="MobileExtraLargeIconRepeater" ItemsSource="{Binding MobileItems}" ItemTemplate="{StaticResource MobileExtraLargeFileItemTemplate}">
                 <ItemsRepeater.Layout>
                   <UniformGridLayout MinItemWidth="150" MinItemHeight="188"
                                      MinColumnSpacing="4" MinRowSpacing="4" />
@@ -885,10 +1022,16 @@
           </RefreshContainer>
         </Grid>
 
-        <Grid HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12"
-              Background="Transparent" IsVisible="{Binding IsLoadingMore}" IsHitTestVisible="False" ZIndex="700">
-          <controls:LoadingIndicator />
-        </Grid>
+        <!-- Native mobile performance path: Android hosts RecyclerView and iOS hosts UICollectionView
+             above the hidden Avalonia fallback surfaces. -->
+        <!-- The platform-native list is created lazily after authentication.  In particular,
+             a clean first launch must not instantiate RecyclerView/UICollectionView behind the
+             login page before the platform activity/view hierarchy has fully settled. -->
+        <Grid x:Name="NativeMobileFileListContainer"
+              IsVisible="False"
+              Margin="0,42,0,0"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch" />
 
         <!-- Marquee selection + freely draggable upload button. -->
         <Canvas IsHitTestVisible="False" ZIndex="800">
@@ -926,8 +1069,9 @@
       </Canvas>
     </Grid>
 
-    <!-- Mobile contextual selection actions. It appears only after the long-press/drag gesture
-         ends, so it never steals the pointer while the finger is extending the selection. -->
+    <!-- Mobile contextual selection actions. A stationary long-press selects one item; additional
+         items are toggled by taps. Drag-range selection is intentionally not used on phones so a
+         slow scroll can never be mistaken for multi-selection. -->
     <Border x:Name="MobileSelectionActionBar" IsVisible="False"
             ZIndex="1500" VerticalAlignment="Top" Margin="8,8,8,0" Padding="10,8"
             CornerRadius="12" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
@@ -1062,13 +1206,13 @@
 
           <Grid Grid.Row="2" RowDefinitions="Auto,Auto,Auto" RowSpacing="8" HorizontalAlignment="Stretch">
             <Button Grid.Row="0" Height="50" Background="Transparent" BorderThickness="0"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                     Content="进入 OneDrive 网页版" Click="MobileProfileOpenWeb_Click" />
             <Button Grid.Row="1" Height="50" Background="Transparent" BorderThickness="0"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                     Content="设置" Click="MobileProfileSettings_Click" />
             <Button Grid.Row="2" Height="50" Background="Transparent" BorderThickness="0"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                     Content="退出登录" Click="MobileProfileLogout_Click" />
           </Grid>
 
@@ -1274,6 +1418,58 @@
       </Border>
     </Grid>
 
+    <!-- Mobile sort action panel. It intentionally mirrors the image-preview long-press surface. -->
+    <Grid x:Name="MobileSortActionsOverlay"
+          IsVisible="False"
+          Background="#72000000"
+          ZIndex="3200"
+          PointerPressed="MobileSortActionsBackdrop_PointerPressed">
+      <Border MaxWidth="420" Margin="28"
+              HorizontalAlignment="Stretch" VerticalAlignment="Center"
+              Padding="0,8" CornerRadius="8"
+              Background="#F0444444"
+              BorderBrush="#28FFFFFF" BorderThickness="1"
+              PointerPressed="OverlayContent_PointerPressed">
+        <StackPanel HorizontalAlignment="Stretch">
+          <Button Content="系统默认" Tag="Inherit:Default"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="名称 · 升序" Tag="Name:Ascending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="名称 · 降序" Tag="Name:Descending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="日期 · 升序" Tag="Modified:Ascending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="日期 · 降序" Tag="Modified:Descending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="大小 · 升序" Tag="Size:Ascending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+          <Button Content="大小 · 降序" Tag="Size:Descending"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileSortAction_Click" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
     <!-- Mobile preview action panel. This intentionally uses an in-page overlay instead of
          ContextMenu so Android Back can dismiss it before the preview itself and so image
          long-press can open the exact same surface. -->
@@ -1288,30 +1484,30 @@
               Background="#F0444444"
               BorderBrush="#28FFFFFF" BorderThickness="1"
               PointerPressed="OverlayContent_PointerPressed">
-        <StackPanel>
+        <StackPanel HorizontalAlignment="Stretch">
           <Button Content="{Binding SlideshowText}"
                   IsVisible="{Binding IsImagePreview}"
-                  Height="58" Padding="20,0"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
                   Click="PreviewSlideshow_Click" />
           <Button Content="下载"
-                  Height="58" Padding="20,0"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
                   Click="PreviewDownload_Click" />
           <Button Content="缓存"
-                  Height="58" Padding="20,0"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
                   Click="PreviewCache_Click" />
           <Button Content="分享"
-                  Height="58" Padding="20,0"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
                   Click="PreviewShare_Click" />
           <Button Content="详细信息"
-                  Height="58" Padding="20,0"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
                   Click="PreviewDetails_Click" />
@@ -1538,7 +1734,7 @@
                   <Button Grid.Column="1" Content="清除缓存" Command="{Binding ClearCacheCommand}" VerticalAlignment="Center" />
                 </Grid>
 
-                <TextBlock Text="设置修改后会自动保存并立即生效。" Classes="caption" TextWrapping="Wrap" />
+<TextBlock Text="设置修改后会自动保存并立即生效。" Classes="caption" TextWrapping="Wrap" />
               </StackPanel>
             </ScrollViewer>
           </Grid>

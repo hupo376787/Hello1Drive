@@ -67,12 +67,44 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet workload install android
       - run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
-      - uses: actions/upload-artifact@v4
+      - name: Prepare Android packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish"
+          TARGET="publish/android"
+          mkdir -p "$TARGET"
+
+          APK="$(find "$SOURCE" -maxdepth 1 -type f -name '*-Signed.apk' -print -quit)"
+          if [[ -z "$APK" ]]; then
+            APK="$(find "$SOURCE" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          fi
+
+          AAB="$(find "$SOURCE" -maxdepth 1 -type f -name '*-Signed.aab' -print -quit)"
+          if [[ -z "$AAB" ]]; then
+            AAB="$(find "$SOURCE" -maxdepth 1 -type f -name '*.aab' -print -quit)"
+          fi
+
+          if [[ -z "$APK" || -z "$AAB" ]]; then
+            echo "Android publish output is missing APK or AAB."
+            find "$SOURCE" -maxdepth 1 -type f -print
+            exit 1
+          fi
+
+          cp "$APK" "$TARGET/Hello1Drive-Android.apk"
+          cp "$AAB" "$TARGET/Hello1Drive-Android.aab"
+
+      - name: Upload APK directly
+        uses: actions/upload-artifact@v7
         with:
-          name: Hello1Drive-Android
-          path: |
-            src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish/*.apk
-            src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish/*.aab
+          path: publish/android/Hello1Drive-Android.apk
+          archive: false
+
+      - name: Upload AAB directly
+        uses: actions/upload-artifact@v7
+        with:
+          path: publish/android/Hello1Drive-Android.aab
+          archive: false
 
   ios-simulator:
     runs-on: macos-latest

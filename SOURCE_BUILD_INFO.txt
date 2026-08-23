@@ -1,0 +1,65 @@
+Base source:
+Hello1Drive Android native RecyclerView high-performance revision after .NET 10 / Android 36 binding fixes.
+
+This revision:
+
+1. Restores the original folder icon on Android native file cells
+- Native Android Canvas drawing now reproduces the original Avalonia folder path:
+  M2,5 C2,3.9 2.9,3 4,3 H8 L10,5 H16 C17.1,5 18,5.9 18,7 V15 C18,16.1 17.1,17 16,17 H4 C2.9,17 2,16.1 2,15 Z
+- Original colors are restored exactly: light #F4B32C, dark #FFD86A.
+- Removes the Android-only alternate shaded/tabbed folder artwork.
+
+2. Adds a native iOS file surface
+- iOS no longer uses the Avalonia ItemsRepeater path for the main file list.
+- NativeControlHost now embeds UIKit UICollectionView on iOS.
+- UICollectionViewFlowLayout provides detail rows plus large/extra-large native grids.
+- UIRefreshControl provides native pull-to-refresh.
+- Cell reuse means only visible/near-visible UIKit cells are created, even when VirtualDriveItemSlot count is in the thousands.
+- Native long press, item tap, selection state, scroll restoration and view-mode switching are bridged through NativeMobileFileListHost.
+
+3. iOS thumbnail performance path
+- 4 concurrent workers.
+- 96-image native UIImage LRU.
+- A new scroll/fling cancels the previous thumbnail generation.
+- Network thumbnail work does not start while scrolling.
+- About 70 ms after native scrolling becomes idle, only currently visible cells are considered for thumbnail work.
+- Disk/network thumbnail persistence continues to use the shared ThumbnailCacheService; visual decode/render uses UIKit UIImage.
+
+4. Removes the old iOS Avalonia list from the hot path
+- UsesNativeMobileFileList is true for both Android and iOS.
+- UseAvaloniaMobileFileList is false when a native mobile implementation is active, so hidden Avalonia RefreshContainer/ItemsRepeater surfaces are not laid out behind the native list.
+- Native mobile file lists keep the app chrome fixed to avoid NativeControlHost/Avalonia transform coupling.
+
+5. iOS folder artwork
+- iOS native drawing uses the same original folder geometry and the same light/dark folder colors as the shared Avalonia templates and restored Android drawing.
+
+Validation available in this environment:
+- All AXAML/project XML parsed successfully.
+- Lightweight C# delimiter scan passed for 61 C# files.
+- Native Android/iOS integration invariants passed.
+- The environment does not contain the .NET SDK/MSBuild or an Apple iOS workload/Xcode, so the iOS head was not compiled locally. Build the iOS project with the configured .NET 10 iOS workload/Xcode environment for final binding validation.
+
+Clean-start / cleared-app-data startup fix:
+- Android and iOS no longer instantiate the platform-native file list from XAML during view construction.
+- MainView now contains only a lightweight NativeMobileFileListContainer at cold start.
+- RecyclerView / UICollectionView is created lazily only after silent authentication has actually succeeded.
+- When signed out (including a completely cleared app-data first launch), no native list exists behind the login page.
+- Logout destroys the native host; a later login creates a fresh native list.
+- Overlay hiding keeps the native host but removes its platform surface from visibility; authentication transitions own creation/destruction.
+- This isolates first-run/login startup from NativeControlHost platform timing while preserving the fast native list after login.
+
+Folder icon refresh:
+- Replaced the previous flat generic folder glyph with a Windows 11 / File Explorer inspired layered yellow folder.
+- Android native RecyclerView draws the icon directly on Canvas using allocation-free reused Path geometry.
+- iOS native UICollectionView uses matching UIKit bezier geometry.
+- Avalonia desktop/fallback file-list templates use the same layered silhouette/colors for visual consistency.
+- No raster image assets were added, so the icon remains sharp at all list/grid sizes.
+
+Android clean-data startup fix (Fast Deployment):
+- Debug builds now set `<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>`.
+- This disables assembly Fast Deployment for Debug so all managed assemblies are packaged in the APK.
+- Clearing Android application data can no longer delete the only deployed copies of the assemblies
+  from `files/.__override__/arm64-v8a`, which previously caused monodroid to abort before
+  Application.OnCreate / Hello1Drive.Startup logging could run.
+- Visual Studio F5 debugging remains supported; deployment is somewhat slower because assemblies are
+  embedded/reinstalled instead of being fast-deployed into the app data directory.

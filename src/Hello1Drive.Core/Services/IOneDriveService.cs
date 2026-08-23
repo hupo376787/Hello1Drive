@@ -17,6 +17,10 @@ public interface IOneDriveService
         int pageSize = 120,
         CancellationToken cancellationToken = default,
         string? orderBy = null);
+    Task<DriveDeltaPage> GetDriveDeltaPageAsync(
+        string? deltaOrNextLink = null,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default);
     Task<DriveItemModel> GetItemMetadataAsync(string? itemId, CancellationToken cancellationToken = default);
     Task<byte[]?> GetThumbnailAsync(DriveItemModel item, CancellationToken cancellationToken = default);
     Task<DriveItemModel> CreateFolderAsync(string? parentItemId, string name, CancellationToken cancellationToken = default);

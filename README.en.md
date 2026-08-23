@@ -17,7 +17,7 @@ Android application ID: `com.xiaowei.hello1drive`
 - Overlay previews that close when clicking outside, plus Desktop right-click and mobile long-press context menus for common file actions.
 - Built-in text editor with save-back-to-OneDrive.
 - Built-in image and animated-GIF preview that opens fitted to the viewport, has no scrollbars, keeps the mouse pointer as the zoom anchor, and shows the 1%–800% zoom ratio at the top center.
-- Persistent opened-file cache validated against DriveItem version metadata; unchanged files reopen locally without downloading the body again. Image/video thumbnails now have a separate persistent disk cache as well (`cache/thumbnails` beside the executable on Desktop, app data on mobile), so unchanged thumbnails survive app restarts without another thumbnail download. Clearing cache removes both file and thumbnail caches, and explicit file/folder caching also warms thumbnail entries recursively.
+- Persistent opened-file cache validated against DriveItem version metadata; unchanged files reopen locally without downloading the body again. Image/video thumbnails now have a separate persistent disk cache as well (`cache/thumbnails` beside the executable on Desktop, app data on mobile), so unchanged thumbnails survive app restarts without another thumbnail download. Clearing cache removes file, thumbnail, and local metadata-index caches for the current account; the current folder is then rebuilt from Graph. Explicit file/folder caching also warms thumbnail entries recursively.
 - Built-in image/media preview with Desktop LibVLC and Android native `VideoView`. Desktop media can replay from the beginning after reaching the end. Android uses a compact custom transport row with one play/pause button before the seek bar and no rewind/fast-forward buttons. Mobile preview overflow and stationary image long-press share a centered action panel that Back dismisses first, without interfering with swipe/zoom gestures. A **Use built-in viewer** setting (enabled by default) can be disabled to cache files locally and open them with the OS default application; unsupported types remain on the preview page with a system-app retry action.
 - Fully custom Desktop title bar with the primary file toolbar merged into it, transparent title/status surfaces, compact toolbar height and consistent caption glyphs.
 - HelloV-style right-side acrylic settings panel using the current wallpaper copy, blur and translucent tint.
@@ -67,6 +67,7 @@ The development SPA redirect URI is fixed to `http://localhost:5173/browser-auth
 ## Folder navigation and view memory
 
 - Folder navigation is cancellable: pressing system Back while a child folder is still loading immediately cancels that request and restores the parent folder.
+- Mobile folder paging is decoupled from scrolling: `folder.childCount` creates a stable placeholder-backed logical list, remaining children pages fill it in the background, and a persistent per-account metadata index is kept current with Microsoft Graph delta. See `docs/LOCAL_INDEX_SYNC.md`.
 - Details / Large Icons / Extra Large Icons are remembered independently for every OneDrive folder under each Microsoft account, including the root folder.
 - An unvisited folder uses the existing global ViewMode as its initial fallback.
 
@@ -74,7 +75,7 @@ The development SPA redirect URI is fixed to `http://localhost:5173/browser-auth
 
 - Added a Hello1Drive startup splash without making restored folder snapshots wait for Graph synchronization.
 - Unified indeterminate loading UI: circular activity ring above `加载中` on a transparent loading surface.
-- Folder entry keeps only the first children page on the critical path; missing child counts refresh in the background and cached folders do not flash a busy overlay.
+- Folder entry keeps only the first children page on the critical path. On mobile, known child counts create the complete logical slot range immediately and later Graph pages fill stable placeholders in the background. Missing counts refresh separately; a persistent metadata index restores indexed folders locally and Graph delta synchronizes cloud changes.
 - Mobile Back at the OneDrive root opens a compact close confirmation. The Settings “download all OneDrive files” warning is also a compact dialog.
 
 - Windows desktop supports launch-at-login with `--tray`, starting directly in the system tray.

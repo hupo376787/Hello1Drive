@@ -12,11 +12,24 @@
     <AndroidPackageFormats>apk;aab</AndroidPackageFormats>
   </PropertyGroup>
 
+
+  <!--
+    Keep Debug builds self-contained on-device.
+    Clearing Android app data deletes the Fast Deployment __override__ assemblies.
+    With EmbedAssembliesIntoApk=true the managed assemblies stay inside the APK,
+    so "Clear all data" cannot make the next cold start abort before managed code runs.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../Hello1Drive.Core/Hello1Drive.Core.csproj" />
     <PackageReference Include="Avalonia.Android" />
     <PackageReference Include="Microsoft.Identity.Client" />
     <PackageReference Include="Xamarin.AndroidX.Browser" />
     <PackageReference Include="Xamarin.AndroidX.Lifecycle.Process" />
+    <PackageReference Include="Xamarin.AndroidX.RecyclerView" />
+    <PackageReference Include="Xamarin.AndroidX.SwipeRefreshLayout" />
   </ItemGroup>
 </Project>

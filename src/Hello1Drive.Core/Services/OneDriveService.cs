@@ -25,6 +25,9 @@ public sealed class OneDriveService : IOneDriveService
     public OneDriveService(IAuthenticationService authentication)
     {
         _authentication = authentication;
+        // A dead Wi-Fi/TLS path should fail into our cancellation-aware retry loop instead of
+        // occupying one Graph request for HttpClient's much longer default timeout.
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
     public long? UploadBytesPerSecondLimit { get; set; }
@@ -179,6 +182,42 @@ public sealed class OneDriveService : IOneDriveService
         };
     }
 
+    public async Task<DriveDeltaPage> GetDriveDeltaPageAsync(
+        string? deltaOrNextLink = null,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default)
+    {
+        pageSize = Math.Clamp(pageSize, 20, 200);
+        var url = deltaOrNextLink;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            const string select = "id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem,specialFolder,parentReference,deleted,root";
+            url = $"{AppConfig.GraphBaseUrl}/me/drive/root/delta?$top={pageSize}&$select={select}";
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.Gone)
+        {
+            return new DriveDeltaPage
+            {
+                ResyncRequired = true,
+                ResyncLink = response.Headers.Location?.ToString()
+            };
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        var page = await DeserializeAsync<GraphDeltaCollectionResponse<DriveItemModel>>(response, cancellationToken)
+            .ConfigureAwait(false);
+        return new DriveDeltaPage
+        {
+            Items = page.Value,
+            NextLink = page.NextLink,
+            DeltaLink = page.DeltaLink
+        };
+    }
+
     public async Task<DriveItemModel> GetItemMetadataAsync(string? itemId, CancellationToken cancellationToken = default)
     {
         var itemPath = string.IsNullOrWhiteSpace(itemId)
@@ -186,7 +225,7 @@ public sealed class OneDriveService : IOneDriveService
             : $"items/{Uri.EscapeDataString(itemId)}";
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{AppConfig.GraphBaseUrl}/me/drive/{itemPath}?$select=id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem,specialFolder");
+            $"{AppConfig.GraphBaseUrl}/me/drive/{itemPath}?$select=id,name,size,webUrl,createdDateTime,lastModifiedDateTime,eTag,cTag,file,folder,remoteItem,specialFolder,parentReference,root");
         using var response = await SendAsync(request, cancellationToken);
         return await DeserializeAsync<DriveItemModel>(response, cancellationToken);
     }
@@ -210,13 +249,14 @@ public sealed class OneDriveService : IOneDriveService
                 if (directResponse.IsSuccessStatusCode)
                     return await directResponse.Content.ReadAsByteArrayAsync(cancellationToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch
             {
-                // Fall through to the authenticated Graph thumbnail endpoint.
+                // A CDN timeout/SSL/DNS problem should fall through to the authenticated Graph
+                // endpoint, whose read-side transport has cancellation-aware automatic retry.
             }
         }
 
@@ -396,43 +436,64 @@ public sealed class OneDriveService : IOneDriveService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}/content");
-
-        // Transfer I/O deliberately leaves the caller's synchronization context after the
-        // response headers arrive. Otherwise every 128 KiB read/write continuation can hop
-        // back through Avalonia's UI dispatcher and produce intermittent scrolling/input hitches.
-        using var response = await SendAsync(request, cancellationToken, HttpCompletionOption.ResponseHeadersRead)
-            .ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-
-        var total = response.Content.Headers.ContentLength;
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var limiter = new TransferRateLimiter(DownloadBytesPerSecondLimit);
-        var buffer = ArrayPool<byte>.Shared.Rent(256 * 1024);
-        long copied = 0;
-        try
+        var retryAttempt = 0;
+        while (true)
         {
-            while (true)
+            cancellationToken.ThrowIfCancellationRequested();
+            try
             {
-                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
+                if (retryAttempt > 0)
+                {
+                    if (!destination.CanSeek)
+                        throw new IOException("下载连接中断，目标流不可定位，无法自动续重试。");
+                    destination.Position = 0;
+                    destination.SetLength(0);
+                    progress?.Report(0);
+                }
+
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    $"{AppConfig.GraphBaseUrl}/me/drive/items/{Uri.EscapeDataString(itemId)}/content");
+
+                // Transfer I/O deliberately leaves the caller's synchronization context after the
+                // response headers arrive. SendAsync itself retries temporary TLS/DNS/Graph failures.
+                using var response = await SendAsync(request, cancellationToken, HttpCompletionOption.ResponseHeadersRead)
                     .ConfigureAwait(false);
-                if (read <= 0)
-                    break;
+                await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                await limiter.ThrottleAsync(read, cancellationToken).ConfigureAwait(false);
-                copied += read;
-                if (total is > 0)
-                    progress?.Report((double)copied / total.Value);
+                var total = response.Content.Headers.ContentLength;
+                await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                var limiter = new TransferRateLimiter(DownloadBytesPerSecondLimit);
+                var buffer = ArrayPool<byte>.Shared.Rent(256 * 1024);
+                long copied = 0;
+                try
+                {
+                    while (true)
+                    {
+                        var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
+                            .ConfigureAwait(false);
+                        if (read <= 0)
+                            break;
+
+                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                        await limiter.ThrottleAsync(read, cancellationToken).ConfigureAwait(false);
+                        copied += read;
+                        if (total is > 0)
+                            progress?.Report((double)copied / total.Value);
+                    }
+
+                    await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    progress?.Report(1.0);
+                    return;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
             }
-
-            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-            progress?.Report(1.0);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
+            catch (Exception ex) when (destination.CanSeek && IsTransientTransportFailure(ex, cancellationToken))
+            {
+                await DelayBeforeReadRetryAsync(null, retryAttempt++, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -470,7 +531,7 @@ public sealed class OneDriveService : IOneDriveService
         if (string.IsNullOrWhiteSpace(session.UploadUrl))
             throw new InvalidOperationException("Microsoft Graph 未返回上传会话 URL。");
 
-        using var uploadClient = new HttpClient();
+        using var uploadClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var buffer = new byte[UploadChunkSize];
         long offset = 0;
         source.Position = 0;
@@ -491,22 +552,41 @@ public sealed class OneDriveService : IOneDriveService
                 throw new EndOfStreamException("上传过程中输入流提前结束。");
 
             var chunkOffset = offset;
-            using var chunkStream = new MemoryStream(buffer, 0, readTotal, writable: false, publiclyVisible: true);
-            var chunkProgress = new InlineProgress<double>(p =>
+            var chunkAttempt = 0;
+            while (true)
             {
-                var sent = chunkOffset + p * readTotal;
-                progress?.Report(Math.Clamp(sent / length, 0, 1));
-            });
-            using var chunk = new ProgressStreamContent(
-                chunkStream,
-                UploadBytesPerSecondLimit,
-                chunkProgress,
-                "application/octet-stream");
-            chunk.Headers.ContentLength = readTotal;
-            chunk.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + readTotal - 1, length);
+                cancellationToken.ThrowIfCancellationRequested();
+                using var chunkStream = new MemoryStream(buffer, 0, readTotal, writable: false, publiclyVisible: true);
+                var chunkProgress = new InlineProgress<double>(p =>
+                {
+                    var sent = chunkOffset + p * readTotal;
+                    progress?.Report(Math.Clamp(sent / length, 0, 1));
+                });
+                using var chunk = new ProgressStreamContent(
+                    chunkStream,
+                    UploadBytesPerSecondLimit,
+                    chunkProgress,
+                    "application/octet-stream");
+                chunk.Headers.ContentLength = readTotal;
+                chunk.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + readTotal - 1, length);
 
-            using var response = await uploadClient.PutAsync(session.UploadUrl, chunk, cancellationToken).ConfigureAwait(false);
-            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    using var response = await uploadClient.PutAsync(session.UploadUrl, chunk, cancellationToken).ConfigureAwait(false);
+                    if (IsTransientReadStatus(response.StatusCode))
+                    {
+                        await DelayBeforeReadRetryAsync(response, chunkAttempt++, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+                catch (Exception ex) when (IsTransientTransportFailure(ex, cancellationToken))
+                {
+                    await DelayBeforeReadRetryAsync(null, chunkAttempt++, cancellationToken).ConfigureAwait(false);
+                }
+            }
 
             offset += readTotal;
             progress?.Report((double)offset / length);
@@ -541,16 +621,153 @@ public sealed class OneDriveService : IOneDriveService
         CancellationToken cancellationToken,
         HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
-        // Graph calls must never start an interactive login by themselves. Interactive
-        // authentication is initiated only by the explicit Login command, which prevents
-        // duplicate browser redirects during startup/callback processing.
-        var token = await _authentication.GetAccessTokenAsync(interactive: false, cancellationToken);
+        // Browsing/preview/metadata calls are reads. A temporary Wi-Fi, DNS, TLS, proxy, 429 or
+        // Graph 5xx failure should never become a red English exception banner. Keep retrying with
+        // bounded exponential backoff until the caller cancels because the user navigated away.
+        // Mutating requests are intentionally *not* replayed here because POST/copy/create-folder
+        // and stream uploads can have side effects that are unsafe to duplicate blindly.
+        var retryableRead = request.Method == HttpMethod.Get || request.Method == HttpMethod.Head;
+        var originalRequestAvailable = true;
+        var attempt = 0;
 
-        if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("未登录 Microsoft 账户。");
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return await _httpClient.SendAsync(request, completionOption, cancellationToken);
+            string? token;
+            try
+            {
+                // Graph calls must never start an interactive login by themselves. Interactive
+                // authentication is initiated only by the explicit Login command.
+                token = await _authentication.GetAccessTokenAsync(interactive: false, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (retryableRead && IsTransientTransportFailure(ex, cancellationToken))
+            {
+                await DelayBeforeReadRetryAsync(null, attempt++, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("未登录 Microsoft 账户。");
+
+            HttpRequestMessage attemptRequest;
+            var ownsAttemptRequest = false;
+            if (originalRequestAvailable)
+            {
+                attemptRequest = request;
+                originalRequestAvailable = false;
+            }
+            else
+            {
+                attemptRequest = CloneReadRequest(request);
+                ownsAttemptRequest = true;
+            }
+
+            attemptRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            try
+            {
+                var response = await _httpClient.SendAsync(attemptRequest, completionOption, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (retryableRead && IsTransientReadStatus(response.StatusCode))
+                {
+                    try
+                    {
+                        await DelayBeforeReadRetryAsync(response, attempt++, cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        response.Dispose();
+                    }
+                    continue;
+                }
+
+                return response;
+            }
+            catch (Exception ex) when (retryableRead && IsTransientTransportFailure(ex, cancellationToken))
+            {
+                await DelayBeforeReadRetryAsync(null, attempt++, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (ownsAttemptRequest)
+                    attemptRequest.Dispose();
+            }
+        }
+    }
+
+    private static HttpRequestMessage CloneReadRequest(HttpRequestMessage source)
+    {
+        var clone = new HttpRequestMessage(source.Method, source.RequestUri)
+        {
+            Version = source.Version,
+            VersionPolicy = source.VersionPolicy
+        };
+
+        foreach (var header in source.Headers)
+        {
+            if (string.Equals(header.Key, "Authorization", StringComparison.OrdinalIgnoreCase))
+                continue;
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return clone;
+    }
+
+    private static bool IsTransientReadStatus(HttpStatusCode statusCode)
+    {
+        var code = (int)statusCode;
+        return code is 408 or 425 or 429 || code >= 500;
+    }
+
+    private static bool IsTransientTransportFailure(Exception ex, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return false;
+
+        if (ex is HttpRequestException http)
+        {
+            if (http.StatusCode is null)
+                return true;
+            return IsTransientReadStatus(http.StatusCode.Value);
+        }
+
+        if (ex is TaskCanceledException or TimeoutException)
+            return true;
+
+        return ex.InnerException is not null && IsTransientTransportFailure(ex.InnerException, cancellationToken);
+    }
+
+    private static async Task DelayBeforeReadRetryAsync(
+        HttpResponseMessage? response,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        TimeSpan delay;
+        var retryAfter = response?.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta)
+        {
+            delay = delta;
+        }
+        else if (retryAfter?.Date is { } date)
+        {
+            delay = date - DateTimeOffset.UtcNow;
+        }
+        else
+        {
+            // 0.45, 0.9, 1.8, 3.6, 7.2, then 8 seconds. Small jitter avoids every parallel
+            // thumbnail/metadata request retrying on the exact same frame after Wi-Fi returns.
+            var seconds = Math.Min(8.0, 0.45 * Math.Pow(2, Math.Min(attempt, 5)));
+            delay = TimeSpan.FromSeconds(seconds) + TimeSpan.FromMilliseconds(Random.Shared.Next(40, 220));
+        }
+
+        if (delay < TimeSpan.FromMilliseconds(150))
+            delay = TimeSpan.FromMilliseconds(150);
+        if (delay > TimeSpan.FromSeconds(30))
+            delay = TimeSpan.FromSeconds(30);
+
+        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<T> DeserializeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
