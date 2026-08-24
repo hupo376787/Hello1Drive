@@ -66,7 +66,8 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
             ShowsVerticalScrollIndicator = true,
             AllowsSelection = true,
             AllowsMultipleSelection = false,
-            BackgroundColor = UIColor.SystemBackground,
+            BackgroundColor = UIColor.Clear,
+            Opaque = false,
             AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight
         };
 
@@ -151,7 +152,8 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
 
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
-            nameof(MainViewModel.SelectedBackgroundModeText))
+            nameof(MainViewModel.SelectedBackgroundModeText) or
+            nameof(MainViewModel.TransparentFileItemBackground))
         {
             UpdateTheme();
         }
@@ -209,10 +211,12 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
     private void UpdateTheme()
     {
         var dark = IsDarkTheme();
+        var transparent = _viewModel?.TransparentFileItemBackground == true;
         var background = dark ? UIColor.FromRGB(18, 18, 18) : UIColor.FromRGB(250, 250, 250);
-        _collection.BackgroundColor = background;
+        _collection.BackgroundColor = transparent ? UIColor.Clear : background;
+        _collection.Opaque = !transparent;
         _refresh.TintColor = dark ? UIColor.White : UIColor.DarkGray;
-        _source.SetDarkTheme(dark);
+        _source.SetPresentation(dark, transparent);
     }
 
     private bool IsDarkTheme()
@@ -333,6 +337,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     private MainViewModel? _viewModel;
     private bool _scrolling;
     private bool _darkTheme;
+    private bool _transparentBackground;
     private bool _selectionMode;
     private HashSet<string> _selectedIds = new(StringComparer.Ordinal);
     private FileViewMode _mode = FileViewMode.Details;
@@ -377,11 +382,12 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         RebindVisible();
     }
 
-    public void SetDarkTheme(bool dark)
+    public void SetPresentation(bool dark, bool transparentBackground)
     {
-        if (_darkTheme == dark)
+        if (_darkTheme == dark && _transparentBackground == transparentBackground)
             return;
         _darkTheme = dark;
+        _transparentBackground = transparentBackground;
         RebindVisible();
     }
 
@@ -537,7 +543,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         if (item is not null)
             TryGetImage(item, out cached);
 
-        presenter.Bind(position, slot, _mode, _darkTheme, _selectionMode,
+        presenter.Bind(position, slot, _mode, _darkTheme, _transparentBackground, _selectionMode,
             item is not null && _selectedIds.Contains(item.Id), cached);
 
         if (!_scrolling && cached is null)
@@ -761,6 +767,7 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
         VirtualDriveItemSlot slot,
         FileViewMode mode,
         bool darkTheme,
+        bool transparentBackground,
         bool selectionMode,
         bool selected,
         UIImage? image)
@@ -775,7 +782,7 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
         }
 
         _thumbnailRequestItemId = null;
-        _content.Bind(slot.Item, mode, darkTheme, selectionMode, selected, image);
+        _content.Bind(slot.Item, mode, darkTheme, transparentBackground, selectionMode, selected, image);
     }
 
     public void MarkThumbnailRequest(string itemId) => _thumbnailRequestItemId = itemId;
@@ -835,6 +842,8 @@ internal sealed class IosNativeFileCellContentView : UIView
     public IosNativeFileCellContentView(CGRect frame) : base(frame)
     {
         ClipsToBounds = true;
+        BackgroundColor = UIColor.Clear;
+        Opaque = false;
         Layer.CornerRadius = 8;
 
         _visual = new IosNativeFileVisualView();
@@ -858,7 +867,7 @@ internal sealed class IosNativeFileCellContentView : UIView
         AddSubview(_sizeLabel);
     }
 
-    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool selectionMode, bool selected, UIImage? image)
+    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool transparentBackground, bool selectionMode, bool selected, UIImage? image)
     {
         _item = item;
         _mode = mode;
@@ -875,7 +884,9 @@ internal sealed class IosNativeFileCellContentView : UIView
 
         BackgroundColor = selected
             ? (darkTheme ? UIColor.FromRGBA(47, 128, 237, 77) : UIColor.FromRGBA(47, 128, 237, 36))
-            : (darkTheme ? UIColor.FromRGB(18, 18, 18) : UIColor.FromRGB(250, 250, 250));
+            : transparentBackground
+                ? UIColor.Clear
+                : (darkTheme ? UIColor.FromRGB(18, 18, 18) : UIColor.FromRGB(250, 250, 250));
 
         _visual.Bind(item, darkTheme, selectionMode, selected, image);
         SetNeedsLayout();

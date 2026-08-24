@@ -147,7 +147,8 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
-            nameof(MainViewModel.SelectedBackgroundModeText))
+            nameof(MainViewModel.SelectedBackgroundModeText) or
+            nameof(MainViewModel.TransparentFileItemBackground))
         {
             UpdateTheme();
         }
@@ -197,10 +198,13 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
     private void UpdateTheme()
     {
         var dark = IsDarkTheme();
-        var background = dark ? Color.Rgb(18, 18, 18) : Color.Rgb(250, 250, 250);
+        var transparent = _viewModel?.TransparentFileItemBackground == true;
+        var background = transparent
+            ? Color.Transparent
+            : dark ? Color.Rgb(18, 18, 18) : Color.Rgb(250, 250, 250);
         _refresh.SetBackgroundColor(background);
         _recycler.SetBackgroundColor(background);
-        _adapter.SetDarkTheme(dark);
+        _adapter.SetPresentation(dark, transparent);
     }
 
     private bool IsDarkTheme()
@@ -366,6 +370,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     private MainViewModel? _viewModel;
     private bool _scrolling;
     private bool _darkTheme;
+    private bool _transparentBackground;
     private bool _selectionMode;
     private HashSet<string> _selectedIds = new(StringComparer.Ordinal);
     private int _visibleFirst;
@@ -411,11 +416,12 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         CancelThumbnailGeneration();
     }
 
-    public void SetDarkTheme(bool dark)
+    public void SetPresentation(bool dark, bool transparentBackground)
     {
-        if (_darkTheme == dark)
+        if (_darkTheme == dark && _transparentBackground == transparentBackground)
             return;
         _darkTheme = dark;
+        _transparentBackground = transparentBackground;
         RefreshVisible();
     }
 
@@ -482,7 +488,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (item is not null)
             TryGetBitmap(item, out cachedBitmap);
 
-        fileHolder.Bind(slot, Mode, _darkTheme, _selectionMode,
+        fileHolder.Bind(slot, Mode, _darkTheme, _transparentBackground, _selectionMode,
             item is not null && _selectedIds.Contains(item.Id), cachedBitmap);
 
         if (!_scrolling && cachedBitmap is null)
@@ -761,6 +767,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
         VirtualDriveItemSlot slot,
         FileViewMode mode,
         bool darkTheme,
+        bool transparentBackground,
         bool selectionMode,
         bool selected,
         Bitmap? bitmap)
@@ -774,7 +781,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
         }
 
         _thumbnailRequestItemId = null;
-        _view.Bind(slot.Item, mode, darkTheme, selectionMode, selected, bitmap);
+        _view.Bind(slot.Item, mode, darkTheme, transparentBackground, selectionMode, selected, bitmap);
     }
 
     public void MarkThumbnailRequest(string itemId) => _thumbnailRequestItemId = itemId;
@@ -798,7 +805,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
             _slot.PropertyChanged -= Slot_PropertyChanged;
         _slot = null;
         _thumbnailRequestItemId = null;
-        _view.Bind(null, _view.Mode, _view.DarkTheme, false, false, null);
+        _view.Bind(null, _view.Mode, _view.DarkTheme, _view.TransparentBackground, false, false, null);
     }
 
     private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -856,6 +863,7 @@ internal sealed class NativeFileItemView : View
         Clickable = true;
         LongClickable = true;
         Focusable = true;
+        SetBackgroundColor(Color.Transparent);
         SetWillNotDraw(false);
         SetPadding(0, 0, 0, 0);
         SetMinimumHeight(DesiredHeightPx());
@@ -863,13 +871,15 @@ internal sealed class NativeFileItemView : View
 
     public FileViewMode Mode { get; private set; } = FileViewMode.Details;
     public bool DarkTheme { get; private set; }
+    public bool TransparentBackground { get; private set; }
 
-    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool selectionMode, bool selected, Bitmap? thumbnail)
+    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool transparentBackground, bool selectionMode, bool selected, Bitmap? thumbnail)
     {
         var modeChanged = Mode != mode;
         _item = item;
         Mode = mode;
         DarkTheme = darkTheme;
+        TransparentBackground = transparentBackground;
         _selectionMode = selectionMode;
         _selected = selected;
         _thumbnail = thumbnail;
@@ -906,8 +916,17 @@ internal sealed class NativeFileItemView : View
         if (width <= 0 || height <= 0)
             return;
 
-        var bg = DarkTheme ? Color.Rgb(18, 18, 18) : Color.Rgb(250, 250, 250);
-        canvas.DrawColor(bg);
+        if (TransparentBackground)
+        {
+            // Clear the recycled native cell buffer so the Avalonia custom background below the
+            // NativeControlHost remains visible instead of retaining a previous opaque frame.
+            canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
+        }
+        else
+        {
+            var bg = DarkTheme ? Color.Rgb(18, 18, 18) : Color.Rgb(250, 250, 250);
+            canvas.DrawColor(bg);
+        }
 
         if (_selected)
         {
