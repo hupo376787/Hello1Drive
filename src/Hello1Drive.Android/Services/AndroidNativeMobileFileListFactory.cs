@@ -778,12 +778,10 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (item is null || !item.SupportsThumbnail || string.IsNullOrWhiteSpace(item.Id))
             return;
 
-        // Native memory cache or persistent disk cache already makes this adjacent item warm.
-        if ((TryGetBitmap(item, out var bitmap) && bitmap is not null) ||
-            AppServices.ThumbnailCache.TryGetCachedPath(item, out _))
-        {
+        // Keep the adjacent viewport fully warm in the bounded native LRU. A disk-cache hit
+        // still needs BitmapFactory decode once, so do that now while the list is idle.
+        if (TryGetBitmap(item, out var bitmap) && bitmap is not null)
             return;
-        }
 
         if (!_prefetchingIds.TryAdd(item.Id, 0))
             return;
@@ -803,11 +801,33 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 if (_scrolling)
                     return;
 
-                // Prefetch only the encoded file. When the item becomes visible, BitmapFactory
-                // decodes from local storage quickly without spending memory on two hidden pages.
-                await AppServices.ThumbnailCache
+                var path = await AppServices.ThumbnailCache
                     .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
                     .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    return;
+
+                generationToken.ThrowIfCancellationRequested();
+                if (TryGetBitmap(item, out var existing) && existing is not null)
+                    return;
+
+                var targetPx = Mode switch
+                {
+                    FileViewMode.ExtraLargeIcons => 320,
+                    FileViewMode.LargeIcons => 256,
+                    _ => 128
+                };
+                var bitmap = await Task.Run(() => DecodeScaled(path, targetPx), generationToken).ConfigureAwait(false);
+                if (bitmap is null)
+                    return;
+
+                if (generationToken.IsCancellationRequested)
+                {
+                    bitmap.Dispose();
+                    generationToken.ThrowIfCancellationRequested();
+                }
+
+                AddBitmapToCache(item, bitmap);
             }
             finally
             {

@@ -806,11 +806,9 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         if (item is null || !item.SupportsThumbnail || string.IsNullOrWhiteSpace(item.Id))
             return;
 
-        if ((TryGetImage(item, out var image) && image is not null) ||
-            AppServices.ThumbnailCache.TryGetCachedPath(item, out _))
-        {
+        // Keep the adjacent viewport in the bounded native UIImage LRU as well as on disk.
+        if (TryGetImage(item, out var image) && image is not null)
             return;
-        }
 
         if (!_prefetchingIds.TryAdd(item.Id, 0))
             return;
@@ -830,9 +828,27 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
                 if (_scrolling)
                     return;
 
-                await AppServices.ThumbnailCache
+                var path = await AppServices.ThumbnailCache
                     .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
                     .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    return;
+
+                generationToken.ThrowIfCancellationRequested();
+                if (TryGetImage(item, out var existing) && existing is not null)
+                    return;
+
+                var image = await Task.Run(() => UIImage.FromFile(path), generationToken).ConfigureAwait(false);
+                if (image is null)
+                    return;
+
+                if (generationToken.IsCancellationRequested)
+                {
+                    image.Dispose();
+                    generationToken.ThrowIfCancellationRequested();
+                }
+
+                AddImageToCache(item, image);
             }
             finally
             {
