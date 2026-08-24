@@ -431,7 +431,7 @@ internal sealed class NativeFloatingUploadButtonView : View
     public NativeFloatingUploadButtonView(Context context, NativeMobileFileListHost host) : base(context)
     {
         _host = host;
-        _touchSlop = ViewConfiguration.Get(context)?.ScaledTouchSlop ?? Dp(6);
+        _touchSlop = (float)(ViewConfiguration.Get(context)?.ScaledTouchSlop ?? (int)MathF.Round(Dp(6)));
 
         Clickable = true;
         Focusable = true;
