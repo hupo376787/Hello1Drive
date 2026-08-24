@@ -106,30 +106,46 @@ function Publish-Android {
     Remove-Item $targetDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
-    $apk = Get-ChildItem $source -File -Filter "*-Signed.apk" | Select-Object -First 1
-    if (-not $apk) { $apk = Get-ChildItem $source -File -Filter "*.apk" | Select-Object -First 1 }
-    $aab = Get-ChildItem $source -File -Filter "*-Signed.aab" | Select-Object -First 1
-    if (-not $aab) { $aab = Get-ChildItem $source -File -Filter "*.aab" | Select-Object -First 1 }
+    $signedApk = Get-ChildItem $source -File -Filter "*-Signed.apk" | Select-Object -First 1
+    $unsignedApk = Get-ChildItem $source -File -Filter "*.apk" |
+        Where-Object { $_.Name -notlike "*-Signed.apk" } |
+        Select-Object -First 1
+    $signedAab = Get-ChildItem $source -File -Filter "*-Signed.aab" | Select-Object -First 1
+    $unsignedAab = Get-ChildItem $source -File -Filter "*.aab" |
+        Where-Object { $_.Name -notlike "*-Signed.aab" } |
+        Select-Object -First 1
 
-    if (-not $apk -or -not $aab) {
-        throw "Android publish output is missing APK or AAB: $source"
+    if (-not $signedApk) {
+        throw "Android publish output is missing the signed APK: $source"
     }
 
-    $apkName = "Hello1Drive-Android-$Version.apk"
-    $aabName = "Hello1Drive-Android-$Version.aab"
-    $apkArtifact = Join-Path $Artifacts $apkName
-    $aabArtifact = Join-Path $Artifacts $aabName
+    $packages = @()
+    $packages += [PSCustomObject]@{ Source = $signedApk; Name = "Hello1Drive-Android-$Version-Signed.apk" }
+    if ($unsignedApk) {
+        $packages += [PSCustomObject]@{ Source = $unsignedApk; Name = "Hello1Drive-Android-$Version.apk" }
+    }
+    if ($signedAab) {
+        $packages += [PSCustomObject]@{ Source = $signedAab; Name = "Hello1Drive-Android-$Version-Signed.aab" }
+    }
+    if ($unsignedAab) {
+        $packages += [PSCustomObject]@{ Source = $unsignedAab; Name = "Hello1Drive-Android-$Version.aab" }
+    }
 
-    Copy-Item $apk.FullName (Join-Path $targetDir $apkName) -Force
-    Copy-Item $aab.FullName (Join-Path $targetDir $aabName) -Force
-    Copy-Item $apk.FullName $apkArtifact -Force
-    Copy-Item $aab.FullName $aabArtifact -Force
-
-    # Android packages are already compressed package formats. Keep them directly usable instead
-    # of wrapping them in an extra ZIP when one-click-publish.cmd is used.
+    # Remove package files from a previous Android publish so artifacts reflects this run exactly.
+    Get-ChildItem $Artifacts -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Hello1Drive-Android-$Version*.apk" -or $_.Name -like "Hello1Drive-Android-$Version*.aab" } |
+        Remove-Item -Force
     Remove-Item (Join-Path $Artifacts "Hello1Drive-Android-$Version.zip") -Force -ErrorAction SilentlyContinue
-    Write-Host "Artifact: $apkArtifact" -ForegroundColor Green
-    Write-Host "Artifact: $aabArtifact" -ForegroundColor Green
+
+    foreach ($package in $packages) {
+        $publishPath = Join-Path $targetDir $package.Name
+        $artifactPath = Join-Path $Artifacts $package.Name
+        Copy-Item $package.Source.FullName $publishPath -Force
+        Copy-Item $package.Source.FullName $artifactPath -Force
+        Write-Host "Artifact: $artifactPath" -ForegroundColor Green
+    }
+
+    # APK/AAB are package formats already. Do not wrap them in another ZIP.
 }
 
 function Publish-iOS {
