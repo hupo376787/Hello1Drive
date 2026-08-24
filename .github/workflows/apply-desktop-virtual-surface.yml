@@ -25,7 +25,18 @@ jobs:
 
       # PR validation applies the migration to its own head branch and compiles it before commit.
       - name: Apply source patch
-        run: python3 tools/apply_desktop_virtual_surface.py
+        run: |
+          python3 tools/apply_desktop_virtual_surface.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Hello1Drive.Core/Views/MainView.axaml.cs')
+          text = path.read_text(encoding='utf-8')
+          old = '\n;\n\n    private static bool ShouldSuppressMarqueeStart'
+          new = '\n\n    private static bool ShouldSuppressMarqueeStart'
+          if old not in text:
+              raise SystemExit('expected stale expression-bodied semicolon was not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Validate migration
         run: |
