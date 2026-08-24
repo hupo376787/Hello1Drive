@@ -800,7 +800,7 @@
               </Button.Flyout>
             </Button>
             <Button Classes="viewMode" ToolTip.Tip="查看方式">
-              <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,2.8 H5 M1.5,7 H5 M1.5,11.2 H5 M7.2,2 H9.6 V4.4 H7.2 Z M10.5,2 H12.9 V4.4 H10.5 Z M7.2,8 H9.6 V10.4 H7.2 Z M10.5,8 H12.9 V10.4 H10.5 Z" />
+              <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,2.4 H5.4 M1.5,7 H5.4 M1.5,11.6 H5.4 M8.4,2.4 H11.8 V5.8 H8.4 Z M8.4,8.2 H11.8 V11.6 H8.4 Z" />
               <Button.Flyout>
                 <MenuFlyout>
                   <MenuItem Header="详细信息" Tag="Details" Click="ViewContextMenu_Click">
@@ -843,7 +843,7 @@
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
               </Button>
               <Button Classes="viewMode" ToolTip.Tip="查看方式" Click="MobileViewModeButton_Click">
-                <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,2.8 H5 M1.5,7 H5 M1.5,11.2 H5 M7.2,2 H9.6 V4.4 H7.2 Z M10.5,2 H12.9 V4.4 H10.5 Z M7.2,8 H9.6 V10.4 H7.2 Z M10.5,8 H12.9 V10.4 H10.5 Z" />
+                <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,2.4 H5.4 M1.5,7 H5.4 M1.5,11.6 H5.4 M8.4,2.4 H11.8 V5.8 H8.4 Z M8.4,8.2 H11.8 V11.6 H8.4 Z" />
               </Button>
             </StackPanel>
           </ScrollViewer>
