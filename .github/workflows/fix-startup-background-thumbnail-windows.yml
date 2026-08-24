@@ -1,0 +1,44 @@
+name: Fix startup background and thumbnail windows
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/fix_startup_background_and_thumbnail_windows.py
+      - .github/workflows/fix-startup-background-thumbnail-windows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply source patch
+        run: python3 tools/fix_startup_background_and_thumbnail_windows.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -q 'var startupBackgroundTask = vm.Settings.BackgroundMode' src/Hello1Drive.Core/Views/MainView.axaml.cs
+          grep -q 'visibleLast + pageSize + 1' src/Hello1Drive.Core/Views/MainView.axaml.cs
+          grep -q 'OnPropertyChanged(nameof(MobileItems))' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q '_desktopThumbnailWorkGate = new(4, 4)' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'nameof(MainViewModel.MobileItems)' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q 'nameof(MainViewModel.MobileItems)' src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/fix_startup_background_and_thumbnail_windows.py
+          rm -f .github/workflows/fix-startup-background-thumbnail-windows.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix startup background and thumbnail prefetch windows"
+          git push origin HEAD:master
