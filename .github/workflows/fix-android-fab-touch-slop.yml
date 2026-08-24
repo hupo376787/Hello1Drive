@@ -1,0 +1,29 @@
+name: Apply Android FAB touch slop fix
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/fix_android_fab_touch_slop.py
+      - .github/workflows/fix-android-fab-touch-slop.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/fix_android_fab_touch_slop.py
+      - run: git diff --check
+      - run: |
+          rm -f tools/fix_android_fab_touch_slop.py
+          rm -f .github/workflows/fix-android-fab-touch-slop.yml
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Android FAB touch threshold typing"
+          git push origin HEAD:master
