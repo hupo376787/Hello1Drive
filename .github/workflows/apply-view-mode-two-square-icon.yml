@@ -1,0 +1,45 @@
+name: Apply two-square view mode icon
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/apply_view_mode_two_square_icon.py
+      - .github/workflows/apply-view-mode-two-square-icon.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply icon patch
+        run: python3 tools/apply_view_mode_two_square_icon.py
+
+      - name: Validate
+        run: |
+          git diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('src/Hello1Drive.Core/Views/MainView.axaml').read_text(encoding='utf-8')
+          icon = 'Data="M1.5,2.4 H5.4 M1.5,7 H5.4 M1.5,11.6 H5.4 M8.4,2.4 H11.8 V5.8 H8.4 Z M8.4,8.2 H11.8 V11.6 H8.4 Z"'
+          assert text.count(icon) == 2
+          PY
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_view_mode_two_square_icon.py
+          rm -f .github/workflows/apply-view-mode-two-square-icon.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Refine view mode icon geometry"
+          git push origin HEAD:master
