@@ -1,0 +1,49 @@
+name: Apply desktop scroll priority fix
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/apply_desktop_scroll_priority_fix.py
+      - .github/workflows/apply-desktop-scroll-priority-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply source patch
+        run: python3 tools/apply_desktop_scroll_priority_fix.py
+
+      - name: Validate source patch
+        run: |
+          git diff --check
+          grep -q 'compactNotification: !IsMobilePlatform' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'DispatcherPriority.Background' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'PresentBackgroundSlotsInSlicesAsync' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'private DriveItemModel? _item;' src/Hello1Drive.Core/Controls/DesktopFileItemControl.cs
+
+      - name: Build desktop
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_desktop_scroll_priority_fix.py
+          rm -f .github/workflows/apply-desktop-scroll-priority-fix.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Prioritize desktop scrolling over background thumbnails"
+          git push origin HEAD:master
