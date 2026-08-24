@@ -38,7 +38,7 @@ jobs:
         run: |
           dotnet publish src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj \
             -c Release -r "${{ matrix.rid }}" --self-contained true \
-            -o "publish/desktop/${{ matrix.rid }}" /p:PublishSingleFile=false
+            -o "publish/desktop/${{ matrix.rid }}" -p:PublishSingleFile=false
       - uses: actions/upload-artifact@v4
         with:
           name: Hello1Drive-Desktop-${{ matrix.rid }}
@@ -116,10 +116,10 @@ jobs:
       - run: dotnet workload install ios
       - name: Build iOS simulator
         run: >-
-          dotnet publish src/Hello1Drive.iOS/Hello1Drive.iOS.csproj
+          dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj
           -c Release -f net10.0-ios26.0 -r iossimulator-arm64
-          /p:CodesignKey= /p:CodesignProvision=
+          -p:CodesignKey= -p:CodesignProvision=
       - uses: actions/upload-artifact@v4
         with:
           name: Hello1Drive-iOS-Simulator-arm64
-          path: src/Hello1Drive.iOS/bin/Release/net10.0-ios26.0/iossimulator-arm64/publish
+          path: src/Hello1Drive.iOS/bin/Release/net10.0-ios26.0/iossimulator-arm64/*.app
