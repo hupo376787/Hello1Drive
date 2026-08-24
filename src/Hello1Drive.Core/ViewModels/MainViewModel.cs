@@ -1077,11 +1077,27 @@ public partial class MainViewModel : ViewModelBase
         ScheduleTransferPersistence();
     }
 
+    private string GetTransferDisplayName(string fileName)
+    {
+        var normalized = (fileName ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length >= 2)
+            return $"{segments[^2]}/{segments[^1]}";
+
+        var parentName = Breadcrumbs.LastOrDefault()?.Name?.Trim();
+        return string.IsNullOrWhiteSpace(parentName)
+            ? segments[0]
+            : $"{parentName}/{segments[0]}";
+    }
+
     public TransferItemModel RegisterTransfer(string fileName, TransferDirection direction)
     {
         var transfer = new TransferItemModel
         {
-            FileName = fileName,
+            FileName = GetTransferDisplayName(fileName),
             Direction = direction,
             State = TransferState.Waiting,
             Message = direction switch

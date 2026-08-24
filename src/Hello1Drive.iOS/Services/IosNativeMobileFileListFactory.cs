@@ -1049,27 +1049,184 @@ internal sealed class IosNativeFileVisualView : UIView
 
     private static void DrawFileBadge(CGRect rect, DriveItemModel item)
     {
-        var color = item.IsPdf ? UIColor.FromRGB(232, 67, 76)
-            : item.IsWord ? UIColor.FromRGB(54, 108, 205)
-            : item.IsExcel ? UIColor.FromRGB(33, 133, 88)
-            : item.IsPowerPoint ? UIColor.FromRGB(211, 91, 55)
-            : item.IsImage ? UIColor.FromRGB(67, 143, 237)
-            : item.IsVideo ? UIColor.FromRGB(124, 88, 204)
-            : item.IsAudio ? UIColor.FromRGB(226, 93, 142)
-            : UIColor.FromRGB(105, 116, 133);
-        color.SetFill();
-        using (var badge = UIBezierPath.FromRoundedRect(rect, 7))
-            badge.Fill();
+        if (item.IsImage)
+        {
+            DrawImagePlaceholder(rect);
+            return;
+        }
+
+        if (item.IsVideo)
+        {
+            DrawVideoPlaceholder(rect);
+            return;
+        }
+
+        if (item.IsAudio)
+        {
+            DrawAudioPlaceholder(rect);
+            return;
+        }
+
+        DrawDocumentPlaceholder(rect, item);
+    }
+
+    private static void DrawImagePlaceholder(CGRect rect)
+    {
+        double X(double value) => (double)rect.Left + (double)rect.Width * value;
+        double Y(double value) => (double)rect.Top + (double)rect.Height * value;
+        var radius = Math.Min((double)rect.Width, (double)rect.Height) * 0.22;
+
+        UIColor.FromRGB(238, 247, 255).SetFill();
+        using (var background = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+            background.Fill();
+        UIColor.FromRGB(142, 197, 255).SetStroke();
+        using (var border = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+        {
+            border.LineWidth = (nfloat)Math.Max(1, (double)rect.Width * 0.04);
+            border.Stroke();
+        }
+
+        UIColor.FromRGB(59, 130, 246).SetStroke();
+        using (var mountain = new UIBezierPath
+        {
+            LineWidth = (nfloat)Math.Max(1.4, (double)rect.Width * 0.055),
+            LineCapStyle = CGLineCap.Round,
+            LineJoinStyle = CGLineJoin.Round
+        })
+        {
+            mountain.MoveTo(new CGPoint(X(0.18), Y(0.75)));
+            mountain.AddLineTo(new CGPoint(X(0.36), Y(0.53)));
+            mountain.AddLineTo(new CGPoint(X(0.50), Y(0.65)));
+            mountain.AddLineTo(new CGPoint(X(0.64), Y(0.50)));
+            mountain.AddLineTo(new CGPoint(X(0.82), Y(0.75)));
+            mountain.Stroke();
+        }
+
+        UIColor.FromRGB(253, 186, 116).SetFill();
+        var sunRadius = Math.Min((double)rect.Width, (double)rect.Height) * 0.085;
+        using var sun = UIBezierPath.FromOval(new CGRect(X(0.31) - sunRadius, Y(0.31) - sunRadius, sunRadius * 2, sunRadius * 2));
+        sun.Fill();
+    }
+
+    private static void DrawVideoPlaceholder(CGRect rect)
+    {
+        var radius = Math.Min((double)rect.Width, (double)rect.Height) * 0.22;
+        UIColor.FromRGB(238, 242, 255).SetFill();
+        using (var background = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+            background.Fill();
+        UIColor.FromRGB(165, 180, 252).SetStroke();
+        using (var border = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+        {
+            border.LineWidth = (nfloat)Math.Max(1, (double)rect.Width * 0.035);
+            border.Stroke();
+        }
+
+        var playRadius = Math.Min((double)rect.Width, (double)rect.Height) * 0.285;
+        var center = new CGPoint(rect.GetMidX(), rect.GetMidY());
+        UIColor.FromRGB(124, 58, 237).SetFill();
+        using (var circle = UIBezierPath.FromOval(new CGRect(center.X - playRadius, center.Y - playRadius, playRadius * 2, playRadius * 2)))
+            circle.Fill();
+
+        UIColor.White.SetFill();
+        using var triangle = new UIBezierPath();
+        triangle.MoveTo(new CGPoint(center.X - playRadius * 0.28, center.Y - playRadius * 0.48));
+        triangle.AddLineTo(new CGPoint(center.X + playRadius * 0.55, center.Y));
+        triangle.AddLineTo(new CGPoint(center.X - playRadius * 0.28, center.Y + playRadius * 0.48));
+        triangle.ClosePath();
+        triangle.Fill();
+    }
+
+    private static void DrawAudioPlaceholder(CGRect rect)
+    {
+        double X(double value) => (double)rect.Left + (double)rect.Width * value;
+        double Y(double value) => (double)rect.Top + (double)rect.Height * value;
+        var min = Math.Min((double)rect.Width, (double)rect.Height);
+
+        UIColor.FromRGB(96, 165, 250).SetFill();
+        using (var leftCircle = UIBezierPath.FromOval(new CGRect(X(0.42) - min * 0.36, Y(0.58) - min * 0.36, min * 0.72, min * 0.72)))
+            leftCircle.Fill();
+        UIColor.FromRGB(251, 113, 133).SetFill();
+        using (var rightCircle = UIBezierPath.FromOval(new CGRect(X(0.58) - min * 0.36, Y(0.42) - min * 0.36, min * 0.72, min * 0.72)))
+            rightCircle.Fill();
+
+        UIColor.White.SetStroke();
+        using (var note = new UIBezierPath
+        {
+            LineWidth = (nfloat)Math.Max(1.6, min * 0.07),
+            LineCapStyle = CGLineCap.Round,
+            LineJoinStyle = CGLineJoin.Round
+        })
+        {
+            note.MoveTo(new CGPoint(X(0.40), Y(0.30)));
+            note.AddLineTo(new CGPoint(X(0.40), Y(0.70)));
+            note.MoveTo(new CGPoint(X(0.40), Y(0.30)));
+            note.AddLineTo(new CGPoint(X(0.70), Y(0.23)));
+            note.AddLineTo(new CGPoint(X(0.70), Y(0.60)));
+            note.Stroke();
+        }
+
+        UIColor.White.SetFill();
+        using (var leftHead = UIBezierPath.FromOval(new CGRect(X(0.23), Y(0.64), X(0.46) - X(0.23), Y(0.82) - Y(0.64))))
+            leftHead.Fill();
+        using var rightHead = UIBezierPath.FromOval(new CGRect(X(0.53), Y(0.54), X(0.76) - X(0.53), Y(0.72) - Y(0.54)));
+        rightHead.Fill();
+    }
+
+    private static void DrawDocumentPlaceholder(CGRect rect, DriveItemModel item)
+    {
+        var background = item.IsPdf ? UIColor.FromRGB(255, 245, 245)
+            : item.IsWord ? UIColor.FromRGB(239, 246, 255)
+            : item.IsExcel ? UIColor.FromRGB(240, 253, 244)
+            : item.IsPowerPoint ? UIColor.FromRGB(255, 247, 237)
+            : item.IsArchive ? UIColor.FromRGB(245, 243, 255)
+            : item.IsUrlShortcut ? UIColor.FromRGB(240, 253, 250)
+            : UIColor.FromRGB(248, 250, 252);
+        var borderColor = item.IsPdf ? UIColor.FromRGB(240, 160, 168)
+            : item.IsWord ? UIColor.FromRGB(147, 197, 253)
+            : item.IsExcel ? UIColor.FromRGB(134, 239, 172)
+            : item.IsPowerPoint ? UIColor.FromRGB(253, 186, 116)
+            : item.IsArchive ? UIColor.FromRGB(196, 181, 253)
+            : item.IsUrlShortcut ? UIColor.FromRGB(94, 234, 212)
+            : UIColor.FromRGB(203, 213, 225);
+        var accent = item.IsPdf ? UIColor.FromRGB(239, 68, 68)
+            : item.IsWord ? UIColor.FromRGB(37, 99, 235)
+            : item.IsExcel ? UIColor.FromRGB(22, 163, 74)
+            : item.IsPowerPoint ? UIColor.FromRGB(249, 115, 22)
+            : item.IsArchive ? UIColor.FromRGB(139, 92, 246)
+            : item.IsUrlShortcut ? UIColor.FromRGB(14, 165, 164)
+            : item.IsText ? UIColor.FromRGB(100, 116, 139)
+            : UIColor.FromRGB(96, 165, 250);
+
+        var radius = Math.Min((double)rect.Width, (double)rect.Height) * 0.18;
+        background.SetFill();
+        using (var card = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+            card.Fill();
+        borderColor.SetStroke();
+        using (var border = UIBezierPath.FromRoundedRect(rect, (nfloat)radius))
+        {
+            border.LineWidth = (nfloat)Math.Max(1, (double)rect.Width * 0.035);
+            border.Stroke();
+        }
+
+        var stripHeight = (double)rect.Height * 0.30;
+        var stripRect = new CGRect(rect.Left, rect.Bottom - stripHeight, rect.Width, stripHeight);
+        accent.SetFill();
+        using (var strip = UIBezierPath.FromRoundedRect(stripRect, (nfloat)(radius * 0.65)))
+            strip.Fill();
+        using (var stripTopFill = UIBezierPath.FromRect(new CGRect(rect.Left, stripRect.Top, rect.Width, (nfloat)(radius * 0.65))))
+        {
+            stripTopFill.Fill();
+        }
 
         using var text = new NSString(item.FileBadgeText);
-        var font = UIFont.BoldSystemFontOfSize((nfloat)Math.Min(13, Math.Max(8, (double)rect.Height * 0.26)));
+        var font = UIFont.BoldSystemFontOfSize((nfloat)Math.Min(8, Math.Max(5, (double)rect.Height * 0.16)));
         var attrs = new UIStringAttributes
         {
             ForegroundColor = UIColor.White,
             Font = font
         };
         var size = text.GetSizeUsingAttributes(attrs);
-        text.DrawString(new CGPoint(rect.GetMidX() - size.Width / 2, rect.GetMidY() - size.Height / 2), attrs);
+        text.DrawString(new CGPoint(rect.GetMidX() - size.Width / 2, stripRect.GetMidY() - size.Height / 2), attrs);
     }
 
     private static void DrawPlayBadge(CGRect rect)

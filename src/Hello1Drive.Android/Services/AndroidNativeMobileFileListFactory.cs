@@ -1058,22 +1058,160 @@ internal sealed class NativeFileItemView : View
 
     private void DrawFileBadge(Canvas canvas, DriveItemModel item, RectF rect)
     {
-        _paint.Color = item.IsPdf ? Color.Rgb(232, 67, 76)
-            : item.IsWord ? Color.Rgb(54, 108, 205)
-            : item.IsExcel ? Color.Rgb(33, 133, 88)
-            : item.IsPowerPoint ? Color.Rgb(211, 91, 55)
-            : item.IsImage ? Color.Rgb(67, 143, 237)
-            : item.IsVideo ? Color.Rgb(124, 88, 204)
-            : item.IsAudio ? Color.Rgb(226, 93, 142)
-            : Color.Rgb(105, 116, 133);
-        canvas.DrawRoundRect(rect, Dp(7), Dp(7), _paint);
+        if (item.IsImage)
+        {
+            DrawImagePlaceholder(canvas, rect);
+            return;
+        }
+
+        if (item.IsVideo)
+        {
+            DrawVideoPlaceholder(canvas, rect);
+            return;
+        }
+
+        if (item.IsAudio)
+        {
+            DrawAudioPlaceholder(canvas, rect);
+            return;
+        }
+
+        DrawDocumentPlaceholder(canvas, item, rect);
+    }
+
+    private void DrawImagePlaceholder(Canvas canvas, RectF rect)
+    {
+        float X(float value) => rect.Left + rect.Width() * value;
+        float Y(float value) => rect.Top + rect.Height() * value;
+        var radius = Math.Min(rect.Width(), rect.Height()) * 0.22f;
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(238, 247, 255);
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(Dp(1), rect.Width() * 0.04f);
+        _paint.Color = Color.Rgb(142, 197, 255);
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+
+        _folderPath.Reset();
+        _folderPath.MoveTo(X(0.18f), Y(0.75f));
+        _folderPath.LineTo(X(0.36f), Y(0.53f));
+        _folderPath.LineTo(X(0.50f), Y(0.65f));
+        _folderPath.LineTo(X(0.64f), Y(0.50f));
+        _folderPath.LineTo(X(0.82f), Y(0.75f));
+        _paint.Color = Color.Rgb(59, 130, 246);
+        _paint.StrokeWidth = Math.Max(Dp(1.4f), rect.Width() * 0.055f);
+        _paint.StrokeCap = Paint.Cap.Round;
+        _paint.StrokeJoin = Paint.Join.Round;
+        canvas.DrawPath(_folderPath, _paint);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(253, 186, 116);
+        canvas.DrawCircle(X(0.31f), Y(0.31f), Math.Min(rect.Width(), rect.Height()) * 0.085f, _paint);
+    }
+
+    private void DrawVideoPlaceholder(Canvas canvas, RectF rect)
+    {
+        var radius = Math.Min(rect.Width(), rect.Height()) * 0.22f;
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(238, 242, 255);
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(Dp(1), rect.Width() * 0.035f);
+        _paint.Color = Color.Rgb(165, 180, 252);
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(124, 58, 237);
+        var playRadius = Math.Min(rect.Width(), rect.Height()) * 0.285f;
+        canvas.DrawCircle(rect.CenterX(), rect.CenterY(), playRadius, _paint);
+
+        _folderPath.Reset();
+        _folderPath.MoveTo(rect.CenterX() - playRadius * 0.28f, rect.CenterY() - playRadius * 0.48f);
+        _folderPath.LineTo(rect.CenterX() + playRadius * 0.55f, rect.CenterY());
+        _folderPath.LineTo(rect.CenterX() - playRadius * 0.28f, rect.CenterY() + playRadius * 0.48f);
+        _folderPath.Close();
+        _paint.Color = Color.White;
+        canvas.DrawPath(_folderPath, _paint);
+    }
+
+    private void DrawAudioPlaceholder(Canvas canvas, RectF rect)
+    {
+        float X(float value) => rect.Left + rect.Width() * value;
+        float Y(float value) => rect.Top + rect.Height() * value;
+        var min = Math.Min(rect.Width(), rect.Height());
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(96, 165, 250);
+        canvas.DrawCircle(X(0.42f), Y(0.58f), min * 0.36f, _paint);
+        _paint.Color = Color.Rgb(251, 113, 133);
+        canvas.DrawCircle(X(0.58f), Y(0.42f), min * 0.36f, _paint);
+
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.Color = Color.White;
+        _paint.StrokeWidth = Math.Max(Dp(1.6f), min * 0.07f);
+        _paint.StrokeCap = Paint.Cap.Round;
+        _paint.StrokeJoin = Paint.Join.Round;
+        _folderPath.Reset();
+        _folderPath.MoveTo(X(0.40f), Y(0.30f));
+        _folderPath.LineTo(X(0.40f), Y(0.70f));
+        _folderPath.MoveTo(X(0.40f), Y(0.30f));
+        _folderPath.LineTo(X(0.70f), Y(0.23f));
+        _folderPath.LineTo(X(0.70f), Y(0.60f));
+        canvas.DrawPath(_folderPath, _paint);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        canvas.DrawOval(new RectF(X(0.23f), Y(0.64f), X(0.46f), Y(0.82f)), _paint);
+        canvas.DrawOval(new RectF(X(0.53f), Y(0.54f), X(0.76f), Y(0.72f)), _paint);
+    }
+
+    private void DrawDocumentPlaceholder(Canvas canvas, DriveItemModel item, RectF rect)
+    {
+        var background = item.IsPdf ? Color.Rgb(255, 245, 245)
+            : item.IsWord ? Color.Rgb(239, 246, 255)
+            : item.IsExcel ? Color.Rgb(240, 253, 244)
+            : item.IsPowerPoint ? Color.Rgb(255, 247, 237)
+            : item.IsArchive ? Color.Rgb(245, 243, 255)
+            : item.IsUrlShortcut ? Color.Rgb(240, 253, 250)
+            : Color.Rgb(248, 250, 252);
+        var border = item.IsPdf ? Color.Rgb(240, 160, 168)
+            : item.IsWord ? Color.Rgb(147, 197, 253)
+            : item.IsExcel ? Color.Rgb(134, 239, 172)
+            : item.IsPowerPoint ? Color.Rgb(253, 186, 116)
+            : item.IsArchive ? Color.Rgb(196, 181, 253)
+            : item.IsUrlShortcut ? Color.Rgb(94, 234, 212)
+            : Color.Rgb(203, 213, 225);
+        var accent = item.IsPdf ? Color.Rgb(239, 68, 68)
+            : item.IsWord ? Color.Rgb(37, 99, 235)
+            : item.IsExcel ? Color.Rgb(22, 163, 74)
+            : item.IsPowerPoint ? Color.Rgb(249, 115, 22)
+            : item.IsArchive ? Color.Rgb(139, 92, 246)
+            : item.IsUrlShortcut ? Color.Rgb(14, 165, 164)
+            : item.IsText ? Color.Rgb(100, 116, 139)
+            : Color.Rgb(96, 165, 250);
+
+        var radius = Math.Min(rect.Width(), rect.Height()) * 0.18f;
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = background;
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(Dp(1), rect.Width() * 0.035f);
+        _paint.Color = border;
+        canvas.DrawRoundRect(rect, radius, radius, _paint);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = accent;
+        var stripTop = rect.Bottom - rect.Height() * 0.30f;
+        var strip = new RectF(rect.Left, stripTop, rect.Right, rect.Bottom);
+        canvas.DrawRoundRect(strip, radius * 0.65f, radius * 0.65f, _paint);
+        canvas.DrawRect(rect.Left, stripTop, rect.Right, stripTop + radius * 0.65f, _paint);
 
         _textPaint.Color = Color.White;
         _textPaint.TextAlign = Paint.Align.Center;
-        _textPaint.TextSize = Math.Min(rect.Height() * 0.26f, Sp(13));
+        _textPaint.TextSize = Math.Min(rect.Height() * 0.16f, Sp(8));
         _textPaint.SetTypeface(Typeface.DefaultBold);
-        var baseline = rect.CenterY() - (_textPaint.Ascent() + _textPaint.Descent()) / 2f;
-        canvas.DrawText(item.FileBadgeText, rect.CenterX(), baseline, _textPaint);
+        var labelY = stripTop + (rect.Bottom - stripTop) / 2f - (_textPaint.Ascent() + _textPaint.Descent()) / 2f;
+        canvas.DrawText(item.FileBadgeText, rect.CenterX(), labelY, _textPaint);
         _textPaint.TextAlign = Paint.Align.Left;
     }
 
