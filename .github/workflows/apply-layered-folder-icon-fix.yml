@@ -1,0 +1,43 @@
+name: Apply layered folder icon fix
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/apply_layered_folder_icon_fix.py
+      - .github/workflows/apply-layered-folder-icon-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply source patch
+        run: python3 tools/apply_layered_folder_icon_fix.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -F 'Layered yellow folder matched to the supplied OneDrive folder artwork.' src/Hello1Drive.Core/Views/MainView.axaml
+          grep -F 'Four-layer yellow folder matched to the supplied OneDrive folder artwork.' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -F 'DrawLayeredFolderGlyph(artRect);' src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+          ! grep -F 'Windows 11 style: raised tab/back plate' src/Hello1Drive.Core/Views/MainView.axaml
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_layered_folder_icon_fix.py
+          rm -f .github/workflows/apply-layered-folder-icon-fix.yml
+
+      - name: Commit and push source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replace OneDrive folder artwork with layered icon"
+          git push origin HEAD:master
