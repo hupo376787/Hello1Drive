@@ -1,0 +1,43 @@
+name: Apply native list transparency fix
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/apply_native_list_transparency_fix.py
+      - .github/workflows/apply-native-list-transparency-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply source patch
+        run: python3 tools/apply_native_list_transparency_fix.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -F 'var transparent = _viewModel?.TransparentFileItemBackground == true;' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -F 'canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -F '_source.SetPresentation(dark, transparent);' src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+          grep -F '? UIColor.Clear' src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_native_list_transparency_fix.py
+          rm -f .github/workflows/apply-native-list-transparency-fix.yml
+
+      - name: Commit and push source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Honor transparent file backgrounds in native lists"
+          git push origin HEAD:master
