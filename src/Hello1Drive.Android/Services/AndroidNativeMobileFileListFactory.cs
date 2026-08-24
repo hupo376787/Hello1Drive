@@ -6,6 +6,7 @@ using Android.Content.Res;
 using Android.Graphics;
 using Android.OS;
 using Android.Views;
+using Android.Widget;
 using Avalonia.Android;
 using Avalonia.Platform;
 using AndroidX.RecyclerView.Widget;
@@ -49,8 +50,10 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 {
     private readonly Context _context;
     private readonly NativeMobileFileListHost _host;
+    private readonly FrameLayout _root;
     private readonly SwipeRefreshLayout _refresh;
     private readonly RecyclerView _recycler;
+    private readonly NativeFloatingUploadButtonView _floatingUpload;
     private readonly NativeFileAdapter _adapter;
     private readonly NativeScrollListener _scrollListener;
     private readonly NativeRefreshListener _refreshListener;
@@ -63,8 +66,14 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         _context = context;
         _host = host;
 
+        _root = new FrameLayout(context)
+        {
+            ClipChildren = false,
+            ClipToPadding = false
+        };
         _refresh = new SwipeRefreshLayout(context);
         _recycler = new RecyclerView(context);
+        _floatingUpload = new NativeFloatingUploadButtonView(context, host);
         _adapter = new NativeFileAdapter(context, host, _recycler);
         _scrollListener = new NativeScrollListener(this);
         _refreshListener = new NativeRefreshListener(this);
@@ -81,14 +90,21 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
             ViewGroup.LayoutParams.MatchParent,
             ViewGroup.LayoutParams.MatchParent));
 
+        _root.AddView(_refresh, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent,
+            ViewGroup.LayoutParams.MatchParent));
+        var floatingSize = Dp(48);
+        _root.AddView(_floatingUpload, new FrameLayout.LayoutParams(floatingSize, floatingSize));
+
         _host.HostStateChanged += Host_HostStateChanged;
         _host.ScrollToPositionRequested += Host_ScrollToPositionRequested;
         _recycler.LayoutChange += Recycler_LayoutChange;
+        _root.LayoutChange += Root_LayoutChange;
 
         SyncHostState(preservePosition: false);
     }
 
-    public View RootView => _refresh;
+    public View RootView => _root;
 
     private void Host_HostStateChanged(object? sender, EventArgs e) => SyncHostState(preservePosition: true);
 
@@ -129,6 +145,7 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 
         _adapter.UpdateSelection(_host.SelectedIds, _host.SelectionMode);
         UpdateTheme();
+        SyncFloatingUpload();
 
         if (_viewModel is not null)
             ApplyLayoutManager(_viewModel.ViewMode, preservePosition);
@@ -145,6 +162,12 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.ShowFloatingUploadButton))
+        {
+            SyncFloatingUpload();
+            return;
+        }
+
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
             nameof(MainViewModel.SelectedBackgroundModeText) or
@@ -152,6 +175,39 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         {
             UpdateTheme();
         }
+    }
+
+    private void Root_LayoutChange(object? sender, View.LayoutChangeEventArgs e)
+    {
+        if (!_disposed)
+            PositionFloatingUpload();
+    }
+
+    private void SyncFloatingUpload()
+    {
+        if (_disposed)
+            return;
+
+        _floatingUpload.Visibility = _host.FloatingUploadVisible ? ViewStates.Visible : ViewStates.Gone;
+        if (_floatingUpload.Visibility == ViewStates.Visible)
+            _root.Post(PositionFloatingUpload);
+    }
+
+    private void PositionFloatingUpload()
+    {
+        if (_disposed || _floatingUpload.Visibility != ViewStates.Visible)
+            return;
+
+        var buttonWidth = _floatingUpload.Width > 0 ? _floatingUpload.Width : Dp(48);
+        var buttonHeight = _floatingUpload.Height > 0 ? _floatingUpload.Height : Dp(48);
+        var maxX = Math.Max(0, _root.Width - buttonWidth);
+        var maxY = Math.Max(0, _root.Height - buttonHeight);
+        if (maxX <= 0 && maxY <= 0)
+            return;
+
+        _floatingUpload.X = (float)(Math.Clamp(_host.FloatingUploadX, 0, 1) * maxX);
+        _floatingUpload.Y = (float)(Math.Clamp(_host.FloatingUploadY, 0, 1) * maxY);
+        _floatingUpload.BringToFront();
     }
 
     private void ApplyLayoutManager(FileViewMode mode, bool preservePosition)
@@ -316,6 +372,7 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         _host.HostStateChanged -= Host_HostStateChanged;
         _host.ScrollToPositionRequested -= Host_ScrollToPositionRequested;
         _recycler.LayoutChange -= Recycler_LayoutChange;
+        _root.LayoutChange -= Root_LayoutChange;
         _recycler.RemoveOnScrollListener(_scrollListener);
         _refresh.SetOnRefreshListener(null);
 
@@ -326,9 +383,12 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         _adapter.Dispose();
         _recycler.SetAdapter(null);
         _recycler.SetLayoutManager(null);
+        _root.RemoveAllViews();
         _refresh.RemoveAllViews();
+        _floatingUpload.Dispose();
         _recycler.Dispose();
         _refresh.Dispose();
+        _root.Dispose();
         _scrollListener.Dispose();
         _refreshListener.Dispose();
         base.Dispose();
@@ -352,6 +412,145 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
     private sealed class NativeRefreshListener(AndroidNativeFileListController owner) : Java.Lang.Object, SwipeRefreshLayout.IOnRefreshListener
     {
         public void OnRefresh() => owner.OnRefresh();
+    }
+}
+
+internal sealed class NativeFloatingUploadButtonView : View
+{
+    private readonly NativeMobileFileListHost _host;
+    private readonly Paint _fillPaint = new(PaintFlags.AntiAlias);
+    private readonly Paint _iconPaint = new(PaintFlags.AntiAlias);
+    private readonly float _touchSlop;
+    private bool _tracking;
+    private bool _moved;
+    private float _downRawX;
+    private float _downRawY;
+    private float _startX;
+    private float _startY;
+
+    public NativeFloatingUploadButtonView(Context context, NativeMobileFileListHost host) : base(context)
+    {
+        _host = host;
+        _touchSlop = ViewConfiguration.Get(context)?.ScaledTouchSlop ?? Dp(6);
+
+        Clickable = true;
+        Focusable = true;
+        ContentDescription = "上传文件";
+        Elevation = Dp(8);
+        SetWillNotDraw(false);
+
+        _fillPaint.Color = Color.Rgb(253, 111, 113);
+        _fillPaint.SetStyle(Paint.Style.Fill);
+        _iconPaint.Color = Color.Rgb(255, 247, 248);
+        _iconPaint.SetStyle(Paint.Style.Stroke);
+        _iconPaint.StrokeWidth = Dp(1.5f);
+        _iconPaint.StrokeCap = Paint.Cap.Round;
+        _iconPaint.StrokeJoin = Paint.Join.Round;
+    }
+
+    protected override void OnDraw(Canvas canvas)
+    {
+        base.OnDraw(canvas);
+        if (Width <= 0 || Height <= 0)
+            return;
+
+        var diameter = Math.Min(Width, Height);
+        canvas.DrawCircle(Width / 2f, Height / 2f, diameter / 2f, _fillPaint);
+
+        var scale = diameter / 14f;
+        var offsetX = (Width - 14f * scale) / 2f;
+        var offsetY = (Height - 14f * scale) / 2f;
+        float X(float value) => offsetX + value * scale;
+        float Y(float value) => offsetY + value * scale;
+
+        canvas.DrawLine(X(7), Y(12), X(7), Y(2), _iconPaint);
+        canvas.DrawLine(X(3.5f), Y(5.5f), X(7), Y(2), _iconPaint);
+        canvas.DrawLine(X(7), Y(2), X(10.5f), Y(5.5f), _iconPaint);
+        canvas.DrawLine(X(2), Y(12), X(12), Y(12), _iconPaint);
+    }
+
+    public override bool OnTouchEvent(MotionEvent? e)
+    {
+        if (e is null)
+            return false;
+
+        switch (e.ActionMasked)
+        {
+            case MotionEventActions.Down:
+                _tracking = true;
+                _moved = false;
+                _downRawX = e.RawX;
+                _downRawY = e.RawY;
+                _startX = X;
+                _startY = Y;
+                Parent?.RequestDisallowInterceptTouchEvent(true);
+                BringToFront();
+                return true;
+
+            case MotionEventActions.Move:
+                if (!_tracking)
+                    return false;
+                MoveTo(e.RawX, e.RawY);
+                return true;
+
+            case MotionEventActions.Up:
+                if (!_tracking)
+                    return false;
+                MoveTo(e.RawX, e.RawY);
+                _tracking = false;
+                Parent?.RequestDisallowInterceptTouchEvent(false);
+                if (_moved)
+                    SaveNormalizedPosition();
+                else
+                    PerformClick();
+                return true;
+
+            case MotionEventActions.Cancel:
+                _tracking = false;
+                Parent?.RequestDisallowInterceptTouchEvent(false);
+                return true;
+
+            default:
+                return base.OnTouchEvent(e);
+        }
+    }
+
+    public override bool PerformClick()
+    {
+        base.PerformClick();
+        _host.RaiseFloatingUploadRequested();
+        return true;
+    }
+
+    private void MoveTo(float rawX, float rawY)
+    {
+        var dx = rawX - _downRawX;
+        var dy = rawY - _downRawY;
+        if (!_moved && MathF.Sqrt(dx * dx + dy * dy) >= _touchSlop)
+            _moved = true;
+        if (!_moved || Parent is not View parent)
+            return;
+
+        var maxX = Math.Max(0, parent.Width - Width);
+        var maxY = Math.Max(0, parent.Height - Height);
+        X = Math.Clamp(_startX + dx, 0, maxX);
+        Y = Math.Clamp(_startY + dy, 0, maxY);
+    }
+
+    private void SaveNormalizedPosition()
+    {
+        if (Parent is not View parent)
+            return;
+
+        var maxX = Math.Max(1, parent.Width - Width);
+        var maxY = Math.Max(1, parent.Height - Height);
+        _host.RaiseFloatingUploadPositionChanged(X / maxX, Y / maxY);
+    }
+
+    private float Dp(float value)
+    {
+        var density = Resources?.DisplayMetrics?.Density ?? 1f;
+        return value * density;
     }
 }
 

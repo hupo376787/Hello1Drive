@@ -150,6 +150,13 @@ public partial class MainView : UserControl
     public MainView()
     {
         InitializeComponent();
+
+        // Android's native RecyclerView lives on a platform View layer above Avalonia. Its upload
+        // FAB is therefore rendered natively as part of that same layer; keep the Avalonia FAB
+        // for desktop/iOS only so RecyclerView cells can never cover the Android button.
+        if (OperatingSystem.IsAndroid())
+            FloatingActionCanvas.IsVisible = false;
+
         MobileDestinationFolderList.ItemsSource = _mobileDestinationFolders;
         MobileDestinationBreadcrumbs.ItemsSource = _mobileDestinationBreadcrumbItems;
         Loaded += MainView_Loaded;
@@ -1776,6 +1783,8 @@ if (visibleItems.Count > 0)
         host.ItemTapped += NativeMobileFileListHost_ItemTapped;
         host.ItemLongPressed += NativeMobileFileListHost_ItemLongPressed;
         host.ScrollStateChanged += NativeMobileFileListHost_ScrollStateChanged;
+        host.FloatingUploadRequested += NativeMobileFileListHost_FloatingUploadRequested;
+        host.FloatingUploadPositionChanged += NativeMobileFileListHost_FloatingUploadPositionChanged;
 
         _nativeMobileFileListHost = host;
         NativeMobileFileListContainer.Children.Add(host);
@@ -1792,6 +1801,8 @@ if (visibleItems.Count > 0)
         host.ItemTapped -= NativeMobileFileListHost_ItemTapped;
         host.ItemLongPressed -= NativeMobileFileListHost_ItemLongPressed;
         host.ScrollStateChanged -= NativeMobileFileListHost_ScrollStateChanged;
+        host.FloatingUploadRequested -= NativeMobileFileListHost_FloatingUploadRequested;
+        host.FloatingUploadPositionChanged -= NativeMobileFileListHost_FloatingUploadPositionChanged;
         NativeMobileFileListContainer.Children.Remove(host);
         host.DataContext = null;
         _nativeMobileFileListHost = null;
@@ -2465,6 +2476,26 @@ if (visibleItems.Count > 0)
             return;
 
         vm.SetMobileListScrolling(e.IsScrolling);
+    }
+
+    private void NativeMobileFileListHost_FloatingUploadRequested(object? sender, EventArgs e)
+    {
+        if (!OperatingSystem.IsAndroid())
+            return;
+
+        Dispatcher.UIThread.Post(
+            () => UploadButton_Click(FloatingUploadButton, new RoutedEventArgs()),
+            DispatcherPriority.Input);
+    }
+
+    private async void NativeMobileFileListHost_FloatingUploadPositionChanged(
+        object? sender,
+        NativeFloatingUploadPositionEventArgs e)
+    {
+        if (!OperatingSystem.IsAndroid() || DataContext is not MainViewModel vm)
+            return;
+
+        await vm.SaveFloatingUploadPositionAsync(e.NormalizedX, e.NormalizedY);
     }
 
     private void BeginMobileLongPress(DriveItemModel item, Point start, ulong timestamp)

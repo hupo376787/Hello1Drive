@@ -22,12 +22,17 @@ public sealed class NativeMobileFileListHost : NativeControlHost
     public event EventHandler<NativeMobileFileScrollEventArgs>? ScrollStateChanged;
     public event EventHandler? HostStateChanged;
     public event EventHandler<NativeMobileFileScrollToEventArgs>? ScrollToPositionRequested;
+    public event EventHandler? FloatingUploadRequested;
+    public event EventHandler<NativeFloatingUploadPositionEventArgs>? FloatingUploadPositionChanged;
     public Func<Task>? RefreshRequestedAsync { get; set; }
 
     public MainViewModel? ViewModel => _viewModel;
     public IReadOnlyList<string> SelectedIds => _selectedIds;
     public bool SelectionMode => _selectionMode;
     public int LastFirstVisibleIndex { get; private set; }
+    public bool FloatingUploadVisible => _viewModel?.ShowFloatingUploadButton == true;
+    public double FloatingUploadX => Math.Clamp(_viewModel?.Settings.FloatingUploadX ?? 0.94, 0, 1);
+    public double FloatingUploadY => Math.Clamp(_viewModel?.Settings.FloatingUploadY ?? 0.90, 0, 1);
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -69,6 +74,15 @@ public sealed class NativeMobileFileListHost : NativeControlHost
     public void ScrollToPosition(int position) =>
         ScrollToPositionRequested?.Invoke(this, new NativeMobileFileScrollToEventArgs(Math.Max(0, position)));
 
+    public void RaiseFloatingUploadRequested() => FloatingUploadRequested?.Invoke(this, EventArgs.Empty);
+
+    public void RaiseFloatingUploadPositionChanged(double normalizedX, double normalizedY) =>
+        FloatingUploadPositionChanged?.Invoke(
+            this,
+            new NativeFloatingUploadPositionEventArgs(
+                Math.Clamp(normalizedX, 0, 1),
+                Math.Clamp(normalizedY, 0, 1)));
+
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
         var factory = AppServices.NativeMobileFileListFactory;
@@ -91,6 +105,12 @@ public sealed class NativeMobileFileListHost : NativeControlHost
             base.DestroyNativeControlCore(control);
         }
     }
+}
+
+public sealed class NativeFloatingUploadPositionEventArgs(double normalizedX, double normalizedY) : EventArgs
+{
+    public double NormalizedX { get; } = normalizedX;
+    public double NormalizedY { get; } = normalizedY;
 }
 
 public sealed class NativeMobileFileItemEventArgs(DriveItemModel item) : EventArgs
