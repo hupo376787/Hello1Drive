@@ -1820,6 +1820,7 @@ if (visibleItems.Count > 0)
             MobileProfileOverlay.IsVisible ||
             vm.IsTransferPanelVisible ||
             vm.IsPreviewVisible ||
+            MobileViewModeActionsOverlay.IsVisible ||
             MobileSortActionsOverlay.IsVisible ||
             MobilePreviewActionsOverlay.IsVisible ||
             vm.IsSettingsPanelVisible ||
@@ -1879,6 +1880,13 @@ if (visibleItems.Count > 0)
         }
 
         // Transient mobile action surfaces are dismissed before page navigation.
+        if (MobileViewModeActionsOverlay.IsVisible)
+        {
+            CloseMobileViewModeActions();
+            e.Handled = true;
+            return;
+        }
+
         if (MobileSortActionsOverlay.IsVisible)
         {
             CloseMobileSortActions();
@@ -2819,12 +2827,55 @@ if (visibleItems.Count > 0)
         await ApplySortTagAsync(menuItem.Tag?.ToString());
     }
 
+    private void MobileViewModeButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        CancelMobileLongPress();
+        CloseMobileSortActions();
+        CloseMobilePreviewActions();
+        MobileViewModeActionsOverlay.IsVisible = true;
+        UpdateNativeMobileFileListVisibility();
+        e.Handled = true;
+    }
+
+    private void CloseMobileViewModeActions()
+    {
+        MobileViewModeActionsOverlay.IsVisible = false;
+        UpdateNativeMobileFileListVisibility();
+    }
+
+    private void MobileViewModeActionsBackdrop_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        CloseMobileViewModeActions();
+        e.Handled = true;
+    }
+
+    private async void MobileViewModeAction_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string tag } || DataContext is not MainViewModel vm ||
+            !Enum.TryParse<FileViewMode>(tag, out var mode))
+            return;
+
+        CloseMobileViewModeActions();
+        ClearListSelections();
+        await vm.SetViewModeAsync(mode);
+        Dispatcher.UIThread.Post(UpdateIconPanelSizing, DispatcherPriority.Loaded);
+        if (IsMobilePlatform && !UsesNativeMobileFileList)
+            Dispatcher.UIThread.Post(UpdateResponsiveMobileIconLayouts, DispatcherPriority.Loaded);
+        if (UsesNativeMobileFileList)
+            Dispatcher.UIThread.Post(() => UpdateNativeMobileFileListGeometry(vm), DispatcherPriority.Loaded);
+        e.Handled = true;
+    }
+
     private void MobileSortButton_Click(object? sender, RoutedEventArgs e)
     {
         if (!IsMobilePlatform)
             return;
 
         CancelMobileLongPress();
+        CloseMobileViewModeActions();
         CloseMobilePreviewActions();
         MobileSortActionsOverlay.IsVisible = true;
         UpdateNativeMobileFileListVisibility();

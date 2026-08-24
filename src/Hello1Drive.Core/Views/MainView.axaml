@@ -799,14 +799,21 @@
                 </MenuFlyout>
               </Button.Flyout>
             </Button>
-            <Button Classes="viewMode" ToolTip.Tip="详细信息" Tag="Details" Click="ViewModeButton_Click">
+            <Button Classes="viewMode" ToolTip.Tip="查看方式">
               <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" />
-            </Button>
-            <Button Classes="viewMode" ToolTip.Tip="大图标" Tag="LargeIcons" Click="ViewModeButton_Click">
-              <Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" />
-            </Button>
-            <Button Classes="viewMode" ToolTip.Tip="超大图标" Tag="ExtraLargeIcons" Click="ViewModeButton_Click">
-              <Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" />
+              <Button.Flyout>
+                <MenuFlyout>
+                  <MenuItem Header="详细信息" Tag="Details" Click="ViewContextMenu_Click">
+                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="大图标" Tag="LargeIcons" Click="ViewContextMenu_Click">
+                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="超大图标" Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
+                  </MenuItem>
+                </MenuFlyout>
+              </Button.Flyout>
             </Button>
           </StackPanel>
 
@@ -835,9 +842,9 @@
               <Button Classes="viewMode" ToolTip.Tip="排序" Click="MobileSortButton_Click">
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
               </Button>
-              <Button Classes="viewMode" ToolTip.Tip="详细信息" Tag="Details" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></Button>
-              <Button Classes="viewMode" ToolTip.Tip="大图标" Tag="LargeIcons" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></Button>
-              <Button Classes="viewMode" ToolTip.Tip="超大图标" Tag="ExtraLargeIcons" Click="ViewModeButton_Click"><Path Classes="toolbarIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></Button>
+              <Button Classes="viewMode" ToolTip.Tip="查看方式" Click="MobileViewModeButton_Click">
+                <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" />
+              </Button>
             </StackPanel>
           </ScrollViewer>
         </Grid>
@@ -1415,6 +1422,37 @@
             <TextBlock Text="{Binding PreviewExtendedDetails}" FontSize="12" Opacity="0.84" TextWrapping="Wrap" />
           </Border>
         </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Mobile view-mode action panel. It intentionally mirrors the mobile sort surface. -->
+    <Grid x:Name="MobileViewModeActionsOverlay"
+          IsVisible="False"
+          Background="#72000000"
+          ZIndex="3200"
+          PointerPressed="MobileViewModeActionsBackdrop_PointerPressed">
+      <Border MaxWidth="420" Margin="28"
+              HorizontalAlignment="Stretch" VerticalAlignment="Center"
+              Padding="0,8" CornerRadius="8"
+              Background="#F0444444"
+              BorderBrush="#28FFFFFF" BorderThickness="1">
+        <StackPanel HorizontalAlignment="Stretch">
+          <Button Content="详细信息" Tag="Details"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileViewModeAction_Click" />
+          <Button Content="大图标" Tag="LargeIcons"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileViewModeAction_Click" />
+          <Button Content="超大图标" Tag="ExtraLargeIcons"
+                  Height="58" Padding="20,0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                  FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
+                  Click="MobileViewModeAction_Click" />
+        </StackPanel>
       </Border>
     </Grid>
 
