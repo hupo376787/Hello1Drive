@@ -35,6 +35,8 @@ public partial class MainView : UserControl
     private bool _loaded;
     private bool _restoredTransfersResumeStarted;
     private CancellationTokenSource? _backgroundUrlApplyCts;
+    private ContextMenu? _desktopFileItemContextMenu;
+    private MenuItem? _desktopOpenWebMenuItem;
     private IDisposable? _backgroundScrimBinding;
     private IDisposable? _mobileProfileScrimBinding;
     private IDisposable? _mobileTransferScrimBinding;
@@ -74,7 +76,6 @@ public partial class MainView : UserControl
 
     private readonly Dictionary<string, Vector> _folderScrollPositions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _nativeFolderScrollPositions = new(StringComparer.Ordinal);
-    private readonly HashSet<ScrollViewer> _hookedScrollViewers = [];
     private TopLevel? _topLevel;
 
     private bool _marqueeSelecting;
@@ -102,7 +103,6 @@ public partial class MainView : UserControl
     private readonly DispatcherTimer _mobileScrollIdleTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _desktopScrollIdleTimer = new() { Interval = TimeSpan.FromMilliseconds(90) };
     private DateTime _desktopScrollLastActivityUtc;
-    private DateTime _desktopThumbnailLastQueueUtc;
     private int _desktopThumbnailIdleRecoveryVersion;
     private bool _mobileFolderNavigationInProgress;
     private bool _mobileRefreshInProgress;
@@ -1038,39 +1038,9 @@ public partial class MainView : UserControl
 
     private void HookListScrollViewers()
     {
-        if (IsMobilePlatform)
-            return; // Mobile ScrollViewers are explicit in XAML and use touch gesture handlers.
-
-        foreach (var scroll in new[] { DesktopDetailsScrollViewer, DesktopLargeIconScrollViewer, DesktopExtraLargeIconScrollViewer })
-        {
-            if (_hookedScrollViewers.Add(scroll))
-            {
-                scroll.AddHandler(
-                    InputElement.PointerWheelChangedEvent,
-                    DesktopFileList_PointerWheelChanged,
-                    RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
-                    true);
-            }
-        }
-    }
-
-    private void DesktopFileList_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
-    {
-        if (IsMobilePlatform || sender is not ScrollViewer scroll ||
-            e.KeyModifiers.HasFlag(KeyModifiers.Control) || Math.Abs(e.Delta.Y) < 0.001)
-            return;
-
-        // Avalonia's default wheel step feels noticeably shorter than Explorer for these rows.
-        // Keep precision touchpad deltas smooth, but make a regular mouse-wheel notch roughly
-        // equal to 2.5-3 detail rows.
-        var pixelsPerWheelUnit = Math.Abs(e.Delta.Y) < 0.9 ? 82.0 : 124.0;
-        var maxY = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
-        var targetY = Math.Clamp(scroll.Offset.Y - e.Delta.Y * pixelsPerWheelUnit, 0, maxY);
-        if (Math.Abs(targetY - scroll.Offset.Y) < 0.01)
-            return;
-
-        scroll.Offset = new Vector(scroll.Offset.X, targetY);
-        e.Handled = true;
+        // Intentionally empty. Let ScrollViewer handle mouse-wheel / precision-touchpad input
+        // through Avalonia's normal scrolling path. Manually assigning Offset for every wheel
+        // event forced synchronous realization/layout and made the desktop list feel stepped.
     }
 
     private void MobileFileList_ScrollGesture(object? sender, ScrollGestureEventArgs e)
@@ -1159,22 +1129,16 @@ public partial class MainView : UserControl
 
     private void HandleDesktopFileScroll(ScrollViewer scroll, MainViewModel vm)
     {
-        var now = DateTime.UtcNow;
-        _desktopScrollLastActivityUtc = now;
+        _desktopScrollLastActivityUtc = DateTime.UtcNow;
         unchecked { _desktopThumbnailIdleRecoveryVersion++; }
         vm.SetDesktopListScrolling(true);
 
         if (!_desktopScrollIdleTimer.IsEnabled)
             _desktopScrollIdleTimer.Start();
 
-        // While the scrollbar thumb/wheel is moving, only decode thumbnails that already exist on
-        // disk. Network work waits for the final viewport, so a long jump cannot build another
-        // off-screen queue behind the six desktop workers.
-        if ((now - _desktopThumbnailLastQueueUtc).TotalMilliseconds >= 90)
-        {
-            _desktopThumbnailLastQueueUtc = now;
-            QueueRealizedDesktopThumbnails(scroll, vm, allowNetwork: false);
-        }
+        // Do no thumbnail traversal, disk probing or bitmap decoding in the active-scroll path.
+        // The idle handler warms current +/- one viewport after 150 ms. Already decoded thumbnails
+        // remain attached to their DriveItemModel and therefore continue drawing while scrolling.
     }
 
     private void DesktopScrollIdleTimer_Tick(object? sender, EventArgs e)
@@ -1450,11 +1414,9 @@ vm.SetMobileListScrolling(true);
 
         foreach (var element in repeater.GetVisualChildren().OfType<Control>())
         {
-            var slot = element.DataContext as VirtualDriveItemSlot
-                ?? element.GetVisualDescendants().OfType<Control>()
-                    .Select(static control => control.DataContext as VirtualDriveItemSlot)
-                    .FirstOrDefault(static candidate => candidate is not null);
-            if (slot is null)
+            // Desktop templates are now a single self-drawn Control whose inherited
+            // DataContext is the slot itself. Avoid walking a deep visual subtree on every scan.
+            if (element.DataContext is not VirtualDriveItemSlot slot)
                 continue;
 
             var origin = element.TranslatePoint(new Point(0, 0), scroll);
@@ -2751,9 +2713,58 @@ if (visibleItems.Count > 0)
     private void FileItem_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         // Mobile uses custom long-press selection; never allow the platform context-menu gesture
-        // to compete with scrolling. Desktop keeps the normal right-click menu.
+        // to compete with scrolling.
         if (IsMobilePlatform)
+        {
             e.Handled = true;
+            return;
+        }
+
+        if (sender is not Control control || GetDriveItemFromDataContext(control.DataContext) is not { } item)
+            return;
+
+        _contextItem = item;
+        SelectContextItem(item);
+        var menu = GetOrCreateDesktopFileItemContextMenu();
+        if (_desktopOpenWebMenuItem is not null)
+            _desktopOpenWebMenuItem.IsVisible = item.HasWebUrl;
+        menu.Open(control);
+        e.Handled = true;
+    }
+
+    private ContextMenu GetOrCreateDesktopFileItemContextMenu()
+    {
+        if (_desktopFileItemContextMenu is not null)
+            return _desktopFileItemContextMenu;
+
+        var open = new MenuItem { Header = "打开" };
+        open.Click += FileContext_Open_Click;
+        var download = new MenuItem { Header = "下载" };
+        download.Click += FileContext_Download_Click;
+        var cache = new MenuItem { Header = "缓存" };
+        cache.Click += FileContext_Cache_Click;
+        var rename = new MenuItem { Header = "重命名" };
+        rename.Click += FileContext_Rename_Click;
+        var delete = new MenuItem { Header = "删除" };
+        delete.Click += FileContext_Delete_Click;
+        _desktopOpenWebMenuItem = new MenuItem { Header = "在 OneDrive 网页中打开" };
+        _desktopOpenWebMenuItem.Click += FileContext_OpenWeb_Click;
+
+        _desktopFileItemContextMenu = new ContextMenu
+        {
+            ItemsSource = new object[]
+            {
+                open,
+                new Separator(),
+                download,
+                cache,
+                rename,
+                delete,
+                new Separator(),
+                _desktopOpenWebMenuItem
+            }
+        };
+        return _desktopFileItemContextMenu;
     }
 
     private void FileItem_Holding(object? sender, HoldingRoutedEventArgs e)

@@ -297,7 +297,7 @@ public partial class MainViewModel : ViewModelBase
             // thumb hundreds of rows then had to wait behind that obsolete queue. A new scrollbar
             // gesture cancels those workers; the final realized viewport will restart only what is
             // actually visible.
-            CancelThumbnailLoading();
+            CancelThumbnailLoading(deferCallbacks: true);
         }
     }
 
@@ -4564,19 +4564,31 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void CancelThumbnailLoading()
+    private void CancelThumbnailLoading(bool deferCallbacks = false)
     {
-        // Move to a fresh logical generation before cancelling. StartThumbnailLoading can then
-        // replace stale in-flight markers immediately instead of waiting for cancelled workers
-        // to unwind their network/decode awaits.
+        // Move to a fresh logical generation immediately. Stale workers will discard their result
+        // even if cancellation callbacks are dispatched asynchronously a moment later.
         Interlocked.Increment(ref _thumbnailLoadGeneration);
         var cts = _thumbnailLoadCts;
         _thumbnailLoadCts = null;
         if (cts is null)
             return;
 
-        cts.Cancel();
-        cts.Dispose();
+        if (deferCallbacks)
+        {
+            // CancellationTokenSource.Cancel invokes registered callbacks synchronously. Doing that
+            // on the first ScrollChanged frame can visibly hitch if HTTP/decode work is active.
+            _ = Task.Run(() =>
+            {
+                try { cts.Cancel(); }
+                catch { }
+                finally { cts.Dispose(); }
+            });
+            return;
+        }
+
+        try { cts.Cancel(); }
+        finally { cts.Dispose(); }
     }
 
     private static void DisposeItemThumbnails(IEnumerable<DriveItemModel> items)

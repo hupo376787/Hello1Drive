@@ -616,30 +616,39 @@
          hosted only after metadata for that index exists; unloaded tail slots keep the scroll extent
          stable without creating a full DriveItemModel or thumbnail object. -->
     <DataTemplate x:Key="DesktopDetailsSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <Grid Height="46" ClipToBounds="True">
-        <Border Margin="7,7,8,7" CornerRadius="6" Background="#10000000"
-                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
-        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource DetailsFileItemTemplate}"
-                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
-      </Grid>
+      <controls:DesktopFileItemControl Mode="Details"
+                                       Height="46"
+                                       HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Stretch"
+                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
+                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
+                                       PointerPressed="FileItem_PointerPressed"
+                                       DoubleTapped="FileItem_DoubleTapped"
+                                       ContextRequested="FileItem_ContextRequested" />
     </DataTemplate>
 
     <DataTemplate x:Key="DesktopLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <Grid Height="162" ClipToBounds="True">
-        <Border Margin="7" CornerRadius="10" Background="#10000000"
-                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
-        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource LargeFileItemTemplate}"
-                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
-      </Grid>
+      <controls:DesktopFileItemControl Mode="LargeIcons"
+                                       Height="162"
+                                       HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Stretch"
+                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
+                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
+                                       PointerPressed="FileItem_PointerPressed"
+                                       DoubleTapped="FileItem_DoubleTapped"
+                                       ContextRequested="FileItem_ContextRequested" />
     </DataTemplate>
 
     <DataTemplate x:Key="DesktopExtraLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <Grid Height="212" ClipToBounds="True">
-        <Border Margin="8" CornerRadius="12" Background="#10000000"
-                IsVisible="{Binding IsPlaceholder}" IsHitTestVisible="False" />
-        <ContentControl Content="{Binding Item}" ContentTemplate="{StaticResource ExtraLargeFileItemTemplate}"
-                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
-      </Grid>
+      <controls:DesktopFileItemControl Mode="ExtraLargeIcons"
+                                       Height="212"
+                                       HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Stretch"
+                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
+                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
+                                       PointerPressed="FileItem_PointerPressed"
+                                       DoubleTapped="FileItem_DoubleTapped"
+                                       ContextRequested="FileItem_ContextRequested" />
     </DataTemplate>
   </UserControl.Resources>
 
