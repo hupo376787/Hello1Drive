@@ -1,0 +1,46 @@
+name: Fix desktop scroll priority threading
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/fix_desktop_scroll_priority_threading.py
+      - .github/workflows/fix-desktop-scroll-priority-threading.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply source patch
+        run: python3 tools/fix_desktop_scroll_priority_threading.py
+
+      - name: Validate source patch
+        run: |
+          git diff --check
+          grep -q 'Search-mode header presentation already rebuilt' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+
+      - name: Build desktop
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/fix_desktop_scroll_priority_threading.py
+          rm -f .github/workflows/fix-desktop-scroll-priority-threading.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep scroll state checks on UI thread"
+          git push origin HEAD:master
