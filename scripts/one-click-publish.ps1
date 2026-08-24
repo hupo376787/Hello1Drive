@@ -101,13 +101,35 @@ function Publish-Android {
     if ($LASTEXITCODE -ne 0) { throw "android workload install failed" }
     Invoke-DotNetPublish $project @("-c", $Configuration, "-f", "net10.0-android36.0", "/p:Version=$Version")
 
+    $source = Join-Path $Root "src/Hello1Drive.Android/bin/$Configuration/net10.0-android36.0/publish"
     $targetDir = Join-Path $Publish "android"
     Remove-Item $targetDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-    Get-ChildItem (Join-Path $Root "src/Hello1Drive.Android/bin/$Configuration/net10.0-android36.0/publish") -File |
-        Where-Object { $_.Extension -in ".apk", ".aab" } |
-        Copy-Item -Destination $targetDir
-    New-Zip $targetDir (Join-Path $Artifacts "Hello1Drive-Android-$Version.zip")
+
+    $apk = Get-ChildItem $source -File -Filter "*-Signed.apk" | Select-Object -First 1
+    if (-not $apk) { $apk = Get-ChildItem $source -File -Filter "*.apk" | Select-Object -First 1 }
+    $aab = Get-ChildItem $source -File -Filter "*-Signed.aab" | Select-Object -First 1
+    if (-not $aab) { $aab = Get-ChildItem $source -File -Filter "*.aab" | Select-Object -First 1 }
+
+    if (-not $apk -or -not $aab) {
+        throw "Android publish output is missing APK or AAB: $source"
+    }
+
+    $apkName = "Hello1Drive-Android-$Version.apk"
+    $aabName = "Hello1Drive-Android-$Version.aab"
+    $apkArtifact = Join-Path $Artifacts $apkName
+    $aabArtifact = Join-Path $Artifacts $aabName
+
+    Copy-Item $apk.FullName (Join-Path $targetDir $apkName) -Force
+    Copy-Item $aab.FullName (Join-Path $targetDir $aabName) -Force
+    Copy-Item $apk.FullName $apkArtifact -Force
+    Copy-Item $aab.FullName $aabArtifact -Force
+
+    # Android packages are already compressed package formats. Keep them directly usable instead
+    # of wrapping them in an extra ZIP when one-click-publish.cmd is used.
+    Remove-Item (Join-Path $Artifacts "Hello1Drive-Android-$Version.zip") -Force -ErrorAction SilentlyContinue
+    Write-Host "Artifact: $apkArtifact" -ForegroundColor Green
+    Write-Host "Artifact: $aabArtifact" -ForegroundColor Green
 }
 
 function Publish-iOS {
