@@ -3710,14 +3710,9 @@ public partial class MainViewModel : ViewModelBase
                         }, DispatcherPriority.Background);
                     }
 
-                    if (firstApplied && navigationVersion == _folderNavigationVersion &&
-                        FolderCacheKey(CurrentFolderId) == cacheKey &&
-                        !(IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText)))
-                    {
-                        if (!await PresentBackgroundSlotsInSlicesAsync(
-                                0, first.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
-                            return;
-                    }
+                    if (firstApplied && !await PresentBackgroundSlotsInSlicesAsync(
+                            0, first.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
+                        return;
                 }
             }
 
@@ -3758,14 +3753,9 @@ public partial class MainViewModel : ViewModelBase
                         }, DispatcherPriority.Background);
                     }
 
-                    if (applied && navigationVersion == _folderNavigationVersion &&
-                        FolderCacheKey(CurrentFolderId) == cacheKey &&
-                        !(IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText)))
-                    {
-                        if (!await PresentBackgroundSlotsInSlicesAsync(
-                                offset, page.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
-                            return;
-                    }
+                    if (applied && !await PresentBackgroundSlotsInSlicesAsync(
+                            offset, page.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
+                        return;
                 }
             }
 
@@ -3907,12 +3897,16 @@ public partial class MainViewModel : ViewModelBase
         // signal, so keep their existing whole-page hydration behavior.
         if (IsMobilePlatform)
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            return await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (navigationVersion == _folderNavigationVersion && FolderCacheKey(CurrentFolderId) == cacheKey)
+                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                    return false;
+
+                // Search-mode header presentation already rebuilt the filtered slot collection.
+                if (string.IsNullOrWhiteSpace(SearchText))
                     FillMobileSlots(offset, pageItems);
+                return true;
             }, DispatcherPriority.Background);
-            return navigationVersion == _folderNavigationVersion;
         }
 
         const int sliceSize = 24;
