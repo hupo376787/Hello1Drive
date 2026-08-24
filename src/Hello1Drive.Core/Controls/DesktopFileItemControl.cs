@@ -57,6 +57,7 @@ public sealed class DesktopFileItemControl : Control
     private static readonly IBrush DarkFileBody = new SolidColorBrush(Color.Parse("#2A2C32"));
 
     private VirtualDriveItemSlot? _slot;
+    private DriveItemModel? _item;
     private bool _hovered;
 
     static DesktopFileItemControl()
@@ -110,15 +111,50 @@ public sealed class DesktopFileItemControl : Control
         if (_slot is not null)
             _slot.PropertyChanged -= Slot_PropertyChanged;
 
+        AttachItem(null);
         _slot = slot;
 
         if (_slot is not null)
+        {
             _slot.PropertyChanged += Slot_PropertyChanged;
+            AttachItem(_slot.Item);
+        }
 
         InvalidateVisual();
     }
 
-    private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e) => InvalidateVisual();
+    private void AttachItem(DriveItemModel? item)
+    {
+        if (ReferenceEquals(_item, item))
+            return;
+
+        if (_item is not null)
+            _item.PropertyChanged -= Item_PropertyChanged;
+
+        _item = item;
+        if (_item is not null)
+            _item.PropertyChanged += Item_PropertyChanged;
+    }
+
+    private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // SetItem raises Item first. Attach once to the new model and ignore all legacy forwarded
+        // property notifications; the self-drawn desktop control reads the model directly.
+        if (e.PropertyName == nameof(VirtualDriveItemSlot.Item))
+        {
+            AttachItem(_slot?.Item);
+            InvalidateVisual();
+        }
+    }
+
+    private void Item_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // ThumbnailImage already implies HasThumbnailImage/HasNoThumbnailImage/video-badge state.
+        // Reacting to those forwarded companion notifications caused four redraw invalidations for
+        // one decoded bitmap. Selection is the only other live visual state used on desktop.
+        if (e.PropertyName is nameof(DriveItemModel.ThumbnailImage) or nameof(DriveItemModel.IsMobileSelected))
+            InvalidateVisual();
+    }
 
     public override void Render(DrawingContext context)
     {

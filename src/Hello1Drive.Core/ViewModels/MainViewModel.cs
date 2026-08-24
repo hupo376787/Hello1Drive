@@ -79,9 +79,10 @@ public partial class MainViewModel : ViewModelBase
     // 90ms viewport batches overlap and silently defeats the intended concurrency limit.
     private readonly SemaphoreSlim _mobileThumbnailWorkGate = new(2, 2);
     private readonly SemaphoreSlim _mobileFlingThumbnailGate = new(1, 1);
-    // Four desktop workers are enough to fill a three-viewport look-ahead window without
-    // letting cached bitmap decode compete too aggressively with Avalonia layout/rendering.
-    private readonly SemaphoreSlim _desktopThumbnailWorkGate = new(4, 4);
+    // Keep only two desktop decode/download workers active. Bitmap.DecodeToWidth itself is
+    // not interruptible mid-decode, so a larger worker pool can keep several CPU-heavy decodes
+    // running for a short time after the user starts scrolling.
+    private readonly SemaphoreSlim _desktopThumbnailWorkGate = new(2, 2);
     private int _previewImagePixelWidth;
     private int _previewImagePixelHeight;
     private AnimatedGifData? _gifAnimation;
@@ -3704,9 +3705,18 @@ public partial class MainViewModel : ViewModelBase
                                 (!IsMobilePlatform && _desktopListScrolling))
                                 return;
 
-                            AppendBackgroundMetadataPage(0, first.Items, first.NextLink);
+                            AppendBackgroundMetadataPageHeader(0, first.Items, first.NextLink);
                             firstApplied = true;
                         }, DispatcherPriority.Background);
+                    }
+
+                    if (firstApplied && navigationVersion == _folderNavigationVersion &&
+                        FolderCacheKey(CurrentFolderId) == cacheKey &&
+                        !(IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText)))
+                    {
+                        if (!await PresentBackgroundSlotsInSlicesAsync(
+                                0, first.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
+                            return;
                     }
                 }
             }
@@ -3743,9 +3753,18 @@ public partial class MainViewModel : ViewModelBase
                                 (!IsMobilePlatform && _desktopListScrolling))
                                 return;
 
-                            AppendBackgroundMetadataPage(offset, page.Items, page.NextLink);
+                            AppendBackgroundMetadataPageHeader(offset, page.Items, page.NextLink);
                             applied = true;
                         }, DispatcherPriority.Background);
+                    }
+
+                    if (applied && navigationVersion == _folderNavigationVersion &&
+                        FolderCacheKey(CurrentFolderId) == cacheKey &&
+                        !(IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText)))
+                    {
+                        if (!await PresentBackgroundSlotsInSlicesAsync(
+                                offset, page.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
+                            return;
                     }
                 }
             }
@@ -3846,7 +3865,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void AppendBackgroundMetadataPage(int offset, IReadOnlyList<DriveItemModel> pageItems, string? nextLink)
+    private void AppendBackgroundMetadataPageHeader(int offset, IReadOnlyList<DriveItemModel> pageItems, string? nextLink)
     {
         _nextChildrenLink = nextLink;
         HasMoreItems = !string.IsNullOrWhiteSpace(nextLink);
@@ -3869,13 +3888,74 @@ public partial class MainViewModel : ViewModelBase
         if (IsMobilePlatform && !string.IsNullOrWhiteSpace(SearchText))
         {
             ApplyFilterAndSort();
-        }
-        else
-        {
-            AppendLoadedPageToVisibleItems(pageItems);
-            FillMobileSlots(offset, pageItems);
+            return;
         }
 
+        // Items is a non-visual desktop compatibility shadow. One AddRange is cheap; the expensive
+        // fixed-slot presentation is deliberately sliced below.
+        AppendLoadedPageToVisibleItems(pageItems);
+    }
+
+    private async Task<bool> PresentBackgroundSlotsInSlicesAsync(
+        int offset,
+        IReadOnlyList<DriveItemModel> pageItems,
+        string cacheKey,
+        long navigationVersion,
+        CancellationToken cancellationToken)
+    {
+        // Mobile native lists are already highly optimized and rely on the page-level MobileItems
+        // signal, so keep their existing whole-page hydration behavior.
+        if (IsMobilePlatform)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (navigationVersion == _folderNavigationVersion && FolderCacheKey(CurrentFolderId) == cacheKey)
+                    FillMobileSlots(offset, pageItems);
+            }, DispatcherPriority.Background);
+            return navigationVersion == _folderNavigationVersion;
+        }
+
+        const int sliceSize = 24;
+        for (var sliceStart = 0; sliceStart < pageItems.Count; sliceStart += sliceSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = Math.Min(sliceSize, pageItems.Count - sliceStart);
+            var slice = new DriveItemModel[count];
+            for (var i = 0; i < count; i++)
+                slice[i] = pageItems[sliceStart + i];
+
+            var presented = false;
+            while (!presented)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Do not even enqueue a background slot mutation while input is active.
+                while (_desktopListScrolling)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(24, cancellationToken).ConfigureAwait(false);
+                }
+
+                var result = await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                        return -1;
+                    if (_desktopListScrolling)
+                        return 0;
+
+                    FillMobileSlots(offset + sliceStart, slice);
+                    return 1;
+                }, DispatcherPriority.Background);
+
+                if (result < 0)
+                    return false;
+                presented = result > 0;
+                if (!presented)
+                    await Task.Delay(24, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return true;
     }
 
     private async Task RefreshFolderInBackgroundAsync(string? folderId, string cacheKey, long navigationVersion)
@@ -4079,7 +4159,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var index = startIndex + i;
             var item = pageItems[i];
-            MobileItems[index].SetItem(item);
+            MobileItems[index].SetItem(item, compactNotification: !IsMobilePlatform);
 
             if (IsMobilePlatform && !UsesNativeMobileFileList &&
                 index >= _mobileThumbnailVisibleFrom &&
@@ -4361,7 +4441,7 @@ public partial class MainViewModel : ViewModelBase
         {
             await Task.WhenAll(tasks);
             if (!cancellationToken.IsCancellationRequested)
-                Dispatcher.UIThread.Post(UpdateCacheStatus);
+                Dispatcher.UIThread.Post(UpdateCacheStatus, DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
         {
@@ -4454,8 +4534,24 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
+            // A decoded desktop bitmap is cosmetic. Never let its UI hand-off compete with
+            // wheel/pointer input: wait while scrolling and post the final model swap at Background
+            // priority. If a new gesture starts after the wait but before this callback executes,
+            // skip this presentation; idle recovery will cheaply decode it again from disk cache.
+            if (!IsMobilePlatform)
+            {
+                while (_desktopListScrolling)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(24, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                if (!IsMobilePlatform && _desktopListScrolling)
+                    return;
+
                 // Use the O(1) id set rather than List.Contains() on every thumbnail completion.
                 // In thousand-item folders the old linear check became measurable UI-thread work.
                 if (cancellationToken.IsCancellationRequested || !_currentItemIds.Contains(item.Id) ||
@@ -4473,7 +4569,7 @@ public partial class MainViewModel : ViewModelBase
                 item.ThumbnailImage = bitmap;
                 TouchMobileThumbnail(item);
                 bitmap = null;
-            });
+            }, DispatcherPriority.Background);
 
             bitmap?.Dispose();
         }
