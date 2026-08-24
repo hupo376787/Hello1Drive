@@ -162,6 +162,19 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.MobileItems))
+        {
+            // Fixed slots may have been placeholders during the previous viewport scan. Retry
+            // after each hydrated Graph page so previous/current/next viewport thumbnails really
+            // start as soon as their metadata becomes available.
+            _recycler.PostDelayed(() =>
+            {
+                if (!_disposed && !_scrolling)
+                    _adapter.StartVisibleThumbnailWork();
+            }, 24);
+            return;
+        }
+
         if (e.PropertyName == nameof(MainViewModel.ShowFloatingUploadButton))
         {
             SyncFloatingUpload();
@@ -179,8 +192,15 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 
     private void Root_LayoutChange(object? sender, View.LayoutChangeEventArgs e)
     {
-        if (!_disposed)
-            PositionFloatingUpload();
+        if (_disposed)
+            return;
+
+        PositionFloatingUpload();
+        _recycler.PostDelayed(() =>
+        {
+            if (!_disposed && !_scrolling)
+                _adapter.StartVisibleThumbnailWork();
+        }, 32);
     }
 
     private void SyncFloatingUpload()

@@ -160,6 +160,18 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.MobileItems))
+        {
+            _collection.BeginInvokeOnMainThread(() =>
+            {
+                if (_disposed || _scrolling)
+                    return;
+                _collection.LayoutIfNeeded();
+                _source.StartVisibleThumbnailWork();
+            });
+            return;
+        }
+
         if (e.PropertyName == nameof(MainViewModel.ShowFloatingUploadButton))
         {
             SyncFloatingUpload();
@@ -182,6 +194,13 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
 
         _collection.Frame = _root.Bounds;
         PositionFloatingUpload();
+        _collection.BeginInvokeOnMainThread(() =>
+        {
+            if (_disposed || _scrolling)
+                return;
+            _collection.LayoutIfNeeded();
+            _source.StartVisibleThumbnailWork();
+        });
     }
 
     private void SyncFloatingUpload()

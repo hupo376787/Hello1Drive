@@ -242,6 +242,13 @@ public partial class MainView : UserControl
             ApplyAppBackgroundAcrylicBlur(vm.AcrylicBlurPercent);
             ApplyStartupBackgroundShell(vm);
 
+            // Local / URL backgrounds do not depend on OneDrive authentication. Start resolving
+            // them immediately so the real wallpaper is already visible when the splash fades,
+            // instead of waiting several seconds for account/folder synchronization to finish.
+            var startupBackgroundTask = vm.Settings.BackgroundMode == WindowBackgroundMode.OneDriveFolder
+                ? Task.CompletedTask
+                : ApplyWindowBackgroundAsync();
+
             // Start initialization immediately, but keep the splash only for a short, fixed
             // first-frame interval. With a startup snapshot the cached directory is already
             // restored behind the splash, so network synchronization must not lengthen it.
@@ -253,9 +260,13 @@ public partial class MainView : UserControl
             UpdateNativeMobileFileListVisibility();
             await initializeTask;
 
-            // URL / local-folder / OneDrive backgrounds are decorative and can involve disk or
-            // network I/O. Load them only after the OneDrive startup path has been released.
-            _ = ApplyWindowBackgroundAsync();
+            // OneDrive-folder wallpaper needs an authenticated Graph session, so resolve only
+            // that mode after initialization. Other modes were already started before the splash.
+            if (vm.Settings.BackgroundMode == WindowBackgroundMode.OneDriveFolder)
+                _ = ApplyWindowBackgroundAsync();
+            else
+                _ = startupBackgroundTask;
+
             _ = TryResumePersistedTransfersAsync(vm);
             Dispatcher.UIThread.Post(PositionFloatingUploadButton, DispatcherPriority.Loaded);
             Dispatcher.UIThread.Post(HookListScrollViewers, DispatcherPriority.Loaded);
@@ -1463,6 +1474,32 @@ vm.SetMobileListScrolling(true);
                 seenItems.Add(item.Id))
             {
                 visibleItems.Add(item);
+            }
+        }
+
+        // Keep one complete viewport before and after the current viewport warm. The current
+        // items stay first in visibleItems so they enter the shared worker gate before look-ahead
+        // candidates. Slot indices are included even when metadata has not arrived yet; the VM's
+        // page hydration path will pick them up as soon as their DriveItemModel becomes available.
+        if (visibleSlotIndices.Count > 0 && vm.MobileItems.Count > 0)
+        {
+            var visibleFirst = visibleSlotIndices.Min();
+            var visibleLast = visibleSlotIndices.Max();
+            var pageSize = Math.Max(1, visibleLast - visibleFirst + 1);
+            var windowFrom = Math.Max(0, visibleFirst - pageSize);
+            var windowToExclusive = Math.Min(vm.MobileItems.Count, visibleLast + pageSize + 1);
+
+            for (var index = windowFrom; index < windowToExclusive; index++)
+            {
+                if (seenSlots.Add(index))
+                    visibleSlotIndices.Add(index);
+
+                if (vm.MobileItems[index].Item is { } item &&
+                    !string.IsNullOrWhiteSpace(item.Id) &&
+                    seenItems.Add(item.Id))
+                {
+                    visibleItems.Add(item);
+                }
             }
         }
 

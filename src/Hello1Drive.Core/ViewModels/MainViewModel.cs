@@ -79,7 +79,9 @@ public partial class MainViewModel : ViewModelBase
     // 90ms viewport batches overlap and silently defeats the intended concurrency limit.
     private readonly SemaphoreSlim _mobileThumbnailWorkGate = new(2, 2);
     private readonly SemaphoreSlim _mobileFlingThumbnailGate = new(1, 1);
-    private readonly SemaphoreSlim _desktopThumbnailWorkGate = new(6, 6);
+    // Four desktop workers are enough to fill a three-viewport look-ahead window without
+    // letting cached bitmap decode compete too aggressively with Avalonia layout/rendering.
+    private readonly SemaphoreSlim _desktopThumbnailWorkGate = new(4, 4);
     private int _previewImagePixelWidth;
     private int _previewImagePixelHeight;
     private AnimatedGifData? _gifAnimation;
@@ -4097,6 +4099,13 @@ public partial class MainViewModel : ViewModelBase
                 viewportCandidates.Add(item);
             }
         }
+
+        // Native Android/iOS lists use fixed VirtualDriveItemSlot instances. Hydrating an
+        // existing slot does not raise MobileItems.CollectionChanged, so publish one lightweight
+        // page-level signal after SetItem calls. Native adapters use it to retry the current +/-1
+        // viewport thumbnail window when metadata arrives after their first layout pass.
+        if (UsesNativeMobileFileList)
+            OnPropertyChanged(nameof(MobileItems));
 
         if (intersectsThumbnailWindow)
             RefreshMobileThumbnailWantedIds();
