@@ -1,0 +1,32 @@
+name: Warm adjacent native thumbnails
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/warm_adjacent_native_thumbnail_cache.py
+      - .github/workflows/warm-adjacent-native-thumbnails.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/warm_adjacent_native_thumbnail_cache.py
+      - run: |
+          git diff --check
+          grep -q 'AddBitmapToCache(item, bitmap);' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q 'AddImageToCache(item, image);' src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+      - run: |
+          rm -f tools/warm_adjacent_native_thumbnail_cache.py
+          rm -f .github/workflows/warm-adjacent-native-thumbnails.yml
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Warm adjacent native thumbnail pages"
+          git push origin HEAD:master
