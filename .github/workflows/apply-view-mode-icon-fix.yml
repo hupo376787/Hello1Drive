@@ -1,0 +1,46 @@
+name: Apply view mode icon fix
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - tools/apply_view_mode_icon_fix.py
+      - .github/workflows/apply-view-mode-icon-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply source patch
+        run: python3 tools/apply_view_mode_icon_fix.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('src/Hello1Drive.Core/Views/MainView.axaml').read_text(encoding='utf-8')
+          glyph = 'M1.5,2.8 H5 M1.5,7 H5 M1.5,11.2 H5 M7.2,2 H9.6 V4.4 H7.2 Z M10.5,2 H12.9 V4.4 H10.5 Z M7.2,8 H9.6 V10.4 H7.2 Z M10.5,8 H12.9 V10.4 H10.5 Z'
+          assert text.count(glyph) == 2
+          assert text.count('ToolTip.Tip="查看方式"') == 2
+          PY
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_view_mode_icon_fix.py
+          rm -f .github/workflows/apply-view-mode-icon-fix.yml
+
+      - name: Commit and push source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use hybrid list-grid icon for view mode"
+          git push origin HEAD:master
