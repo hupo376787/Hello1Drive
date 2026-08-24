@@ -28,13 +28,21 @@ jobs:
           python3 tools/apply_desktop_virtual_surface.py
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('src/Hello1Drive.Core/Views/MainView.axaml.cs')
-          text = path.read_text(encoding='utf-8')
-          old = '\n;\n\n    private static bool ShouldSuppressMarqueeStart'
-          new = '\n\n    private static bool ShouldSuppressMarqueeStart'
-          if old not in text:
+          main = Path('src/Hello1Drive.Core/Views/MainView.axaml.cs')
+          text = main.read_text(encoding='utf-8')
+          stale = '\n;\n\n    private static bool ShouldSuppressMarqueeStart'
+          fixed = '\n\n    private static bool ShouldSuppressMarqueeStart'
+          if stale not in text:
               raise SystemExit('expected stale expression-bodied semicolon was not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          main.write_text(text.replace(stale, fixed, 1), encoding='utf-8')
+
+          surface = Path('src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs')
+          text = surface.read_text(encoding='utf-8')
+          old = '''            var index = (int)Math.Floor(point.Y / DetailsRowHeight);\n            return index >= 0 && index < vm.VirtualItems.Count ? index : -1;'''
+          new = '''            var detailIndex = (int)Math.Floor(point.Y / DetailsRowHeight);\n            return detailIndex >= 0 && detailIndex < vm.VirtualItems.Count ? detailIndex : -1;'''
+          if old not in text:
+              raise SystemExit('expected detail index block was not found')
+          surface.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Validate migration
