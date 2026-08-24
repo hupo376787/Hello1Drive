@@ -1022,57 +1022,54 @@ internal sealed class NativeFileItemView : View
 
     private void DrawFolder(Canvas canvas, RectF rect)
     {
-        // Windows 11 inspired closed-folder glyph. Keep it allocation-free in the hot drawing path:
-        // one back/tab silhouette, one front face, plus two tiny highlight/shadow accents.
-        const float sourceWidth = 20f;
-        const float sourceHeight = 18f;
+        // Four-layer yellow folder matched to the supplied OneDrive folder artwork.
+        // Keep the hot path allocation-free: the same reusable Path/Paint are used for every cell.
+        const float sourceWidth = 32f;
+        const float sourceHeight = 26f;
         var scale = Math.Min(rect.Width() / sourceWidth, rect.Height() / sourceHeight);
         var left = rect.CenterX() - sourceWidth * scale / 2f;
         var top = rect.CenterY() - sourceHeight * scale / 2f;
         float X(float x) => left + x * scale;
         float Y(float y) => top + y * scale;
 
-        // Back plate + raised tab.
+        // Golden rear shell with the long sloped tab from the reference image.
         _folderPath.Reset();
-        _folderPath.MoveTo(X(1.2f), Y(5.1f));
-        _folderPath.CubicTo(X(1.2f), Y(3.75f), X(2.25f), Y(2.7f), X(3.6f), Y(2.7f));
-        _folderPath.LineTo(X(8.25f), Y(2.7f));
-        _folderPath.CubicTo(X(8.85f), Y(2.7f), X(9.25f), Y(2.9f), X(9.65f), Y(3.35f));
-        _folderPath.LineTo(X(10.85f), Y(4.75f));
-        _folderPath.LineTo(X(16.65f), Y(4.75f));
-        _folderPath.CubicTo(X(18.0f), Y(4.75f), X(18.85f), Y(5.65f), X(18.85f), Y(7.0f));
-        _folderPath.LineTo(X(18.85f), Y(14.55f));
-        _folderPath.CubicTo(X(18.85f), Y(15.9f), X(17.95f), Y(16.8f), X(16.6f), Y(16.8f));
-        _folderPath.LineTo(X(3.4f), Y(16.8f));
-        _folderPath.CubicTo(X(2.05f), Y(16.8f), X(1.15f), Y(15.9f), X(1.15f), Y(14.55f));
+        _folderPath.MoveTo(X(0f), Y(7.5f));
+        _folderPath.CubicTo(X(0f), Y(5.1f), X(1.9f), Y(3.1f), X(4.3f), Y(3.1f));
+        _folderPath.LineTo(X(9.7f), Y(3.1f));
+        _folderPath.CubicTo(X(10.7f), Y(3.1f), X(11.4f), Y(3.4f), X(12.2f), Y(4f));
+        _folderPath.LineTo(X(15.2f), Y(6.3f));
+        _folderPath.CubicTo(X(16.2f), Y(7.1f), X(17.3f), Y(7.4f), X(18.7f), Y(7.4f));
+        _folderPath.LineTo(X(29.5f), Y(7.4f));
+        _folderPath.CubicTo(X(30.9f), Y(7.4f), X(32f), Y(8.5f), X(32f), Y(9.9f));
+        _folderPath.LineTo(X(32f), Y(22.3f));
+        _folderPath.CubicTo(X(32f), Y(24.3f), X(30.3f), Y(26f), X(28.3f), Y(26f));
+        _folderPath.LineTo(X(3.7f), Y(26f));
+        _folderPath.CubicTo(X(1.7f), Y(26f), X(0f), Y(24.3f), X(0f), Y(22.3f));
         _folderPath.Close();
-        _paint.Color = DarkTheme ? Color.Rgb(238, 173, 18) : Color.Rgb(244, 177, 20);
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Rgb(247, 188, 15);
         canvas.DrawPath(_folderPath, _paint);
 
-        // Main front face: this broad, softly rounded panel is what gives the Windows 11 folder
-        // its cleaner 'File Explorer' appearance instead of the old single flat blob.
-        _folderPath.Reset();
-        _folderPath.MoveTo(X(1.05f), Y(6.25f));
-        _folderPath.CubicTo(X(1.05f), Y(5.55f), X(1.6f), Y(5.0f), X(2.3f), Y(5.0f));
-        _folderPath.LineTo(X(17.7f), Y(5.0f));
-        _folderPath.CubicTo(X(18.4f), Y(5.0f), X(18.95f), Y(5.55f), X(18.95f), Y(6.25f));
-        _folderPath.LineTo(X(18.95f), Y(15.05f));
-        _folderPath.CubicTo(X(18.95f), Y(16.05f), X(18.15f), Y(16.85f), X(17.15f), Y(16.85f));
-        _folderPath.LineTo(X(2.85f), Y(16.85f));
-        _folderPath.CubicTo(X(1.85f), Y(16.85f), X(1.05f), Y(16.05f), X(1.05f), Y(15.05f));
-        _folderPath.Close();
-        _paint.Color = DarkTheme ? Color.Rgb(255, 210, 74) : Color.Rgb(255, 211, 75);
-        canvas.DrawPath(_folderPath, _paint);
+        // Peach rear insert.
+        _paint.Color = Color.Rgb(255, 210, 141);
+        canvas.DrawRoundRect(X(4.4f), Y(8.8f), X(28.9f), Y(21.4f),
+            Math.Max(1f, 1.2f * scale), Math.Max(1f, 1.2f * scale), _paint);
 
-        // Soft top highlight and bottom shade mimic the subtle depth of the Win11 Explorer icon
-        // without introducing gradients/allocations during RecyclerView flings.
-        _paint.Color = DarkTheme ? Color.Rgb(255, 231, 139) : Color.Rgb(255, 233, 144);
-        canvas.DrawRoundRect(X(2.0f), Y(5.65f), X(18.0f), Y(6.75f),
-            Math.Max(1f, 0.55f * scale), Math.Max(1f, 0.55f * scale), _paint);
+        // Cream inner sheet.
+        _paint.Color = Color.Rgb(255, 242, 214);
+        canvas.DrawRoundRect(X(3.2f), Y(10.1f), X(27.7f), Y(21.9f),
+            Math.Max(1f, 1.2f * scale), Math.Max(1f, 1.2f * scale), _paint);
 
-        _paint.Color = DarkTheme ? Color.Rgb(222, 156, 12) : Color.Rgb(225, 160, 17);
-        canvas.DrawRoundRect(X(2.45f), Y(15.85f), X(17.55f), Y(16.45f),
-            Math.Max(1f, 0.30f * scale), Math.Max(1f, 0.30f * scale), _paint);
+        // Broad pale-yellow front cover.
+        _paint.Color = Color.Rgb(255, 215, 107);
+        canvas.DrawRoundRect(X(0f), Y(11.5f), X(32f), Y(26f),
+            Math.Max(1f, 2.1f * scale), Math.Max(1f, 2.1f * scale), _paint);
+
+        // Very soft top sheen preserves the light-at-the-top look of the supplied artwork.
+        _paint.Color = Color.Argb(88, 255, 233, 176);
+        canvas.DrawRoundRect(X(2f), Y(12.2f), X(30f), Y(13.4f),
+            Math.Max(1f, 0.6f * scale), Math.Max(1f, 0.6f * scale), _paint);
     }
 
     private void DrawFileBadge(Canvas canvas, DriveItemModel item, RectF rect)

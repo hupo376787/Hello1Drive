@@ -928,7 +928,7 @@ internal sealed class IosNativeFileCellContentView : UIView
 
 /// <summary>
 /// Single native drawing view for folder/file art, thumbnails and selection affordance.
-/// The folder artwork uses the same Windows-11-style layered geometry as the Android native list.
+/// The folder artwork uses the same supplied layered-yellow geometry as the Android native list.
 /// </summary>
 internal sealed class IosNativeFileVisualView : UIView
 {
@@ -990,7 +990,7 @@ internal sealed class IosNativeFileVisualView : UIView
         }
         else if (_item.IsFolder)
         {
-            DrawWindows11FolderGlyph(artRect);
+            DrawLayeredFolderGlyph(artRect);
         }
         else
         {
@@ -1001,61 +1001,58 @@ internal sealed class IosNativeFileVisualView : UIView
             DrawSelectionCircle(bounds, _selected);
     }
 
-    private void DrawWindows11FolderGlyph(CGRect rect)
+    private static void DrawLayeredFolderGlyph(CGRect rect)
     {
-        const double sourceWidth = 20.0;
-        const double sourceHeight = 18.0;
+        const double sourceWidth = 32.0;
+        const double sourceHeight = 26.0;
         var scale = Math.Min((double)rect.Width / sourceWidth, (double)rect.Height / sourceHeight);
         var left = (double)rect.GetMidX() - sourceWidth * scale / 2.0;
         var top = (double)rect.GetMidY() - sourceHeight * scale / 2.0;
         CGPoint P(double x, double y) => new(left + x * scale, top + y * scale);
 
-        // Back plate + raised tab.
-        (_darkTheme ? UIColor.FromRGB(238, 173, 18) : UIColor.FromRGB(244, 177, 20)).SetFill();
+        // Golden rear shell with the long sloped tab from the supplied reference image.
+        UIColor.FromRGB(247, 188, 15).SetFill();
         using (var back = new UIBezierPath())
         {
-            back.MoveTo(P(1.2, 5.1));
-            back.AddCurveToPoint(P(3.6, 2.7), P(1.2, 3.75), P(2.25, 2.7));
-            back.AddLineTo(P(8.25, 2.7));
-            back.AddCurveToPoint(P(9.65, 3.35), P(8.85, 2.7), P(9.25, 2.9));
-            back.AddLineTo(P(10.85, 4.75));
-            back.AddLineTo(P(16.65, 4.75));
-            back.AddCurveToPoint(P(18.85, 7.0), P(18.0, 4.75), P(18.85, 5.65));
-            back.AddLineTo(P(18.85, 14.55));
-            back.AddCurveToPoint(P(16.6, 16.8), P(18.85, 15.9), P(17.95, 16.8));
-            back.AddLineTo(P(3.4, 16.8));
-            back.AddCurveToPoint(P(1.15, 14.55), P(2.05, 16.8), P(1.15, 15.9));
+            back.MoveTo(P(0, 7.5));
+            back.AddCurveToPoint(P(4.3, 3.1), P(0, 5.1), P(1.9, 3.1));
+            back.AddLineTo(P(9.7, 3.1));
+            back.AddCurveToPoint(P(12.2, 4.0), P(10.7, 3.1), P(11.4, 3.4));
+            back.AddLineTo(P(15.2, 6.3));
+            back.AddCurveToPoint(P(18.7, 7.4), P(16.2, 7.1), P(17.3, 7.4));
+            back.AddLineTo(P(29.5, 7.4));
+            back.AddCurveToPoint(P(32.0, 9.9), P(30.9, 7.4), P(32.0, 8.5));
+            back.AddLineTo(P(32.0, 22.3));
+            back.AddCurveToPoint(P(28.3, 26.0), P(32.0, 24.3), P(30.3, 26.0));
+            back.AddLineTo(P(3.7, 26.0));
+            back.AddCurveToPoint(P(0, 22.3), P(1.7, 26.0), P(0, 24.3));
             back.ClosePath();
             back.Fill();
         }
 
-        // Main front face.
-        (_darkTheme ? UIColor.FromRGB(255, 210, 74) : UIColor.FromRGB(255, 211, 75)).SetFill();
-        using (var front = new UIBezierPath())
-        {
-            front.MoveTo(P(1.05, 6.25));
-            front.AddCurveToPoint(P(2.3, 5.0), P(1.05, 5.55), P(1.6, 5.0));
-            front.AddLineTo(P(17.7, 5.0));
-            front.AddCurveToPoint(P(18.95, 6.25), P(18.4, 5.0), P(18.95, 5.55));
-            front.AddLineTo(P(18.95, 15.05));
-            front.AddCurveToPoint(P(17.15, 16.85), P(18.95, 16.05), P(18.15, 16.85));
-            front.AddLineTo(P(2.85, 16.85));
-            front.AddCurveToPoint(P(1.05, 15.05), P(1.85, 16.85), P(1.05, 16.05));
-            front.ClosePath();
+        UIColor.FromRGB(255, 210, 141).SetFill();
+        using (var rearInsert = UIBezierPath.FromRoundedRect(
+            new CGRect(left + 4.4 * scale, top + 8.8 * scale, 24.5 * scale, 12.6 * scale),
+            (nfloat)Math.Max(0.6, 1.2 * scale)))
+            rearInsert.Fill();
+
+        UIColor.FromRGB(255, 242, 214).SetFill();
+        using (var innerSheet = UIBezierPath.FromRoundedRect(
+            new CGRect(left + 3.2 * scale, top + 10.1 * scale, 24.5 * scale, 11.8 * scale),
+            (nfloat)Math.Max(0.6, 1.2 * scale)))
+            innerSheet.Fill();
+
+        UIColor.FromRGB(255, 215, 107).SetFill();
+        using (var front = UIBezierPath.FromRoundedRect(
+            new CGRect(left, top + 11.5 * scale, 32.0 * scale, 14.5 * scale),
+            (nfloat)Math.Max(0.8, 2.1 * scale)))
             front.Fill();
-        }
 
-        (_darkTheme ? UIColor.FromRGB(255, 231, 139) : UIColor.FromRGB(255, 233, 144)).SetFill();
-        using (var highlight = UIBezierPath.FromRoundedRect(
-            new CGRect(left + 2.0 * scale, top + 5.65 * scale, 16.0 * scale, 1.1 * scale),
-            (nfloat)Math.Max(0.5, 0.55 * scale)))
-            highlight.Fill();
-
-        (_darkTheme ? UIColor.FromRGB(222, 156, 12) : UIColor.FromRGB(225, 160, 17)).SetFill();
-        using var shade = UIBezierPath.FromRoundedRect(
-            new CGRect(left + 2.45 * scale, top + 15.85 * scale, 15.1 * scale, 0.6 * scale),
-            (nfloat)Math.Max(0.3, 0.30 * scale));
-        shade.Fill();
+        UIColor.FromRGBA(255, 233, 176, 88).SetFill();
+        using var sheen = UIBezierPath.FromRoundedRect(
+            new CGRect(left + 2.0 * scale, top + 12.2 * scale, 28.0 * scale, 1.2 * scale),
+            (nfloat)Math.Max(0.4, 0.6 * scale));
+        sheen.Fill();
     }
 
     private static void DrawFileBadge(CGRect rect, DriveItemModel item)

@@ -42,18 +42,18 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="26" Height="26" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+                        <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -165,18 +165,18 @@
       <Grid IsVisible="{Binding HasNoThumbnailImage}">
         <Viewbox Width="27" Height="27" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                  IsVisible="{Binding IsFolder}">
-          <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+          <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
         </Viewbox>
         <Grid IsVisible="{Binding ShowMobileFileBadge}" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -233,18 +233,18 @@
         <Grid IsVisible="{Binding HasNoThumbnailImage}">
           <Viewbox Width="72" Height="72" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                    IsVisible="{Binding IsFolder}">
-            <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+            <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
           </Viewbox>
           <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Width="72" Height="86" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -301,18 +301,18 @@
         <Grid IsVisible="{Binding HasNoThumbnailImage}">
           <Viewbox Width="102" Height="102" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                    IsVisible="{Binding IsFolder}">
-            <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+            <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
           </Viewbox>
           <Viewbox IsVisible="{Binding ShowMobileFileBadge}" Width="104" Height="124" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -381,18 +381,18 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="82" Height="82" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+                        <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -513,18 +513,18 @@
                     <Grid IsVisible="{Binding HasNoThumbnailImage}">
                       <Viewbox Width="116" Height="116" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                                IsVisible="{Binding IsFolder}">
-                        <Canvas Width="20" Height="18">
-                          <!-- Windows 11 style: raised tab/back plate + brighter rounded front face. -->
-                          <Border Width="17.7" Height="13.7" Canvas.Left="1.15" Canvas.Top="2.7"
-                                  Background="#F4B114" CornerRadius="2.3" />
-                          <Border Width="8.5" Height="4.8" Canvas.Left="2.15" Canvas.Top="1.55"
-                                  Background="#F9BC1E" CornerRadius="2.2,2.2,0.9,0.9" />
-                          <Border Width="17.9" Height="11.85" Canvas.Left="1.05" Canvas.Top="5"
-                                  Background="#FFD34B" CornerRadius="2.45" />
-                          <Border Width="16" Height="1.1" Canvas.Left="2" Canvas.Top="5.65"
-                                  Background="#FFE990" CornerRadius="0.55" />
-                          <Border Width="15.1" Height="0.65" Canvas.Left="2.45" Canvas.Top="15.8"
-                                  Background="#E1A011" CornerRadius="0.35" />
+                        <Canvas Width="32" Height="26">
+                          <!-- Layered yellow folder matched to the supplied OneDrive folder artwork. -->
+                          <Path Fill="#F7BC0F"
+                                Data="M0,7.5 C0,5.1 1.9,3.1 4.3,3.1 H9.7 C10.7,3.1 11.4,3.4 12.2,4 L15.2,6.3 C16.2,7.1 17.3,7.4 18.7,7.4 H29.5 C30.9,7.4 32,8.5 32,9.9 V22.3 C32,24.3 30.3,26 28.3,26 H3.7 C1.7,26 0,24.3 0,22.3 Z" />
+                          <Border Width="24.5" Height="12.6" Canvas.Left="4.4" Canvas.Top="8.8"
+                                  Background="#FFD28D" CornerRadius="1.2" />
+                          <Border Width="24.5" Height="11.8" Canvas.Left="3.2" Canvas.Top="10.1"
+                                  Background="#FFF2D6" CornerRadius="1.2" />
+                          <Border Width="32" Height="14.5" Canvas.Left="0" Canvas.Top="11.5"
+                                  Background="#FFD76B" CornerRadius="2.1" />
+                          <Border Width="28" Height="1.2" Canvas.Left="2" Canvas.Top="12.2"
+                                  Background="#55FFE9B0" CornerRadius="0.6" />
                         </Canvas>
                       </Viewbox>
                       <Grid IsVisible="{Binding IsAudio}" HorizontalAlignment="Center" VerticalAlignment="Center">
