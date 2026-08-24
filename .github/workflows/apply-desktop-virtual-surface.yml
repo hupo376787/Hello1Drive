@@ -23,6 +23,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # PR validation applies the migration to its own head branch and compiles it before commit.
       - name: Apply source patch
         run: python3 tools/apply_desktop_virtual_surface.py
 
