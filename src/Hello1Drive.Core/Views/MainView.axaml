@@ -1435,7 +1435,8 @@
               HorizontalAlignment="Stretch" VerticalAlignment="Center"
               Padding="0,8" CornerRadius="8"
               Background="#F0444444"
-              BorderBrush="#28FFFFFF" BorderThickness="1">
+              BorderBrush="#28FFFFFF" BorderThickness="1"
+              PointerPressed="OverlayContent_PointerPressed">
         <StackPanel HorizontalAlignment="Stretch">
           <Button Content="详细信息" Tag="Details"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
