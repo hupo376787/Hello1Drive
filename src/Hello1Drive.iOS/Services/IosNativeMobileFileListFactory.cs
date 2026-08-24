@@ -39,8 +39,10 @@ internal sealed class IosNativeMobileFileListFactory : INativeMobileFileListFact
 internal sealed class IosNativeFileListController : NSObject, IDisposable
 {
     private readonly NativeMobileFileListHost _host;
+    private readonly IosNativeFileRootView _root;
     private readonly UICollectionViewFlowLayout _layout;
     private readonly NativeCollectionView _collection;
+    private readonly IosNativeFloatingUploadButtonView _floatingUpload;
     private readonly UIRefreshControl _refresh;
     private readonly IosNativeFileCollectionSource _source;
     private readonly UILongPressGestureRecognizer _longPress;
@@ -52,6 +54,7 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
     public IosNativeFileListController(NativeMobileFileListHost host)
     {
         _host = host;
+        _root = new IosNativeFileRootView();
         _layout = new UICollectionViewFlowLayout
         {
             ScrollDirection = UICollectionViewScrollDirection.Vertical,
@@ -71,6 +74,8 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
             AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight
         };
 
+        _floatingUpload = new IosNativeFloatingUploadButtonView(host);
+
         _refresh = new UIRefreshControl();
         _refresh.ValueChanged += Refresh_ValueChanged;
         _collection.RefreshControl = _refresh;
@@ -86,13 +91,17 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         _collection.AddGestureRecognizer(_longPress);
         _collection.NativeLayoutChanged += Collection_NativeLayoutChanged;
 
+        _root.AddSubview(_collection);
+        _root.AddSubview(_floatingUpload);
+        _root.NativeLayoutChanged += Root_NativeLayoutChanged;
+
         _host.HostStateChanged += Host_HostStateChanged;
         _host.ScrollToPositionRequested += Host_ScrollToPositionRequested;
 
         SyncHostState(preservePosition: false);
     }
 
-    public UIView RootView => _collection;
+    public UIView RootView => _root;
 
     private void Host_HostStateChanged(object? sender, EventArgs e) => SyncHostState(preservePosition: true);
 
@@ -134,6 +143,7 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
 
         _source.UpdateSelection(_host.SelectedIds, _host.SelectionMode);
         UpdateTheme();
+        SyncFloatingUpload();
 
         if (_viewModel is not null)
             ApplyLayout(_viewModel.ViewMode, preservePosition);
@@ -150,6 +160,12 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.ShowFloatingUploadButton))
+        {
+            SyncFloatingUpload();
+            return;
+        }
+
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
             nameof(MainViewModel.SelectedBackgroundModeText) or
@@ -157,6 +173,39 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         {
             UpdateTheme();
         }
+    }
+
+    private void Root_NativeLayoutChanged(object? sender, EventArgs e)
+    {
+        if (_disposed)
+            return;
+
+        _collection.Frame = _root.Bounds;
+        PositionFloatingUpload();
+    }
+
+    private void SyncFloatingUpload()
+    {
+        if (_disposed)
+            return;
+
+        _floatingUpload.Hidden = !_host.FloatingUploadVisible;
+        if (!_floatingUpload.Hidden)
+            PositionFloatingUpload();
+    }
+
+    private void PositionFloatingUpload()
+    {
+        if (_disposed || _floatingUpload.Hidden)
+            return;
+
+        const double size = 48d;
+        var maxX = Math.Max(0d, (double)_root.Bounds.Width - size);
+        var maxY = Math.Max(0d, (double)_root.Bounds.Height - size);
+        var x = Math.Clamp(_host.FloatingUploadX, 0d, 1d) * maxX;
+        var y = Math.Clamp(_host.FloatingUploadY, 0d, 1d) * maxY;
+        _floatingUpload.Frame = new CGRect((nfloat)x, (nfloat)y, (nfloat)size, (nfloat)size);
+        _root.BringSubviewToFront(_floatingUpload);
     }
 
     private void ApplyLayout(FileViewMode mode, bool preservePosition)
@@ -279,6 +328,7 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         _host.ScrollToPositionRequested -= Host_ScrollToPositionRequested;
         _refresh.ValueChanged -= Refresh_ValueChanged;
         _collection.NativeLayoutChanged -= Collection_NativeLayoutChanged;
+        _root.NativeLayoutChanged -= Root_NativeLayoutChanged;
 
         if (_viewModel is not null)
             _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
@@ -287,12 +337,164 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         _collection.RemoveGestureRecognizer(_longPress);
         _collection.Source = null;
         _collection.RefreshControl = null;
+        _floatingUpload.RemoveFromSuperview();
+        _collection.RemoveFromSuperview();
         _source.Dispose();
         _longPress.Dispose();
         _refresh.Dispose();
+        _floatingUpload.Dispose();
         _collection.Dispose();
+        _root.Dispose();
         _layout.Dispose();
         base.Dispose();
+    }
+}
+
+internal sealed class IosNativeFileRootView : UIView
+{
+    private CGSize _lastSize;
+
+    public IosNativeFileRootView()
+    {
+        BackgroundColor = UIColor.Clear;
+        Opaque = false;
+    }
+
+    public event EventHandler? NativeLayoutChanged;
+
+    public override void LayoutSubviews()
+    {
+        base.LayoutSubviews();
+        var size = Bounds.Size;
+        if (Math.Abs((double)(size.Width - _lastSize.Width)) < 0.5 &&
+            Math.Abs((double)(size.Height - _lastSize.Height)) < 0.5)
+        {
+            return;
+        }
+
+        _lastSize = size;
+        NativeLayoutChanged?.Invoke(this, EventArgs.Empty);
+    }
+}
+
+internal sealed class IosNativeFloatingUploadButtonView : UIView
+{
+    private readonly NativeMobileFileListHost _host;
+    private readonly UITapGestureRecognizer _tap;
+    private readonly UIPanGestureRecognizer _pan;
+    private CGPoint _panStartOrigin;
+
+    public IosNativeFloatingUploadButtonView(NativeMobileFileListHost host)
+    {
+        _host = host;
+        BackgroundColor = UIColor.Clear;
+        Opaque = false;
+        UserInteractionEnabled = true;
+        MultipleTouchEnabled = false;
+        AccessibilityLabel = "上传文件";
+
+        _tap = new UITapGestureRecognizer(HandleTap);
+        _pan = new UIPanGestureRecognizer(HandlePan);
+        _tap.RequireGestureRecognizerToFail(_pan);
+        AddGestureRecognizer(_tap);
+        AddGestureRecognizer(_pan);
+    }
+
+    public override void Draw(CGRect rect)
+    {
+        base.Draw(rect);
+        var width = (double)Bounds.Width;
+        var height = (double)Bounds.Height;
+        if (width <= 0 || height <= 0)
+            return;
+
+        var diameter = Math.Min(width, height);
+        var circleRect = new CGRect(
+            (nfloat)((width - diameter) / 2d),
+            (nfloat)((height - diameter) / 2d),
+            (nfloat)diameter,
+            (nfloat)diameter);
+        UIColor.FromRGB(253, 111, 113).SetFill();
+        using (var circle = UIBezierPath.FromOval(circleRect))
+            circle.Fill();
+
+        var scale = diameter / 14d;
+        var offsetX = (width - 14d * scale) / 2d;
+        var offsetY = (height - 14d * scale) / 2d;
+        double X(double value) => offsetX + value * scale;
+        double Y(double value) => offsetY + value * scale;
+
+        using var path = new UIBezierPath
+        {
+            LineWidth = (nfloat)Math.Max(1d, 1.5d * scale / 3.4d),
+            LineCapStyle = CGLineCap.Round,
+            LineJoinStyle = CGLineJoin.Round
+        };
+        path.MoveTo(new CGPoint((nfloat)X(7), (nfloat)Y(12)));
+        path.AddLineTo(new CGPoint((nfloat)X(7), (nfloat)Y(2)));
+        path.MoveTo(new CGPoint((nfloat)X(3.5), (nfloat)Y(5.5)));
+        path.AddLineTo(new CGPoint((nfloat)X(7), (nfloat)Y(2)));
+        path.AddLineTo(new CGPoint((nfloat)X(10.5), (nfloat)Y(5.5)));
+        path.MoveTo(new CGPoint((nfloat)X(2), (nfloat)Y(12)));
+        path.AddLineTo(new CGPoint((nfloat)X(12), (nfloat)Y(12)));
+        UIColor.FromRGB(255, 247, 248).SetStroke();
+        path.Stroke();
+    }
+
+    private void HandleTap(UITapGestureRecognizer recognizer)
+    {
+        if (recognizer.State == UIGestureRecognizerState.Ended)
+            _host.RaiseFloatingUploadRequested();
+    }
+
+    private void HandlePan(UIPanGestureRecognizer recognizer)
+    {
+        if (Superview is not UIView parent)
+            return;
+
+        switch (recognizer.State)
+        {
+            case UIGestureRecognizerState.Began:
+                _panStartOrigin = Frame.Location;
+                parent.BringSubviewToFront(this);
+                break;
+
+            case UIGestureRecognizerState.Changed:
+            {
+                var translation = recognizer.TranslationInView(parent);
+                var maxX = Math.Max(0d, (double)parent.Bounds.Width - (double)Frame.Width);
+                var maxY = Math.Max(0d, (double)parent.Bounds.Height - (double)Frame.Height);
+                var x = Math.Clamp((double)_panStartOrigin.X + (double)translation.X, 0d, maxX);
+                var y = Math.Clamp((double)_panStartOrigin.Y + (double)translation.Y, 0d, maxY);
+                Frame = new CGRect((nfloat)x, (nfloat)y, Frame.Width, Frame.Height);
+                break;
+            }
+
+            case UIGestureRecognizerState.Ended:
+                SaveNormalizedPosition(parent);
+                break;
+        }
+    }
+
+    private void SaveNormalizedPosition(UIView parent)
+    {
+        var maxX = Math.Max(1d, (double)parent.Bounds.Width - (double)Frame.Width);
+        var maxY = Math.Max(1d, (double)parent.Bounds.Height - (double)Frame.Height);
+        _host.RaiseFloatingUploadPositionChanged(
+            Math.Clamp((double)Frame.X / maxX, 0d, 1d),
+            Math.Clamp((double)Frame.Y / maxY, 0d, 1d));
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            RemoveGestureRecognizer(_tap);
+            RemoveGestureRecognizer(_pan);
+            _tap.Dispose();
+            _pan.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }
 
@@ -328,6 +530,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     private readonly NativeMobileFileListHost _host;
     private readonly SemaphoreSlim _thumbnailGate = new(4, 4);
     private readonly ConcurrentDictionary<string, byte> _loadingIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _prefetchingIds = new(StringComparer.Ordinal);
     private readonly Dictionary<nint, IosNativeFileCellPresenter> _presenters = [];
     private readonly object _imageCacheGate = new();
     private readonly Dictionary<string, UIImage> _imageCache = new(StringComparer.Ordinal);
@@ -513,15 +716,24 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
             return;
 
         var paths = _collection.IndexPathsForVisibleItems;
-        if (paths is null)
+        if (paths is null || paths.Length == 0)
             return;
 
+        // Visible cells are queued first so look-ahead work can never delay what is on screen.
         foreach (var path in paths.OrderBy(static p => p.Item))
         {
             var cell = _collection.CellForItem(path);
             if (cell is null || !_presenters.TryGetValue(cell.Handle, out var presenter))
                 continue;
             RequestThumbnailIfNeeded(presenter, (int)path.Item);
+        }
+
+        var (first, last) = GetVisibleRange();
+        var pageSize = Math.Max(1, last - first + 1);
+        for (var distance = 1; distance <= pageSize; distance++)
+        {
+            PrefetchThumbnailIfNeeded(last + distance);
+            PrefetchThumbnailIfNeeded(first - distance);
         }
     }
 
@@ -558,8 +770,13 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         CancelThumbnailGeneration();
         _collection.BeginInvokeOnMainThread(() =>
         {
-            if (!_disposed)
-                UIView.PerformWithoutAnimation(() => _collection.ReloadData());
+            if (_disposed)
+                return;
+
+            UIView.PerformWithoutAnimation(() => _collection.ReloadData());
+            _collection.LayoutIfNeeded();
+            if (!_scrolling)
+                StartVisibleThumbnailWork();
         });
     }
 
@@ -577,6 +794,62 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
             var cell = _collection.CellForItem(path);
             if (cell is not null && _presenters.TryGetValue(cell.Handle, out var presenter))
                 BindPresenter(presenter, (int)path.Item);
+        }
+    }
+
+    private void PrefetchThumbnailIfNeeded(int position)
+    {
+        if (_disposed || _scrolling || _viewModel is null || position < 0 || position >= ItemCount)
+            return;
+
+        var item = _viewModel.MobileItems[position].Item;
+        if (item is null || !item.SupportsThumbnail || string.IsNullOrWhiteSpace(item.Id))
+            return;
+
+        if ((TryGetImage(item, out var image) && image is not null) ||
+            AppServices.ThumbnailCache.TryGetCachedPath(item, out _))
+        {
+            return;
+        }
+
+        if (!_prefetchingIds.TryAdd(item.Id, 0))
+            return;
+
+        var generationToken = _thumbnailGenerationCts.Token;
+        _ = PrefetchThumbnailAsync(item, generationToken);
+    }
+
+    private async Task PrefetchThumbnailAsync(DriveItemModel item, CancellationToken generationToken)
+    {
+        try
+        {
+            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            try
+            {
+                generationToken.ThrowIfCancellationRequested();
+                if (_scrolling)
+                    return;
+
+                await AppServices.ThumbnailCache
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _thumbnailGate.Release();
+            }
+        }
+        catch (System.OperationCanceledException)
+        {
+            // A new drag/deceleration/folder/view mode superseded this adjacent window.
+        }
+        catch
+        {
+            // Adjacent prefetch is cosmetic and must not affect UICollectionView scrolling.
+        }
+        finally
+        {
+            _prefetchingIds.TryRemove(item.Id, out _);
         }
     }
 
@@ -708,6 +981,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         previous.Cancel();
         previous.Dispose();
         _loadingIds.Clear();
+        _prefetchingIds.Clear();
     }
 
     protected override void Dispose(bool disposing)

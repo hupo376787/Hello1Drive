@@ -561,6 +561,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     private readonly RecyclerView _recycler;
     private readonly SemaphoreSlim _thumbnailGate = new(4, 4);
     private readonly ConcurrentDictionary<string, byte> _loadingIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _prefetchingIds = new(StringComparer.Ordinal);
     private readonly object _bitmapCacheGate = new();
     private readonly Dictionary<string, Bitmap> _bitmapCache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _bitmapLru = [];
@@ -652,13 +653,36 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (_disposed || _scrolling || _viewModel is null || ItemCount == 0)
             return;
 
+        CaptureVisibleRangeFromLayout();
         var first = Math.Clamp(_visibleFirst, 0, ItemCount - 1);
         var last = Math.Clamp(_visibleLast, first, ItemCount - 1);
+
+        // Visible holders always win: queue them before any look-ahead work.
         for (var position = first; position <= last; position++)
         {
             if (_recycler.FindViewHolderForAdapterPosition(position) is NativeFileViewHolder holder)
                 RequestThumbnailIfNeeded(holder, position);
         }
+
+        // A "page" means one current viewport, not one Graph 200-item metadata page. This keeps
+        // work proportional to the screen size while making the previous/next viewport warm.
+        var pageSize = Math.Max(1, last - first + 1);
+        for (var distance = 1; distance <= pageSize; distance++)
+        {
+            PrefetchThumbnailIfNeeded(last + distance);
+            PrefetchThumbnailIfNeeded(first - distance);
+        }
+    }
+
+    private void CaptureVisibleRangeFromLayout()
+    {
+        if (_recycler.GetLayoutManager() is not LinearLayoutManager layout)
+            return;
+
+        var first = layout.FindFirstVisibleItemPosition();
+        var last = layout.FindLastVisibleItemPosition();
+        if (first >= 0 && last >= first)
+            UpdateVisibleRange(first, last);
     }
 
     public override long GetItemId(int position)
@@ -726,8 +750,15 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         CancelThumbnailGeneration();
         _recycler.Post(() =>
         {
-            if (!_disposed)
-                NotifyDataSetChanged();
+            if (_disposed)
+                return;
+
+            NotifyDataSetChanged();
+            _recycler.PostDelayed(() =>
+            {
+                if (!_disposed && !_scrolling)
+                    StartVisibleThumbnailWork();
+            }, 48);
         });
     }
 
@@ -736,6 +767,65 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (_viewModel is null || position < 0 || position >= _viewModel.MobileItems.Count)
             return null;
         return _viewModel.MobileItems[position].Item;
+    }
+
+    private void PrefetchThumbnailIfNeeded(int position)
+    {
+        if (_disposed || _scrolling || _viewModel is null || position < 0 || position >= ItemCount)
+            return;
+
+        var item = _viewModel.MobileItems[position].Item;
+        if (item is null || !item.SupportsThumbnail || string.IsNullOrWhiteSpace(item.Id))
+            return;
+
+        // Native memory cache or persistent disk cache already makes this adjacent item warm.
+        if ((TryGetBitmap(item, out var bitmap) && bitmap is not null) ||
+            AppServices.ThumbnailCache.TryGetCachedPath(item, out _))
+        {
+            return;
+        }
+
+        if (!_prefetchingIds.TryAdd(item.Id, 0))
+            return;
+
+        var generationToken = _thumbnailGenerationCts.Token;
+        _ = PrefetchThumbnailAsync(item, generationToken);
+    }
+
+    private async Task PrefetchThumbnailAsync(DriveItemModel item, CancellationToken generationToken)
+    {
+        try
+        {
+            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            try
+            {
+                generationToken.ThrowIfCancellationRequested();
+                if (_scrolling)
+                    return;
+
+                // Prefetch only the encoded file. When the item becomes visible, BitmapFactory
+                // decodes from local storage quickly without spending memory on two hidden pages.
+                await AppServices.ThumbnailCache
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _thumbnailGate.Release();
+            }
+        }
+        catch (System.OperationCanceledException)
+        {
+            // Normal when a new fling/folder/view mode invalidates this look-ahead window.
+        }
+        catch
+        {
+            // Adjacent prefetch is best-effort and must never affect the visible file list.
+        }
+        finally
+        {
+            _prefetchingIds.TryRemove(item.Id, out _);
+        }
     }
 
     private void RequestThumbnailIfNeeded(NativeFileViewHolder holder, int position)
@@ -915,6 +1005,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         previous.Cancel();
         previous.Dispose();
         _loadingIds.Clear();
+        _prefetchingIds.Clear();
     }
 
 

@@ -151,10 +151,10 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
 
-        // Android's native RecyclerView lives on a platform View layer above Avalonia. Its upload
-        // FAB is therefore rendered natively as part of that same layer; keep the Avalonia FAB
-        // for desktop/iOS only so RecyclerView cells can never cover the Android button.
-        if (OperatingSystem.IsAndroid())
+        // Android RecyclerView and iOS UICollectionView live on platform-native view layers above
+        // Avalonia. Render the upload FAB inside the same native root on both platforms so file
+        // cells can never cover it; desktop keeps the Avalonia FAB.
+        if (UsesNativeMobileFileList)
             FloatingActionCanvas.IsVisible = false;
 
         MobileDestinationFolderList.ItemsSource = _mobileDestinationFolders;
@@ -2480,7 +2480,7 @@ if (visibleItems.Count > 0)
 
     private void NativeMobileFileListHost_FloatingUploadRequested(object? sender, EventArgs e)
     {
-        if (!OperatingSystem.IsAndroid())
+        if (!UsesNativeMobileFileList)
             return;
 
         Dispatcher.UIThread.Post(
@@ -2492,7 +2492,7 @@ if (visibleItems.Count > 0)
         object? sender,
         NativeFloatingUploadPositionEventArgs e)
     {
-        if (!OperatingSystem.IsAndroid() || DataContext is not MainViewModel vm)
+        if (!UsesNativeMobileFileList || DataContext is not MainViewModel vm)
             return;
 
         await vm.SaveFloatingUploadPositionAsync(e.NormalizedX, e.NormalizedY);
