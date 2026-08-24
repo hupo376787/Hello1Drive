@@ -94,7 +94,7 @@ jobs:
           name: release-${{ matrix.rid }}
           path: Hello1Drive-Desktop-${{ matrix.rid }}-*.zip
 
-  web-mobile:
+  web-android:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"; fi
-      - run: dotnet workload install wasm-tools android ios
+      - run: dotnet workload install wasm-tools android
       - name: Browser
         run: |
           dotnet publish src/Hello1Drive.Browser/Hello1Drive.Browser.csproj -c Release -p:Version="$VERSION"
@@ -113,33 +113,20 @@ jobs:
           zip -qr "$GITHUB_WORKSPACE/Hello1Drive-Browser-$VERSION.zip" .
       - name: Android
         run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0 -p:Version="$VERSION"
-      - name: iOS simulator
-        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios26.0 -r iossimulator-arm64 -p:CodesignKey= -p:CodesignProvision= -p:Version="$VERSION"
-      - name: Collect mobile outputs
+      - name: Collect web and Android outputs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release-mobile
           cp Hello1Drive-Browser-$VERSION.zip release-mobile/
           find src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish -maxdepth 1 -type f \( -name '*.apk' -o -name '*.aab' \) -exec cp {} release-mobile/ \;
-
-          IOS_ROOT="src/Hello1Drive.iOS/bin/Release/net10.0-ios26.0/iossimulator-arm64"
-          IOS_APP="$(find "$IOS_ROOT" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          if [[ -z "$IOS_APP" ]]; then
-            echo "iOS simulator .app was not found under $IOS_ROOT"
-            find "$IOS_ROOT" -maxdepth 2 -print
-            exit 1
-          fi
-          IOS_APP_DIR="$(dirname "$IOS_APP")"
-          IOS_APP_NAME="$(basename "$IOS_APP")"
-          (cd "$IOS_APP_DIR" && zip -qr "$GITHUB_WORKSPACE/release-mobile/Hello1Drive-iOS-Simulator-arm64-$VERSION.zip" "$IOS_APP_NAME")
       - uses: actions/upload-artifact@v4
         with:
-          name: release-web-mobile
+          name: release-web-android
           path: release-mobile/*
 
   github-release:
-    needs: [package, web-mobile]
+    needs: [package, web-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
