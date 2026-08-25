@@ -1271,6 +1271,10 @@ public partial class MainView : UserControl
 
         _desktopScrollIdleTimer.Stop();
         vm.SetDesktopListScrolling(false);
+        // Hover cleanup is intentionally deferred until scrolling is quiet. Invalidating the
+        // retained file surface on the very first wheel frame makes that first movement compete
+        // with a full three-viewport redraw.
+        DesktopFileSurface.FlushDeferredHoverVisual();
         var scroll = GetActiveScrollViewer(vm);
         if (scroll is null || !scroll.IsVisible)
             return;
