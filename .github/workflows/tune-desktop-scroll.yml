@@ -1,0 +1,124 @@
+name: Tune desktop scroll
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/tune-desktop-scroll.yml
+
+permissions:
+  contents: write
+
+jobs:
+  tune-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply desktop scroll tuning
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str):
+              text = path.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected exactly one match for {old[:120]!r}, got {text.count(old)}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Platform-neutral contract. Windows returns the real system setting; other desktop heads
+          # can ask Avalonia to keep its native behavior.
+          Path('src/Hello1Drive.Core/Services/IDesktopInputSettingsService.cs').write_text('''namespace Hello1Drive.Services;\n\npublic interface IDesktopInputSettingsService\n{\n    int GetMouseWheelScrollLines();\n}\n\npublic static class DesktopScrollSettings\n{\n    public const int UseFrameworkDefault = -1;\n    public const int ScrollByPage = -2;\n}\n''', encoding='utf-8')
+
+          Path('src/Hello1Drive.Desktop/Services/DesktopInputSettingsService.cs').write_text('''using System.Runtime.InteropServices;\nusing Hello1Drive.Services;\n\nnamespace Hello1Drive.Desktop.Services;\n\ninternal sealed class DesktopInputSettingsService : IDesktopInputSettingsService\n{\n    private const uint SpiGetWheelScrollLines = 0x0068;\n    private const int DefaultWindowsWheelLines = 3;\n    private const long RefreshIntervalMilliseconds = 1000;\n\n    private int _cachedWheelLines = DefaultWindowsWheelLines;\n    private long _lastRefreshTick = long.MinValue;\n\n    public int GetMouseWheelScrollLines()\n    {\n        if (!OperatingSystem.IsWindows())\n            return DesktopScrollSettings.UseFrameworkDefault;\n\n        var now = Environment.TickCount64;\n        if (_lastRefreshTick != long.MinValue && now - _lastRefreshTick < RefreshIntervalMilliseconds)\n            return _cachedWheelLines;\n\n        _lastRefreshTick = now;\n        if (!SystemParametersInfo(SpiGetWheelScrollLines, 0, out var lines, 0))\n            return _cachedWheelLines;\n\n        _cachedWheelLines = lines == uint.MaxValue\n            ? DesktopScrollSettings.ScrollByPage\n            : (int)Math.Min(lines, 100u);\n        return _cachedWheelLines;\n    }\n\n    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]\n    [return: MarshalAs(UnmanagedType.Bool)]\n    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, out uint pvParam, uint fWinIni);\n}\n''', encoding='utf-8')
+
+          app_services = Path('src/Hello1Drive.Core/Services/AppServices.cs')
+          replace_once(app_services,
+              '    private static INativeMobileFileListFactory? _nativeMobileFileListFactory;\n',
+              '    private static INativeMobileFileListFactory? _nativeMobileFileListFactory;\n    private static IDesktopInputSettingsService? _desktopInputSettingsService;\n')
+          replace_once(app_services,
+              '    public static INativeMobileFileListFactory? NativeMobileFileListFactory => _nativeMobileFileListFactory;\n',
+              '    public static INativeMobileFileListFactory? NativeMobileFileListFactory => _nativeMobileFileListFactory;\n    public static IDesktopInputSettingsService? DesktopInputSettingsService => _desktopInputSettingsService;\n')
+          replace_once(app_services,
+              '        ITransferBackgroundService? transferBackgroundService = null,\n        INativeMobileFileListFactory? nativeMobileFileListFactory = null)\n',
+              '        ITransferBackgroundService? transferBackgroundService = null,\n        INativeMobileFileListFactory? nativeMobileFileListFactory = null,\n        IDesktopInputSettingsService? desktopInputSettingsService = null)\n')
+          replace_once(app_services,
+              '        _nativeMobileFileListFactory = nativeMobileFileListFactory;\n',
+              '        _nativeMobileFileListFactory = nativeMobileFileListFactory;\n        _desktopInputSettingsService = desktopInputSettingsService;\n')
+
+          program = Path('src/Hello1Drive.Desktop/Program.cs')
+          replace_once(program,
+              '        AppServices.Configure(new DesktopAuthenticationService(), new DesktopEmbeddedMediaPlayerFactory(), startupRegistrationService: new WindowsStartupRegistrationService());\n',
+              '        AppServices.Configure(\n            new DesktopAuthenticationService(),\n            new DesktopEmbeddedMediaPlayerFactory(),\n            startupRegistrationService: new WindowsStartupRegistrationService(),\n            desktopInputSettingsService: new DesktopInputSettingsService());\n')
+
+          surface = Path('src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs')
+          replace_once(surface,
+              '    private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];\n    private readonly Dictionary<TextCacheKey, FormattedText> _textCache = [];\n',
+              '    private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];\n    private readonly List<VirtualDriveItemSlot> _subscriptionScratch = [];\n    private readonly Dictionary<TextCacheKey, FormattedText> _textCache = [];\n')
+          replace_once(surface,
+              '''    public IBrush? SelectionBrush\n    {\n        get => GetValue(SelectionBrushProperty);\n        set => SetValue(SelectionBrushProperty, value);\n    }\n\n    public void SetViewport(double offsetY, double viewportHeight, double viewportWidth)\n    {\n        var width = Math.Max(1, viewportWidth);\n        var widthChanged = Math.Abs(width - _viewportWidth) > 0.5;\n        _viewportOffsetY = Math.Max(0, offsetY);\n        _viewportHeight = Math.Max(1, viewportHeight);\n        _viewportWidth = width;\n''',
+              '''    public IBrush? SelectionBrush\n    {\n        get => GetValue(SelectionBrushProperty);\n        set => SetValue(SelectionBrushProperty, value);\n    }\n\n    public double MouseWheelLineHeight => Mode switch\n    {\n        FileViewMode.LargeIcons => LargeHeight + GridSpacing,\n        FileViewMode.ExtraLargeIcons => ExtraHeight + GridSpacing,\n        _ => DetailsRowHeight\n    };\n\n    public void ClearHoverForScroll()\n    {\n        if (_hoverIndex < 0)\n            return;\n        _hoverIndex = -1;\n        InvalidateVisual();\n    }\n\n    public void SetViewport(double offsetY, double viewportHeight, double viewportWidth)\n    {\n        var offset = Math.Max(0, offsetY);\n        var height = Math.Max(1, viewportHeight);\n        var width = Math.Max(1, viewportWidth);\n        var offsetChanged = Math.Abs(offset - _viewportOffsetY) > 0.01;\n        var heightChanged = Math.Abs(height - _viewportHeight) > 0.5;\n        var widthChanged = Math.Abs(width - _viewportWidth) > 0.5;\n        if (!offsetChanged && !heightChanged && !widthChanged)\n            return;\n\n        _viewportOffsetY = offset;\n        _viewportHeight = height;\n        _viewportWidth = width;\n''')
+          replace_once(surface,
+              '''        _renderFrom = from;\n        _renderTo = to;\n\n        if (Mode == FileViewMode.Details)\n''',
+              '''        _renderFrom = from;\n        _renderTo = to;\n        UpdateSlotSubscriptions(from, to);\n\n        if (Mode == FileViewMode.Details)\n''')
+          replace_once(surface,
+              '''        _vm = vm;\n        if (_vm is not null)\n        {\n            _vm.VirtualItems.CollectionChanged += VirtualItems_CollectionChanged;\n            foreach (var slot in _vm.VirtualItems)\n                AttachSlot(slot);\n        }\n''',
+              '''        _vm = vm;\n        if (_vm is not null)\n            _vm.VirtualItems.CollectionChanged += VirtualItems_CollectionChanged;\n''')
+          replace_once(surface,
+              '''        if (e.Action == NotifyCollectionChangedAction.Reset)\n        {\n            DetachAllSlots();\n            if (_vm is not null)\n                foreach (var slot in _vm.VirtualItems)\n                    AttachSlot(slot);\n        }\n        else if (e.NewItems is not null)\n        {\n            foreach (var value in e.NewItems)\n                if (value is VirtualDriveItemSlot slot)\n                    AttachSlot(slot);\n        }\n\n        _renderFrom = -1;\n''',
+              '''        if (e.Action == NotifyCollectionChangedAction.Reset)\n            DetachAllSlots();\n\n        _renderFrom = -1;\n''')
+          replace_once(surface,
+              '''    private void AttachSlot(VirtualDriveItemSlot slot)\n    {\n''',
+              '''    private void UpdateSlotSubscriptions(int from, int to)\n    {\n        var vm = _vm;\n        if (vm is null || from < 0 || to < from || vm.VirtualItems.Count == 0)\n        {\n            DetachAllSlots();\n            return;\n        }\n\n        _subscriptionScratch.Clear();\n        foreach (var slot in _subscribedSlots)\n        {\n            if (slot.Index < from || slot.Index > to)\n                _subscriptionScratch.Add(slot);\n        }\n        foreach (var slot in _subscriptionScratch)\n            DetachSlot(slot);\n\n        var last = Math.Min(to, vm.VirtualItems.Count - 1);\n        for (var index = Math.Max(0, from); index <= last; index++)\n            AttachSlot(vm.VirtualItems[index]);\n    }\n\n    private void AttachSlot(VirtualDriveItemSlot slot)\n    {\n''')
+          replace_once(surface,
+              '''    private void DetachAllSlots()\n    {\n        foreach (var slot in _subscribedSlots)\n            slot.PropertyChanged -= Slot_PropertyChanged;\n        _subscribedSlots.Clear();\n    }\n''',
+              '''    private void DetachAllSlots()\n    {\n        foreach (var slot in _subscribedSlots)\n            slot.PropertyChanged -= Slot_PropertyChanged;\n        _subscribedSlots.Clear();\n        _subscriptionScratch.Clear();\n    }\n''')
+
+          main = Path('src/Hello1Drive.Core/Views/MainView.axaml.cs')
+          replace_once(main,
+              '    private int _desktopThumbnailIdleRecoveryVersion;\n',
+              '    private int _desktopThumbnailIdleRecoveryVersion;\n    private bool _desktopWheelHandlerAttached;\n')
+          replace_once(main,
+              '''    private void HookListScrollViewers()\n    {\n        // Intentionally empty. Let ScrollViewer handle mouse-wheel / precision-touchpad input\n        // through Avalonia's normal scrolling path. Manually assigning Offset for every wheel\n        // event forced synchronous realization/layout and made the desktop list feel stepped.\n    }\n''',
+              '''    private void HookListScrollViewers()\n    {\n        if (IsMobilePlatform || _desktopWheelHandlerAttached || AppServices.DesktopInputSettingsService is null)\n            return;\n\n        // Avalonia's pixel ScrollViewer uses a fixed 50-DIP wheel step. Intercept on the tunnel\n        // route before ScrollContentPresenter so Windows can honor the user's system line count.\n        DesktopVirtualScrollViewer.AddHandler(\n            InputElement.PointerWheelChangedEvent,\n            DesktopVirtualScrollViewer_PointerWheelChanged,\n            RoutingStrategies.Tunnel,\n            handledEventsToo: true);\n        _desktopWheelHandlerAttached = true;\n    }\n\n    private void DesktopVirtualScrollViewer_PointerWheelChanged(object? sender, PointerWheelEventArgs e)\n    {\n        if (sender is not ScrollViewer scroll || !scroll.IsVisible ||\n            Math.Abs(e.Delta.Y) < 0.0001 || e.KeyModifiers.HasFlag(KeyModifiers.Shift))\n        {\n            return;\n        }\n\n        var settings = AppServices.DesktopInputSettingsService;\n        var scrollLines = settings?.GetMouseWheelScrollLines() ?? DesktopScrollSettings.UseFrameworkDefault;\n        if (scrollLines == DesktopScrollSettings.UseFrameworkDefault)\n            return;\n\n        // A Windows value of zero deliberately disables wheel scrolling.\n        if (scrollLines == 0)\n        {\n            e.Handled = true;\n            return;\n        }\n\n        var distancePerDelta = scrollLines == DesktopScrollSettings.ScrollByPage\n            ? Math.Max(1, scroll.Viewport.Height)\n            : DesktopFileSurface.MouseWheelLineHeight * scrollLines;\n        var maximum = Math.Max(0, scroll.ScrollBarMaximum.Y);\n        var targetY = Math.Clamp(scroll.Offset.Y - e.Delta.Y * distancePerDelta, 0, maximum);\n        if (Math.Abs(targetY - scroll.Offset.Y) > 0.01)\n            scroll.Offset = new Vector(scroll.Offset.X, targetY);\n\n        e.Handled = true;\n    }\n''')
+          replace_once(main,
+              '''        SyncDesktopVirtualSurfaceViewport(scroll);\n        _desktopScrollLastActivityUtc = DateTime.UtcNow;\n        unchecked { _desktopThumbnailIdleRecoveryVersion++; }\n        vm.SetDesktopListScrolling(true);\n\n        if (!_desktopScrollIdleTimer.IsEnabled)\n''',
+              '''        SyncDesktopVirtualSurfaceViewport(scroll);\n        _desktopScrollLastActivityUtc = DateTime.UtcNow;\n        unchecked { _desktopThumbnailIdleRecoveryVersion++; }\n        if (!vm.IsDesktopListScrolling)\n        {\n            DesktopFileSurface.ClearHoverForScroll();\n            vm.SetDesktopListScrolling(true);\n        }\n\n        if (!_desktopScrollIdleTimer.IsEnabled)\n''')
+
+          # Keep the compact-notification comment accurate after the one-surface migration.
+          slot = Path('src/Hello1Drive.Core/Models/VirtualDriveItemSlot.cs')
+          replace_once(slot,
+              '        // Desktop uses one self-drawn control per realized slot and reads the DriveItemModel\n        // directly. A 200-item Graph page therefore needs only one notification per slot instead\n',
+              '        // Desktop uses one retained self-drawn surface and reads the DriveItemModel directly.\n        // A 200-item Graph page therefore needs only one notification per slot instead\n')
+          PY
+
+          git diff --check
+          grep -q 'MouseWheelLineHeight' src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs
+          grep -q 'UpdateSlotSubscriptions' src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs
+          grep -q 'DesktopVirtualScrollViewer_PointerWheelChanged' src/Hello1Drive.Core/Views/MainView.axaml.cs
+          grep -q 'SystemParametersInfo' src/Hello1Drive.Desktop/Services/DesktopInputSettingsService.cs
+
+      - name: Build desktop release
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Publish Android release
+        run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
+
+      - name: Remove one-shot workflow
+        run: rm -f .github/workflows/tune-desktop-scroll.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Honor system wheel scrolling and trim desktop hot path"
+          git push origin HEAD:master
