@@ -1,0 +1,73 @@
+name: Fix Android native API
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/fix-android-native-api.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply Android API compatibility fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              ('''        _root = new FrameLayout(context)\n        {\n            ClipChildren = false,\n            ClipToPadding = false\n        };''',
+               '''        _root = new FrameLayout(context);\n        _root.SetClipChildren(false);\n        _root.SetClipToPadding(false);'''),
+              ('''        _floatingUpload.X = (float)(Math.Clamp(_host.FloatingUploadX, 0, 1) * maxX);\n        _floatingUpload.Y = (float)(Math.Clamp(_host.FloatingUploadY, 0, 1) * maxY);''',
+               '''        _floatingUpload.SetX((float)(Math.Clamp(_host.FloatingUploadX, 0, 1) * maxX));\n        _floatingUpload.SetY((float)(Math.Clamp(_host.FloatingUploadY, 0, 1) * maxY));'''),
+              ('''                _startX = X;\n                _startY = Y;''',
+               '''                _startX = GetX();\n                _startY = GetY();'''),
+              ('''        X = Math.Clamp(_startX + dx, 0, maxX);\n        Y = Math.Clamp(_startY + dy, 0, maxY);''',
+               '''        SetX(Math.Clamp(_startX + dx, 0, maxX));\n        SetY(Math.Clamp(_startY + dy, 0, maxY));'''),
+              ('''        _host.RaiseFloatingUploadPositionChanged(X / maxX, Y / maxY);''',
+               '''        _host.RaiseFloatingUploadPositionChanged(GetX() / maxX, GetY() / maxY);'''),
+              ('''            canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);''',
+               '''            canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);'''),
+          ]
+
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one match for: {old[:70]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          grep -q '_root.SetClipChildren(false);' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q '_floatingUpload.SetX' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q '_startX = GetX();' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Publish Android Release
+        run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
+
+      - name: Remove one-shot workflow
+        run: rm -f .github/workflows/fix-android-native-api.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Android native floating button API"
+          git push origin HEAD:master
