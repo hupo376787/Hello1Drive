@@ -66,11 +66,9 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         _context = context;
         _host = host;
 
-        _root = new FrameLayout(context)
-        {
-            ClipChildren = false,
-            ClipToPadding = false
-        };
+        _root = new FrameLayout(context);
+        _root.SetClipChildren(false);
+        _root.SetClipToPadding(false);
         _refresh = new SwipeRefreshLayout(context);
         _recycler = new RecyclerView(context);
         _floatingUpload = new NativeFloatingUploadButtonView(context, host);
@@ -225,8 +223,8 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         if (maxX <= 0 && maxY <= 0)
             return;
 
-        _floatingUpload.X = (float)(Math.Clamp(_host.FloatingUploadX, 0, 1) * maxX);
-        _floatingUpload.Y = (float)(Math.Clamp(_host.FloatingUploadY, 0, 1) * maxY);
+        _floatingUpload.SetX((float)(Math.Clamp(_host.FloatingUploadX, 0, 1) * maxX));
+        _floatingUpload.SetY((float)(Math.Clamp(_host.FloatingUploadY, 0, 1) * maxY));
         _floatingUpload.BringToFront();
     }
 
@@ -501,8 +499,8 @@ internal sealed class NativeFloatingUploadButtonView : View
                 _moved = false;
                 _downRawX = e.RawX;
                 _downRawY = e.RawY;
-                _startX = X;
-                _startY = Y;
+                _startX = GetX();
+                _startY = GetY();
                 Parent?.RequestDisallowInterceptTouchEvent(true);
                 BringToFront();
                 return true;
@@ -553,8 +551,8 @@ internal sealed class NativeFloatingUploadButtonView : View
 
         var maxX = Math.Max(0, parent.Width - Width);
         var maxY = Math.Max(0, parent.Height - Height);
-        X = Math.Clamp(_startX + dx, 0, maxX);
-        Y = Math.Clamp(_startY + dy, 0, maxY);
+        SetX(Math.Clamp(_startX + dx, 0, maxX));
+        SetY(Math.Clamp(_startY + dy, 0, maxY));
     }
 
     private void SaveNormalizedPosition()
@@ -564,7 +562,7 @@ internal sealed class NativeFloatingUploadButtonView : View
 
         var maxX = Math.Max(1, parent.Width - Width);
         var maxY = Math.Max(1, parent.Height - Height);
-        _host.RaiseFloatingUploadPositionChanged(X / maxX, Y / maxY);
+        _host.RaiseFloatingUploadPositionChanged(GetX() / maxX, GetY() / maxY);
     }
 
     private float Dp(float value)
@@ -1250,7 +1248,7 @@ internal sealed class NativeFileItemView : View
         {
             // Clear the recycled native cell buffer so the Avalonia custom background below the
             // NativeControlHost remains visible instead of retaining a previous opaque frame.
-            canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear);
+            canvas.DrawColor(Color.Transparent, PorterDuff.Mode.Clear!);
         }
         else
         {
