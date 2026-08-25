@@ -1,0 +1,53 @@
+name: Finalize desktop scroll hot path
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - tools/apply_desktop_scroll_hotpath_final.py
+      - .github/workflows/finalize-desktop-scroll-hotpath.yml
+
+permissions:
+  contents: write
+
+jobs:
+  tune-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply final desktop scroll tuning
+        run: python3 tools/apply_desktop_scroll_hotpath_final.py
+
+      - name: Validate hot path
+        run: |
+          git diff --check
+          grep -q 'FlushDeferredHoverVisual' src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs
+          grep -q '_deferredHoverVisualRefresh = true' src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs
+          grep -q 'DesktopFileSurface.FlushDeferredHoverVisual' src/Hello1Drive.Core/Views/MainView.axaml.cs
+          grep -q 'private readonly int _wheelLines = ReadWheelLines();' src/Hello1Drive.Desktop/Services/DesktopInputSettingsService.cs
+          ! grep -q 'RefreshIntervalMilliseconds' src/Hello1Drive.Desktop/Services/DesktopInputSettingsService.cs
+          ! grep -q 'Environment.TickCount64' src/Hello1Drive.Desktop/Services/DesktopInputSettingsService.cs
+
+      - name: Build desktop release
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f tools/apply_desktop_scroll_hotpath_final.py
+          rm -f .github/workflows/finalize-desktop-scroll-hotpath.yml
+
+      - name: Commit and push to PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove first-frame desktop scroll stalls"
+          git push origin HEAD:${{ github.head_ref }}
