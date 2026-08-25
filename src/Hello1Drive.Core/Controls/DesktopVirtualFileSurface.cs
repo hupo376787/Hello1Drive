@@ -438,7 +438,7 @@ public sealed class DesktopVirtualFileSurface : Control
         var minWidth = extra ? ExtraMinWidth : LargeMinWidth;
         var maxWidth = extra ? ExtraMaxWidth : LargeMaxWidth;
         var height = extra ? ExtraHeight : LargeHeight;
-        var usable = Math.Max(minWidth, width - 18);
+        var usable = Math.Max(minWidth, width);
         var columns = Math.Max(1, (int)Math.Floor((usable + GridSpacing) / (preferred + GridSpacing)));
         var cellWidth = Math.Clamp((usable - GridSpacing * (columns - 1)) / columns, minWidth, maxWidth);
         return new GridMetrics(columns, cellWidth, height);
@@ -689,7 +689,7 @@ public sealed class DesktopVirtualFileSurface : Control
             };
             _textCache[key] = formatted;
             _textCacheOrder.Enqueue(key);
-            while (_textCacheOrder.Count > 6000)
+            while (_textCacheOrder.Count > 2048)
             {
                 var old = _textCacheOrder.Dequeue();
                 _textCache.Remove(old);

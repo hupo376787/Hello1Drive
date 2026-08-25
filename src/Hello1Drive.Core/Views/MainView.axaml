@@ -868,7 +868,7 @@
         </Grid.ContextMenu>
         <!-- Desktop hot path: exactly one ScrollViewer and one retained virtual drawing surface. -->
         <Grid IsVisible="{OnFormFactor Desktop=True, Mobile=False}" RowDefinitions="Auto,*">
-          <Border x:Name="DesktopDetailsHeaderBorder" Grid.Row="0" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
+          <Border x:Name="DesktopDetailsHeaderBorder" Grid.Row="0" IsVisible="{Binding IsDetailsView}" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
                   Background="Transparent">
             <Grid ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}" ColumnSpacing="6">
               <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序"

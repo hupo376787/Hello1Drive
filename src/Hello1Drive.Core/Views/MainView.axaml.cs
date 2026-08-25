@@ -414,8 +414,21 @@ public partial class MainView : UserControl
             return;
         }
 
-        if (e.PropertyName == nameof(MainViewModel.ViewMode) && IsMobilePlatform)
+        if (e.PropertyName == nameof(MainViewModel.ViewMode))
         {
+            if (!IsMobilePlatform)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    DesktopVirtualScrollViewer.Offset = new Vector(0, 0);
+                    DesktopFileSurface.InvalidateMeasure();
+                    SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
+                    if (!vm.IsDesktopListScrolling)
+                        QueueRealizedDesktopThumbnails(DesktopVirtualScrollViewer, vm, allowNetwork: true);
+                }, DispatcherPriority.Loaded);
+                return;
+            }
+
             if (UsesNativeMobileFileList)
             {
                 Dispatcher.UIThread.Post(() =>
