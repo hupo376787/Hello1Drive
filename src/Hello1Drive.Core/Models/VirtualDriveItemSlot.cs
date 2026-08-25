@@ -54,8 +54,8 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         if (_item is not null)
             _item.PropertyChanged += Item_PropertyChanged;
 
-        // Desktop uses one self-drawn control per realized slot and reads the DriveItemModel
-        // directly. A 200-item Graph page therefore needs only one notification per slot instead
+        // Desktop uses one retained self-drawn surface and reads the DriveItemModel directly.
+        // A 200-item Graph page therefore needs only one notification per slot instead
         // of the 15+ forwarded binding notifications required by the legacy/mobile XAML surface.
         // This keeps a background page hydration short enough for pointer/wheel input to preempt.
         if (compactNotification)

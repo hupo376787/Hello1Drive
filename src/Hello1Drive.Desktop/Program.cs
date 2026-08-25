@@ -10,7 +10,11 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        AppServices.Configure(new DesktopAuthenticationService(), new DesktopEmbeddedMediaPlayerFactory(), startupRegistrationService: new WindowsStartupRegistrationService());
+        AppServices.Configure(
+            new DesktopAuthenticationService(),
+            new DesktopEmbeddedMediaPlayerFactory(),
+            startupRegistrationService: new WindowsStartupRegistrationService(),
+            desktopInputSettingsService: new DesktopInputSettingsService());
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

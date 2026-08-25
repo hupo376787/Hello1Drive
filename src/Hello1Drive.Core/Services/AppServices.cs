@@ -10,6 +10,7 @@ public static class AppServices
     private static IStartupRegistrationService? _startupRegistrationService;
     private static ITransferBackgroundService? _transferBackgroundService;
     private static INativeMobileFileListFactory? _nativeMobileFileListFactory;
+    private static IDesktopInputSettingsService? _desktopInputSettingsService;
     private static readonly AppSettingsService _settings = new();
     private static readonly FileCacheService _fileCache = new();
     private static readonly ThumbnailCacheService _thumbnailCache = new();
@@ -35,6 +36,7 @@ public static class AppServices
     public static IStartupRegistrationService? StartupRegistrationService => _startupRegistrationService;
     public static ITransferBackgroundService? TransferBackgroundService => _transferBackgroundService;
     public static INativeMobileFileListFactory? NativeMobileFileListFactory => _nativeMobileFileListFactory;
+    public static IDesktopInputSettingsService? DesktopInputSettingsService => _desktopInputSettingsService;
 
     public static void Configure(
         IAuthenticationService authentication,
@@ -43,7 +45,8 @@ public static class AppServices
         IPlatformAppLifecycleService? platformAppLifecycleService = null,
         IStartupRegistrationService? startupRegistrationService = null,
         ITransferBackgroundService? transferBackgroundService = null,
-        INativeMobileFileListFactory? nativeMobileFileListFactory = null)
+        INativeMobileFileListFactory? nativeMobileFileListFactory = null,
+        IDesktopInputSettingsService? desktopInputSettingsService = null)
     {
         _authentication = authentication;
         _oneDrive = new OneDriveService(authentication);
@@ -53,5 +56,6 @@ public static class AppServices
         _startupRegistrationService = startupRegistrationService;
         _transferBackgroundService = transferBackgroundService;
         _nativeMobileFileListFactory = nativeMobileFileListFactory;
+        _desktopInputSettingsService = desktopInputSettingsService;
     }
 }

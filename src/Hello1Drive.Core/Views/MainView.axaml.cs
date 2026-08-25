@@ -104,6 +104,7 @@ public partial class MainView : UserControl
     private readonly DispatcherTimer _desktopScrollIdleTimer = new() { Interval = TimeSpan.FromMilliseconds(90) };
     private DateTime _desktopScrollLastActivityUtc;
     private int _desktopThumbnailIdleRecoveryVersion;
+    private bool _desktopWheelHandlerAttached;
     private bool _mobileFolderNavigationInProgress;
     private bool _mobileRefreshInProgress;
 
@@ -1044,9 +1045,48 @@ public partial class MainView : UserControl
 
     private void HookListScrollViewers()
     {
-        // Intentionally empty. Let ScrollViewer handle mouse-wheel / precision-touchpad input
-        // through Avalonia's normal scrolling path. Manually assigning Offset for every wheel
-        // event forced synchronous realization/layout and made the desktop list feel stepped.
+        if (IsMobilePlatform || _desktopWheelHandlerAttached || AppServices.DesktopInputSettingsService is null)
+            return;
+
+        // Avalonia's pixel ScrollViewer uses a fixed 50-DIP wheel step. Intercept on the tunnel
+        // route before ScrollContentPresenter so Windows can honor the user's system line count.
+        DesktopVirtualScrollViewer.AddHandler(
+            InputElement.PointerWheelChangedEvent,
+            DesktopVirtualScrollViewer_PointerWheelChanged,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        _desktopWheelHandlerAttached = true;
+    }
+
+    private void DesktopVirtualScrollViewer_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer scroll || !scroll.IsVisible ||
+            Math.Abs(e.Delta.Y) < 0.0001 || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            return;
+        }
+
+        var settings = AppServices.DesktopInputSettingsService;
+        var scrollLines = settings?.GetMouseWheelScrollLines() ?? DesktopScrollSettings.UseFrameworkDefault;
+        if (scrollLines == DesktopScrollSettings.UseFrameworkDefault)
+            return;
+
+        // A Windows value of zero deliberately disables wheel scrolling.
+        if (scrollLines == 0)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var distancePerDelta = scrollLines == DesktopScrollSettings.ScrollByPage
+            ? Math.Max(1, scroll.Viewport.Height)
+            : DesktopFileSurface.MouseWheelLineHeight * scrollLines;
+        var maximum = Math.Max(0, scroll.ScrollBarMaximum.Y);
+        var targetY = Math.Clamp(scroll.Offset.Y - e.Delta.Y * distancePerDelta, 0, maximum);
+        if (Math.Abs(targetY - scroll.Offset.Y) > 0.01)
+            scroll.Offset = new Vector(scroll.Offset.X, targetY);
+
+        e.Handled = true;
     }
 
     private void MobileFileList_ScrollGesture(object? sender, ScrollGestureEventArgs e)
@@ -1208,7 +1248,11 @@ public partial class MainView : UserControl
         SyncDesktopVirtualSurfaceViewport(scroll);
         _desktopScrollLastActivityUtc = DateTime.UtcNow;
         unchecked { _desktopThumbnailIdleRecoveryVersion++; }
-        vm.SetDesktopListScrolling(true);
+        if (!vm.IsDesktopListScrolling)
+        {
+            DesktopFileSurface.ClearHoverForScroll();
+            vm.SetDesktopListScrolling(true);
+        }
 
         if (!_desktopScrollIdleTimer.IsEnabled)
             _desktopScrollIdleTimer.Start();

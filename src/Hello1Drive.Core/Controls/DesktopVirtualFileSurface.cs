@@ -69,6 +69,7 @@ public sealed class DesktopVirtualFileSurface : Control
     private static readonly IBrush DarkFileBody = new SolidColorBrush(Color.Parse("#2A2C32"));
 
     private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];
+    private readonly List<VirtualDriveItemSlot> _subscriptionScratch = [];
     private readonly Dictionary<TextCacheKey, FormattedText> _textCache = [];
     private readonly Queue<TextCacheKey> _textCacheOrder = [];
     private MainViewModel? _vm;
@@ -135,12 +136,34 @@ public sealed class DesktopVirtualFileSurface : Control
         set => SetValue(SelectionBrushProperty, value);
     }
 
+    public double MouseWheelLineHeight => Mode switch
+    {
+        FileViewMode.LargeIcons => LargeHeight + GridSpacing,
+        FileViewMode.ExtraLargeIcons => ExtraHeight + GridSpacing,
+        _ => DetailsRowHeight
+    };
+
+    public void ClearHoverForScroll()
+    {
+        if (_hoverIndex < 0)
+            return;
+        _hoverIndex = -1;
+        InvalidateVisual();
+    }
+
     public void SetViewport(double offsetY, double viewportHeight, double viewportWidth)
     {
+        var offset = Math.Max(0, offsetY);
+        var height = Math.Max(1, viewportHeight);
         var width = Math.Max(1, viewportWidth);
+        var offsetChanged = Math.Abs(offset - _viewportOffsetY) > 0.01;
+        var heightChanged = Math.Abs(height - _viewportHeight) > 0.5;
         var widthChanged = Math.Abs(width - _viewportWidth) > 0.5;
-        _viewportOffsetY = Math.Max(0, offsetY);
-        _viewportHeight = Math.Max(1, viewportHeight);
+        if (!offsetChanged && !heightChanged && !widthChanged)
+            return;
+
+        _viewportOffsetY = offset;
+        _viewportHeight = height;
         _viewportWidth = width;
 
         if (widthChanged)
@@ -254,6 +277,7 @@ public sealed class DesktopVirtualFileSurface : Control
 
         _renderFrom = from;
         _renderTo = to;
+        UpdateSlotSubscriptions(from, to);
 
         if (Mode == FileViewMode.Details)
         {
@@ -278,11 +302,7 @@ public sealed class DesktopVirtualFileSurface : Control
 
         _vm = vm;
         if (_vm is not null)
-        {
             _vm.VirtualItems.CollectionChanged += VirtualItems_CollectionChanged;
-            foreach (var slot in _vm.VirtualItems)
-                AttachSlot(slot);
-        }
 
         _renderFrom = -1;
         _renderTo = -1;
@@ -299,23 +319,35 @@ public sealed class DesktopVirtualFileSurface : Control
                     DetachSlot(slot);
 
         if (e.Action == NotifyCollectionChangedAction.Reset)
-        {
             DetachAllSlots();
-            if (_vm is not null)
-                foreach (var slot in _vm.VirtualItems)
-                    AttachSlot(slot);
-        }
-        else if (e.NewItems is not null)
-        {
-            foreach (var value in e.NewItems)
-                if (value is VirtualDriveItemSlot slot)
-                    AttachSlot(slot);
-        }
 
         _renderFrom = -1;
         _renderTo = -1;
         InvalidateMeasure();
         InvalidateVisual();
+    }
+
+    private void UpdateSlotSubscriptions(int from, int to)
+    {
+        var vm = _vm;
+        if (vm is null || from < 0 || to < from || vm.VirtualItems.Count == 0)
+        {
+            DetachAllSlots();
+            return;
+        }
+
+        _subscriptionScratch.Clear();
+        foreach (var slot in _subscribedSlots)
+        {
+            if (slot.Index < from || slot.Index > to)
+                _subscriptionScratch.Add(slot);
+        }
+        foreach (var slot in _subscriptionScratch)
+            DetachSlot(slot);
+
+        var last = Math.Min(to, vm.VirtualItems.Count - 1);
+        for (var index = Math.Max(0, from); index <= last; index++)
+            AttachSlot(vm.VirtualItems[index]);
     }
 
     private void AttachSlot(VirtualDriveItemSlot slot)
@@ -335,6 +367,7 @@ public sealed class DesktopVirtualFileSurface : Control
         foreach (var slot in _subscribedSlots)
             slot.PropertyChanged -= Slot_PropertyChanged;
         _subscribedSlots.Clear();
+        _subscriptionScratch.Clear();
     }
 
     private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)
