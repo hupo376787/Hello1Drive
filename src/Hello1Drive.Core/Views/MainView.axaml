@@ -615,41 +615,6 @@
     <!-- Desktop uses the same fixed logical slots as mobile. The actual desktop file template is
          hosted only after metadata for that index exists; unloaded tail slots keep the scroll extent
          stable without creating a full DriveItemModel or thumbnail object. -->
-    <DataTemplate x:Key="DesktopDetailsSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <controls:DesktopFileItemControl Mode="Details"
-                                       Height="46"
-                                       HorizontalAlignment="Stretch"
-                                       VerticalAlignment="Stretch"
-                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
-                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
-                                       PointerPressed="FileItem_PointerPressed"
-                                       DoubleTapped="FileItem_DoubleTapped"
-                                       ContextRequested="FileItem_ContextRequested" />
-    </DataTemplate>
-
-    <DataTemplate x:Key="DesktopLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <controls:DesktopFileItemControl Mode="LargeIcons"
-                                       Height="162"
-                                       HorizontalAlignment="Stretch"
-                                       VerticalAlignment="Stretch"
-                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
-                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
-                                       PointerPressed="FileItem_PointerPressed"
-                                       DoubleTapped="FileItem_DoubleTapped"
-                                       ContextRequested="FileItem_ContextRequested" />
-    </DataTemplate>
-
-    <DataTemplate x:Key="DesktopExtraLargeSlotTemplate" x:DataType="models:VirtualDriveItemSlot">
-      <controls:DesktopFileItemControl Mode="ExtraLargeIcons"
-                                       Height="212"
-                                       HorizontalAlignment="Stretch"
-                                       VerticalAlignment="Stretch"
-                                       ItemBackground="{DynamicResource HelloFileItemBrush}"
-                                       SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
-                                       PointerPressed="FileItem_PointerPressed"
-                                       DoubleTapped="FileItem_DoubleTapped"
-                                       ContextRequested="FileItem_ContextRequested" />
-    </DataTemplate>
   </UserControl.Resources>
 
   <Grid x:Name="RootGrid" ClipToBounds="True">
@@ -901,6 +866,67 @@
             </MenuItem>
           </ContextMenu>
         </Grid.ContextMenu>
+        <!-- Desktop hot path: exactly one ScrollViewer and one retained virtual drawing surface. -->
+        <Grid IsVisible="{OnFormFactor Desktop=True, Mobile=False}" RowDefinitions="Auto,*">
+          <Border x:Name="DesktopDetailsHeaderBorder" Grid.Row="0" IsVisible="{Binding IsDetailsView}" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
+                  Background="Transparent">
+            <Grid ColumnDefinitions="{OnFormFactor Desktop='42,*,150,130,190', Mobile='38,*,90'}" ColumnSpacing="6">
+              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序"
+                      HorizontalContentAlignment="Center" Padding="0"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+                <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
+                <Button.Flyout>
+                  <MenuFlyout>
+                    <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
+                    <Separator />
+                    <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
+                    <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
+                    <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
+                    <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+              <Button Grid.Column="0" Classes="headerSort" ToolTip.Tip="排序"
+                      HorizontalContentAlignment="Center" Padding="0"
+                      IsVisible="{OnFormFactor Desktop=False, Mobile=True}"
+                      Click="MobileSortButton_Click">
+                <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
+              </Button>
+              <Button Grid.Column="1" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Name" Click="SortHeader_Click">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="名称"/><TextBlock Text="{Binding NameSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+              <Border Grid.Column="2" Padding="8,0"
+                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+                <TextBlock Text="类型" VerticalAlignment="Center" />
+              </Border>
+              <Button Grid.Column="{OnFormFactor Desktop=3, Mobile=2}" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Size" Click="SortHeader_Click">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="大小"/><TextBlock Text="{Binding SizeSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+              <Button Grid.Column="4" Classes="headerSort" HorizontalAlignment="Stretch" Tag="Modified" Click="SortHeader_Click" IsVisible="{OnFormFactor Desktop=True, Mobile=False}">
+                <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="修改时间"/><TextBlock Text="{Binding ModifiedSortIndicator}" FontSize="10" Foreground="{DynamicResource HelloIconSortBrush}"/></StackPanel>
+              </Button>
+            </Grid>
+          </Border>
+          <ScrollViewer x:Name="DesktopVirtualScrollViewer" Grid.Row="1" Margin="0,0,4,0"
+                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                        HorizontalContentAlignment="Stretch"
+                        ScrollChanged="FileListScrollViewer_ScrollChanged"
+                        SizeChanged="DesktopVirtualScrollViewer_SizeChanged">
+            <controls:DesktopVirtualFileSurface x:Name="DesktopFileSurface"
+                                                Mode="{Binding ViewMode}"
+                                                HorizontalAlignment="Stretch"
+                                                ItemBackground="{DynamicResource HelloFileItemBrush}"
+                                                SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}"
+                                                PointerPressed="DesktopFileSurface_PointerPressed"
+                                                DoubleTapped="DesktopFileSurface_DoubleTapped"
+                                                ContextRequested="DesktopFileSurface_ContextRequested" />
+          </ScrollViewer>
+        </Grid>
+
+        <!-- The Avalonia mobile fallback keeps its existing three mode-specific surfaces. -->
+        <Grid IsVisible="{OnFormFactor Desktop=False, Mobile=True}">
         <!-- Details -->
         <Grid IsVisible="{Binding IsDetailsView}" RowDefinitions="Auto,*">
           <Border x:Name="DetailsHeaderBorder" Grid.Row="0" Padding="{OnFormFactor Desktop='8,4', Mobile='6,4'}"
@@ -945,18 +971,6 @@
             </Grid>
           </Border>
 
-          <ScrollViewer x:Name="DesktopDetailsScrollViewer" Grid.Row="1" Margin="0,0,4,0"
-                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                        IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
-                        ScrollChanged="FileListScrollViewer_ScrollChanged">
-            <ItemsRepeater x:Name="DesktopDetailsRepeater" ItemsSource="{Binding VirtualItems}"
-                           ItemTemplate="{StaticResource DesktopDetailsSlotTemplate}">
-              <ItemsRepeater.Layout>
-                <StackLayout Spacing="0" />
-              </ItemsRepeater.Layout>
-            </ItemsRepeater>
-          </ScrollViewer>
-
           <RefreshContainer Grid.Row="1"
                             IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
@@ -976,19 +990,6 @@
 
         <!-- Large icons -->
         <Grid IsVisible="{Binding IsLargeIconView}">
-<ScrollViewer x:Name="DesktopLargeIconScrollViewer" Margin="0,0,4,0"
-                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
-                      ScrollChanged="FileListScrollViewer_ScrollChanged">
-          <ItemsRepeater x:Name="DesktopLargeIconRepeater" ItemsSource="{Binding VirtualItems}"
-                         ItemTemplate="{StaticResource DesktopLargeSlotTemplate}">
-            <ItemsRepeater.Layout>
-              <UniformGridLayout MinItemWidth="152" MinItemHeight="162" MinColumnSpacing="4" MinRowSpacing="4" />
-            </ItemsRepeater.Layout>
-          </ItemsRepeater>
-        </ScrollViewer>
-
-
           <RefreshContainer IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
@@ -1008,19 +1009,6 @@
 
         <!-- Extra large icons -->
         <Grid IsVisible="{Binding IsExtraLargeIconView}">
-<ScrollViewer x:Name="DesktopExtraLargeIconScrollViewer" Margin="0,0,4,0"
-                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                      IsVisible="{OnFormFactor Desktop=True, Mobile=False}"
-                      ScrollChanged="FileListScrollViewer_ScrollChanged">
-          <ItemsRepeater x:Name="DesktopExtraLargeIconRepeater" ItemsSource="{Binding VirtualItems}"
-                         ItemTemplate="{StaticResource DesktopExtraLargeSlotTemplate}">
-            <ItemsRepeater.Layout>
-              <UniformGridLayout MinItemWidth="220" MinItemHeight="212" MinColumnSpacing="4" MinRowSpacing="4" />
-            </ItemsRepeater.Layout>
-          </ItemsRepeater>
-        </ScrollViewer>
-
-
           <RefreshContainer IsVisible="{Binding UseAvaloniaMobileFileList}"
                             PullDirection="TopToBottom"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
@@ -1036,6 +1024,8 @@
               </ItemsRepeater>
             </ScrollViewer>
           </RefreshContainer>
+        </Grid>
+
         </Grid>
 
         <!-- Native mobile performance path: Android hosts RecyclerView and iOS hosts UICollectionView

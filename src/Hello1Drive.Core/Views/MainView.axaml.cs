@@ -414,8 +414,21 @@ public partial class MainView : UserControl
             return;
         }
 
-        if (e.PropertyName == nameof(MainViewModel.ViewMode) && IsMobilePlatform)
+        if (e.PropertyName == nameof(MainViewModel.ViewMode))
         {
+            if (!IsMobilePlatform)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    DesktopVirtualScrollViewer.Offset = new Vector(0, 0);
+                    DesktopFileSurface.InvalidateMeasure();
+                    SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
+                    if (!vm.IsDesktopListScrolling)
+                        QueueRealizedDesktopThumbnails(DesktopVirtualScrollViewer, vm, allowNetwork: true);
+                }, DispatcherPriority.Loaded);
+                return;
+            }
+
             if (UsesNativeMobileFileList)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -955,7 +968,7 @@ public partial class MainView : UserControl
             if (!IsMobilePlatform)
             {
                 // Desktop no longer creates a thumbnail task for every loaded item. Wait for the
-                // destination ItemsRepeater to realize its first viewport, then queue only those
+                // destination virtual surface to receive its first viewport, then queue only those
                 // controls. This keeps the first scrollbar drag free of a thousands-task backlog.
                 var recoveryVersion = unchecked(++_desktopThumbnailIdleRecoveryVersion);
                 Dispatcher.UIThread.Post(() =>
@@ -1018,21 +1031,14 @@ public partial class MainView : UserControl
         if (UsesNativeMobileFileList)
             return null;
 
-        if (IsMobilePlatform)
-        {
-            return vm.ViewMode switch
-            {
-                FileViewMode.LargeIcons => MobileLargeIconScrollViewer,
-                FileViewMode.ExtraLargeIcons => MobileExtraLargeIconScrollViewer,
-                _ => MobileDetailsScrollViewer
-            };
-        }
+        if (!IsMobilePlatform)
+            return DesktopVirtualScrollViewer;
 
         return vm.ViewMode switch
         {
-            FileViewMode.LargeIcons => DesktopLargeIconScrollViewer,
-            FileViewMode.ExtraLargeIcons => DesktopExtraLargeIconScrollViewer,
-            _ => DesktopDetailsScrollViewer
+            FileViewMode.LargeIcons => MobileLargeIconScrollViewer,
+            FileViewMode.ExtraLargeIcons => MobileExtraLargeIconScrollViewer,
+            _ => MobileDetailsScrollViewer
         };
     }
 
@@ -1107,6 +1113,74 @@ public partial class MainView : UserControl
         }, DispatcherPriority.Background);
     }
 
+    private void SyncDesktopVirtualSurfaceViewport(ScrollViewer scroll)
+    {
+        if (IsMobilePlatform || !ReferenceEquals(scroll, DesktopVirtualScrollViewer))
+            return;
+
+        var viewportWidth = scroll.Viewport.Width > 1 ? scroll.Viewport.Width : scroll.Bounds.Width;
+        var viewportHeight = scroll.Viewport.Height > 1 ? scroll.Viewport.Height : scroll.Bounds.Height;
+        DesktopFileSurface.SetViewport(scroll.Offset.Y, viewportHeight, viewportWidth);
+    }
+
+    private void DesktopVirtualScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (IsMobilePlatform || sender is not ScrollViewer scroll)
+            return;
+
+        SyncDesktopVirtualSurfaceViewport(scroll);
+        if (DataContext is MainViewModel vm && !vm.IsDesktopListScrolling)
+            Dispatcher.UIThread.Post(() => QueueRealizedDesktopThumbnails(scroll, vm, allowNetwork: true), DispatcherPriority.Background);
+    }
+
+    private void DesktopFileSurface_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (IsMobilePlatform || sender is not DesktopVirtualFileSurface surface || DataContext is not MainViewModel vm)
+            return;
+
+        var item = surface.GetItemAt(e.GetPosition(surface));
+        if (item is null)
+            return;
+
+        _contextItem = item;
+        var point = e.GetCurrentPoint(surface);
+        if (point.Properties.IsLeftButtonPressed)
+            ApplyDesktopPointerSelection(vm, item, e.KeyModifiers);
+        else if (point.Properties.IsRightButtonPressed)
+            SelectContextItem(item);
+    }
+
+    private async void DesktopFileSurface_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (IsMobilePlatform || sender is not DesktopVirtualFileSurface surface || DataContext is not MainViewModel vm)
+            return;
+
+        var item = surface.GetItemAt(e.GetPosition(surface));
+        if (item is null)
+            return;
+
+        _contextItem = item;
+        _desktopSelectionAnchorId = item.Id;
+        _desktopSelectedIds.Clear();
+        _desktopSelectedIds.Add(item.Id);
+        ApplyDesktopSelection(vm);
+        e.Handled = true;
+        await OpenDriveItemAsync(vm, item);
+    }
+
+    private void DesktopFileSurface_ContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (IsMobilePlatform || sender is not DesktopVirtualFileSurface surface || _contextItem is not { } item)
+            return;
+
+        SelectContextItem(item);
+        var menu = GetOrCreateDesktopFileItemContextMenu();
+        if (_desktopOpenWebMenuItem is not null)
+            _desktopOpenWebMenuItem.IsVisible = item.HasWebUrl;
+        menu.Open(surface);
+        e.Handled = true;
+    }
+
     private void FileListScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         if (sender is not ScrollViewer scroll || !scroll.IsVisible || DataContext is not MainViewModel vm)
@@ -1129,16 +1203,15 @@ public partial class MainView : UserControl
 
     private void HandleDesktopFileScroll(ScrollViewer scroll, MainViewModel vm)
     {
+        // This is the complete desktop scroll hot path. SetViewport normally does not invalidate
+        // the surface while the visible viewport remains inside its retained +/-1 viewport scene.
+        SyncDesktopVirtualSurfaceViewport(scroll);
         _desktopScrollLastActivityUtc = DateTime.UtcNow;
         unchecked { _desktopThumbnailIdleRecoveryVersion++; }
         vm.SetDesktopListScrolling(true);
 
         if (!_desktopScrollIdleTimer.IsEnabled)
             _desktopScrollIdleTimer.Start();
-
-        // Do no thumbnail traversal, disk probing or bitmap decoding in the active-scroll path.
-        // The idle handler warms current +/- one viewport after 150 ms. Already decoded thumbnails
-        // remain attached to their DriveItemModel and therefore continue drawing while scrolling.
     }
 
     private void DesktopScrollIdleTimer_Tick(object? sender, EventArgs e)
@@ -1402,70 +1475,42 @@ vm.SetMobileListScrolling(true);
         MainViewModel vm,
         bool allowNetwork)
     {
-        if (IsMobilePlatform || !scroll.IsVisible)
+        if (IsMobilePlatform || !scroll.IsVisible || !ReferenceEquals(scroll, DesktopVirtualScrollViewer))
             return;
 
-        var repeater = GetActiveDesktopRepeater(vm);
-        var viewportHeight = Math.Max(1, scroll.Viewport.Height);
-        var visibleItems = new List<DriveItemModel>();
-        var visibleSlotIndices = new List<int>();
-        var seenItems = new HashSet<string>(StringComparer.Ordinal);
-        var seenSlots = new HashSet<int>();
+        SyncDesktopVirtualSurfaceViewport(scroll);
+        var (visibleFirst, visibleLast) = DesktopFileSurface.GetVisibleRange();
+        if (visibleFirst < 0 || visibleLast < visibleFirst || vm.VirtualItems.Count == 0)
+            return;
 
-        foreach (var element in repeater.GetVisualChildren().OfType<Control>())
+        var visibleCount = Math.Max(1, visibleLast - visibleFirst + 1);
+        var windowFrom = Math.Max(0, visibleFirst - visibleCount);
+        var windowTo = Math.Min(vm.VirtualItems.Count - 1, visibleLast + visibleCount);
+        var indices = new List<int>(windowTo - windowFrom + 1);
+        var items = new List<DriveItemModel>(windowTo - windowFrom + 1);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void AddRange(int from, int to)
         {
-            // Desktop templates are now a single self-drawn Control whose inherited
-            // DataContext is the slot itself. Avoid walking a deep visual subtree on every scan.
-            if (element.DataContext is not VirtualDriveItemSlot slot)
-                continue;
-
-            var origin = element.TranslatePoint(new Point(0, 0), scroll);
-            if (origin is null)
-                continue;
-
-            var top = origin.Value.Y;
-            var bottom = top + Math.Max(1, element.Bounds.Height);
-            if (bottom < -2 || top > viewportHeight + 2)
-                continue;
-
-            if (seenSlots.Add(slot.Index))
-                visibleSlotIndices.Add(slot.Index);
-
-            if (slot.Item is { } item &&
-                !string.IsNullOrWhiteSpace(item.Id) &&
-                seenItems.Add(item.Id))
+            if (from > to)
+                return;
+            for (var index = from; index <= to; index++)
             {
-                visibleItems.Add(item);
-            }
-        }
-
-        // Keep one complete viewport before and after the current viewport warm. The current
-        // items stay first in visibleItems so they enter the shared worker gate before look-ahead
-        // candidates. Slot indices are included even when metadata has not arrived yet; the VM's
-        // page hydration path will pick them up as soon as their DriveItemModel becomes available.
-        if (visibleSlotIndices.Count > 0 && vm.MobileItems.Count > 0)
-        {
-            var visibleFirst = visibleSlotIndices.Min();
-            var visibleLast = visibleSlotIndices.Max();
-            var pageSize = Math.Max(1, visibleLast - visibleFirst + 1);
-            var windowFrom = Math.Max(0, visibleFirst - pageSize);
-            var windowToExclusive = Math.Min(vm.MobileItems.Count, visibleLast + pageSize + 1);
-
-            for (var index = windowFrom; index < windowToExclusive; index++)
-            {
-                if (seenSlots.Add(index))
-                    visibleSlotIndices.Add(index);
-
-                if (vm.MobileItems[index].Item is { } item &&
-                    !string.IsNullOrWhiteSpace(item.Id) &&
-                    seenItems.Add(item.Id))
+                indices.Add(index);
+                if (vm.VirtualItems[index].Item is { } item &&
+                    !string.IsNullOrWhiteSpace(item.Id) && seen.Add(item.Id))
                 {
-                    visibleItems.Add(item);
+                    items.Add(item);
                 }
             }
         }
 
-        vm.UpdateDesktopRealizedThumbnails(visibleSlotIndices, visibleItems, allowNetwork);
+        // Current viewport first, then previous viewport, then next viewport. The VM preserves this
+        // ordering when it enters the two-worker thumbnail gate, so what the user sees always wins.
+        AddRange(visibleFirst, visibleLast);
+        AddRange(windowFrom, visibleFirst - 1);
+        AddRange(visibleLast + 1, windowTo);
+        vm.UpdateDesktopRealizedThumbnails(indices, items, allowNetwork);
     }
 
     private async Task RecoverVisibleDesktopThumbnailsAfterIdleAsync(
@@ -3025,12 +3070,6 @@ if (visibleItems.Count > 0)
 
     private void FileArea_Upload_Click(object? sender, RoutedEventArgs e) => UploadButton_Click(sender, e);
 
-    private ItemsRepeater GetActiveDesktopRepeater(MainViewModel vm) => vm.ViewMode switch
-    {
-        FileViewMode.LargeIcons => DesktopLargeIconRepeater,
-        FileViewMode.ExtraLargeIcons => DesktopExtraLargeIconRepeater,
-        _ => DesktopDetailsRepeater
-    };
 
     private static bool ShouldSuppressMarqueeStart(object? source)
     {
@@ -3068,32 +3107,8 @@ if (visibleItems.Count > 0)
         if (IsMobilePlatform)
             return;
 
-        var availableWidth = FileArea.Bounds.Width;
-        if (availableWidth <= 1)
-            return;
-
-        ConfigureResponsiveDesktopGrid(DesktopLargeIconRepeater, availableWidth, 152, 162, 136, 184);
-        ConfigureResponsiveDesktopGrid(DesktopExtraLargeIconRepeater, availableWidth, 220, 212, 190, 276);
-    }
-
-    private static void ConfigureResponsiveDesktopGrid(
-        ItemsRepeater repeater,
-        double availableWidth,
-        double preferredWidth,
-        double itemHeight,
-        double minWidth,
-        double maxWidth)
-    {
-        if (repeater.Layout is not UniformGridLayout layout || availableWidth <= 1)
-            return;
-
-        const double spacing = 4;
-        var usableWidth = Math.Max(minWidth, availableWidth - 18);
-        var columns = Math.Max(1, (int)Math.Floor((usableWidth + spacing) / (preferredWidth + spacing)));
-        var itemWidth = Math.Clamp((usableWidth - spacing * (columns - 1)) / columns, minWidth, maxWidth);
-        layout.MinItemWidth = itemWidth;
-        layout.MinItemHeight = itemHeight;
-        repeater.InvalidateMeasure();
+        DesktopFileSurface.InvalidateMeasure();
+        SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
     }
 
     private void FileArea_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -3111,8 +3126,14 @@ if (visibleItems.Count > 0)
         if (pointerPosition.X >= Math.Max(0, FileArea.Bounds.Width - 22))
             return;
 
-        // Do not steal pointer capture from real controls. In particular the ListBox scrollbar
-        // thumb must remain draggable, and header buttons must receive Click for sorting.
+        // The desktop file area is one control, so DataContext alone can no longer tell whether
+        // the pointer is over an item or an empty gap. Ask the virtual surface directly.
+        if (e.Source is DesktopVirtualFileSurface desktopSurface &&
+            desktopSurface.GetItemAt(e.GetPosition(desktopSurface)) is not null)
+            return;
+
+        // Do not steal pointer capture from real controls. In particular the scrollbar thumb and
+        // header buttons must keep their own input gestures.
         if (ShouldSuppressMarqueeStart(e.Source))
             return;
 
@@ -3179,19 +3200,16 @@ if (visibleItems.Count > 0)
 
         var selectionRect = new Rect(x, y, width, height);
         var selectedIds = new HashSet<string>(_marqueeBaseSelection, StringComparer.Ordinal);
-        var repeater = GetActiveDesktopRepeater(vm);
-        foreach (var container in repeater.GetVisualChildren().OfType<Control>())
+        var topLeft = FileArea.TranslatePoint(new Point(selectionRect.Left, selectionRect.Top), DesktopFileSurface);
+        var bottomRight = FileArea.TranslatePoint(new Point(selectionRect.Right, selectionRect.Bottom), DesktopFileSurface);
+        if (topLeft is { } a && bottomRight is { } b)
         {
-            if (GetDriveItemFromDataContext(container.DataContext) is not { } item)
-                continue;
-            var origin = container.TranslatePoint(new Point(0, 0), FileArea);
-            if (origin is null)
-                continue;
-
-            var itemRect = new Rect(origin.Value.X, origin.Value.Y, container.Bounds.Width, container.Bounds.Height);
-            var intersects = selectionRect.Left < itemRect.Right && selectionRect.Right > itemRect.Left &&
-                             selectionRect.Top < itemRect.Bottom && selectionRect.Bottom > itemRect.Top;
-            if (intersects)
+            var surfaceRect = new Rect(
+                Math.Min(a.X, b.X),
+                Math.Min(a.Y, b.Y),
+                Math.Abs(b.X - a.X),
+                Math.Abs(b.Y - a.Y));
+            foreach (var item in DesktopFileSurface.GetItemsIntersecting(surfaceRect))
                 selectedIds.Add(item.Id);
         }
 
