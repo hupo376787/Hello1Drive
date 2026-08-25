@@ -8,7 +8,7 @@ internal sealed class DesktopInputSettingsService : IDesktopInputSettingsService
     private const uint SpiGetWheelScrollLines = 0x0068;
     private const int DefaultWindowsWheelLines = 3;
 
-    // Cache the Windows preference while desktop services are created. Mouse-wheel input itself
+    // Cache the Windows preference during desktop service initialization. Mouse-wheel input itself
     // never synchronously crosses the user32 boundary, so the first wheel frame stays input-only.
     private readonly int _wheelLines = ReadWheelLines();
 
