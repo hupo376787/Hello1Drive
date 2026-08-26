@@ -16,7 +16,13 @@ public class AndroidApp : AvaloniaAndroidApplication<global::Hello1Drive.App>
 
     public override void OnCreate()
     {
-        AppServices.Configure(new AndroidAuthenticationService(), new AndroidEmbeddedMediaPlayerFactory(), new AndroidPlatformShareService(), new AndroidPlatformAppLifecycleService(), transferBackgroundService: new AndroidTransferBackgroundService(), nativeMobileFileListFactory: new AndroidNativeMobileFileListFactory());
+        AppServices.Configure(
+            new AndroidAuthenticationService(),
+            new AndroidEmbeddedMediaPlayerFactory(),
+            new AndroidPlatformShareService(),
+            new AndroidPlatformAppLifecycleService(),
+            transferBackgroundService: new AndroidTransferBackgroundService(),
+            nativeMobileFileListFactory: new PolishedAndroidNativeMobileFileListFactory());
         base.OnCreate();
     }
 }
