@@ -322,10 +322,11 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         }
     }
 
-    public void OnScrolled()
+    public void OnScrolled(int dy)
     {
         if (_disposed)
             return;
+        _adapter.UpdateScrollDirection(dy);
         _adapter.UpdateVisibleRange(GetFirstVisiblePosition(), GetLastVisiblePosition());
     }
 
@@ -423,7 +424,7 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         public override void OnScrolled(RecyclerView recyclerView, int dx, int dy)
         {
             base.OnScrolled(recyclerView, dx, dy);
-            owner.OnScrolled();
+            owner.OnScrolled(dy);
         }
     }
 
@@ -438,6 +439,7 @@ internal sealed class NativeFloatingUploadButtonView : View
     private readonly NativeMobileFileListHost _host;
     private readonly Paint _fillPaint = new(PaintFlags.AntiAlias);
     private readonly Paint _iconPaint = new(PaintFlags.AntiAlias);
+    private readonly global::Android.Graphics.Path _iconPath = new();
     private readonly float _touchSlop;
     private bool _tracking;
     private bool _moved;
@@ -461,9 +463,13 @@ internal sealed class NativeFloatingUploadButtonView : View
         _fillPaint.SetStyle(Paint.Style.Fill);
         _iconPaint.Color = Color.Rgb(255, 247, 248);
         _iconPaint.SetStyle(Paint.Style.Stroke);
-        _iconPaint.StrokeWidth = Dp(1.5f);
+        // The icon is authored in an 18 x 18 logical box and scaled by Canvas, so keep this
+        // stroke in logical units. It lands at about 1.8-2.0 dp on a 48 dp FAB.
+        _iconPaint.StrokeWidth = 1.55f;
         _iconPaint.StrokeCap = Paint.Cap.Round;
         _iconPaint.StrokeJoin = Paint.Join.Round;
+
+        BuildUploadIconPath();
     }
 
     protected override void OnDraw(Canvas canvas)
@@ -475,16 +481,37 @@ internal sealed class NativeFloatingUploadButtonView : View
         var diameter = Math.Min(Width, Height);
         canvas.DrawCircle(Width / 2f, Height / 2f, diameter / 2f, _fillPaint);
 
-        var scale = diameter / 14f;
-        var offsetX = (Width - 14f * scale) / 2f;
-        var offsetY = (Height - 14f * scale) / 2f;
-        float X(float value) => offsetX + value * scale;
-        float Y(float value) => offsetY + value * scale;
+        // Keep the glyph around 46% of the FAB diameter: large enough to read instantly,
+        // but with a clear ring of coral around it so it never looks cramped.
+        var iconSize = diameter * 0.46f;
+        var scale = iconSize / 18f;
+        var offsetX = (Width - iconSize) / 2f;
+        var offsetY = (Height - iconSize) / 2f - diameter * 0.012f;
+        var saveCount = canvas.Save();
+        canvas.Translate(offsetX, offsetY);
+        canvas.Scale(scale, scale);
+        canvas.DrawPath(_iconPath, _iconPaint);
+        canvas.RestoreToCount(saveCount);
+    }
 
-        canvas.DrawLine(X(7), Y(12), X(7), Y(2), _iconPaint);
-        canvas.DrawLine(X(3.5f), Y(5.5f), X(7), Y(2), _iconPaint);
-        canvas.DrawLine(X(7), Y(2), X(10.5f), Y(5.5f), _iconPaint);
-        canvas.DrawLine(X(2), Y(12), X(12), Y(12), _iconPaint);
+    private void BuildUploadIconPath()
+    {
+        // Cloud outline. The bottom edge stays simple so the upward arrow remains the focal point.
+        _iconPath.MoveTo(4.2f, 13.1f);
+        _iconPath.CubicTo(2.2f, 13.1f, 0.9f, 11.8f, 0.9f, 10.0f);
+        _iconPath.CubicTo(0.9f, 8.4f, 2.0f, 7.0f, 3.5f, 6.6f);
+        _iconPath.CubicTo(4.0f, 4.2f, 6.0f, 2.5f, 8.5f, 2.5f);
+        _iconPath.CubicTo(10.8f, 2.5f, 12.8f, 3.9f, 13.5f, 6.0f);
+        _iconPath.CubicTo(15.6f, 6.2f, 17.1f, 7.8f, 17.1f, 9.8f);
+        _iconPath.CubicTo(17.1f, 11.8f, 15.7f, 13.1f, 13.7f, 13.1f);
+        _iconPath.LineTo(4.2f, 13.1f);
+
+        // Upload arrow. Let the stem extend just below the cloud baseline for a clearer silhouette.
+        _iconPath.MoveTo(9.0f, 13.9f);
+        _iconPath.LineTo(9.0f, 7.2f);
+        _iconPath.MoveTo(6.7f, 9.5f);
+        _iconPath.LineTo(9.0f, 7.2f);
+        _iconPath.LineTo(11.3f, 9.5f);
     }
 
     public override bool OnTouchEvent(MotionEvent? e)
@@ -593,6 +620,9 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     private HashSet<string> _selectedIds = new(StringComparer.Ordinal);
     private int _visibleFirst;
     private int _visibleLast;
+    // +1 means the last meaningful movement was downward, -1 upward. The idle prefetch pass
+    // warms the just-passed viewport first so a one-screen reversal never shows stale badges.
+    private int _lastScrollDirection = 1;
     private bool _disposed;
 
     private const int BitmapCacheLimit = 96;
@@ -656,6 +686,14 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         _visibleLast = Math.Max(_visibleFirst, last);
     }
 
+    public void UpdateScrollDirection(int dy)
+    {
+        if (dy > 0)
+            _lastScrollDirection = 1;
+        else if (dy < 0)
+            _lastScrollDirection = -1;
+    }
+
     public void SetScrolling(bool scrolling)
     {
         if (_scrolling == scrolling)
@@ -682,13 +720,23 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 RequestThumbnailIfNeeded(holder, position);
         }
 
-        // A "page" means one current viewport, not one Graph 200-item metadata page. This keeps
-        // work proportional to the screen size while making the previous/next viewport warm.
+        // A "page" means one current viewport, not one Graph 200-item metadata page. Queue the
+        // viewport the user just passed before the forward look-ahead viewport. This matters after
+        // a fast fling: reversing by one screen should reveal already-decoded thumbnails.
         var pageSize = Math.Max(1, last - first + 1);
-        for (var distance = 1; distance <= pageSize; distance++)
+        if (_lastScrollDirection >= 0)
         {
-            PrefetchThumbnailIfNeeded(last + distance);
-            PrefetchThumbnailIfNeeded(first - distance);
+            for (var distance = 1; distance <= pageSize; distance++)
+                PrefetchThumbnailIfNeeded(first - distance);
+            for (var distance = 1; distance <= pageSize; distance++)
+                PrefetchThumbnailIfNeeded(last + distance);
+        }
+        else
+        {
+            for (var distance = 1; distance <= pageSize; distance++)
+                PrefetchThumbnailIfNeeded(last + distance);
+            for (var distance = 1; distance <= pageSize; distance++)
+                PrefetchThumbnailIfNeeded(first - distance);
         }
     }
 
@@ -805,10 +853,10 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
             return;
 
         var generationToken = _thumbnailGenerationCts.Token;
-        _ = PrefetchThumbnailAsync(item, generationToken);
+        _ = PrefetchThumbnailAsync(position, item, generationToken);
     }
 
-    private async Task PrefetchThumbnailAsync(DriveItemModel item, CancellationToken generationToken)
+    private async Task PrefetchThumbnailAsync(int position, DriveItemModel item, CancellationToken generationToken)
     {
         try
         {
@@ -846,6 +894,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 }
 
                 AddBitmapToCache(item, bitmap);
+                PublishPrefetchedThumbnail(position, item.Id);
             }
             finally
             {
@@ -864,6 +913,31 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         {
             _prefetchingIds.TryRemove(item.Id, out _);
         }
+    }
+
+    private void PublishPrefetchedThumbnail(int position, string itemId)
+    {
+        _recycler.Post(() =>
+        {
+            if (_disposed || _scrolling || _viewModel is null || position < 0 || position >= ItemCount)
+                return;
+
+            var current = _viewModel.MobileItems[position].Item;
+            if (current is null || !string.Equals(current.Id, itemId, StringComparison.Ordinal))
+                return;
+
+            // If RecyclerView still has the holder attached, update it directly. Otherwise mark the
+            // one adapter position dirty. This is the key part: cached detached holders are then
+            // rebound when they come back instead of reappearing with their old no-thumbnail state.
+            if (_recycler.FindViewHolderForAdapterPosition(position) is NativeFileViewHolder holder &&
+                TryGetBitmap(current, out var bitmap) && bitmap is not null)
+            {
+                holder.ApplyThumbnail(itemId, bitmap);
+                return;
+            }
+
+            NotifyItemChanged(position);
+        });
     }
 
     private void RequestThumbnailIfNeeded(NativeFileViewHolder holder, int position)

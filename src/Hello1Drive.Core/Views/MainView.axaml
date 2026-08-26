@@ -1064,8 +1064,11 @@
         <Grid x:Name="FloatingUploadDragHost" Width="48" Height="48"
               IsVisible="{Binding ShowFloatingUploadButton}" ToolTip.Tip="上传文件">
           <Button x:Name="FloatingUploadButton" Classes="fab" IsHitTestVisible="False">
-            <Path Width="17" Height="17" Stretch="Uniform" Stroke="#FFF7F8" StrokeThickness="1.5" StrokeLineCap="Round"
-                  Data="M7,12 V2 M3.5,5.5 L7,2 L10.5,5.5 M2,12 H12" />
+            <!-- Cloud + upward arrow: recognizable as OneDrive upload at a glance, with enough
+                 internal breathing room to stay crisp inside the 48-DIP floating circle. -->
+            <Path Width="20" Height="20" Stretch="Uniform" Stroke="#FFF7F8" StrokeThickness="1.55"
+                  StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent"
+                  Data="M4.2,13.1 C2.2,13.1 0.9,11.8 0.9,10 C0.9,8.4 2,7 3.5,6.6 C4,4.2 6,2.5 8.5,2.5 C10.8,2.5 12.8,3.9 13.5,6 C15.6,6.2 17.1,7.8 17.1,9.8 C17.1,11.8 15.7,13.1 13.7,13.1 L4.2,13.1 M9,13.9 V7.2 M6.7,9.5 L9,7.2 L11.3,9.5" />
           </Button>
           <Border Background="#01000000" CornerRadius="24" Cursor="Hand"
                   PointerPressed="FloatingUploadButton_PointerPressed"

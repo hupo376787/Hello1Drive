@@ -437,25 +437,40 @@ internal sealed class IosNativeFloatingUploadButtonView : UIView
         using (var circle = UIBezierPath.FromOval(circleRect))
             circle.Fill();
 
-        var scale = diameter / 14d;
-        var offsetX = (width - 14d * scale) / 2d;
-        var offsetY = (height - 14d * scale) / 2d;
+        var iconSize = diameter * 0.46d;
+        var scale = iconSize / 18d;
+        var offsetX = (width - iconSize) / 2d;
+        var offsetY = (height - iconSize) / 2d - diameter * 0.012d;
         double X(double value) => offsetX + value * scale;
         double Y(double value) => offsetY + value * scale;
 
         using var path = new UIBezierPath
         {
-            LineWidth = (nfloat)Math.Max(1d, 1.5d * scale / 3.4d),
+            LineWidth = (nfloat)1.55d,
             LineCapStyle = CGLineCap.Round,
             LineJoinStyle = CGLineJoin.Round
         };
-        path.MoveTo(new CGPoint((nfloat)X(7), (nfloat)Y(12)));
-        path.AddLineTo(new CGPoint((nfloat)X(7), (nfloat)Y(2)));
-        path.MoveTo(new CGPoint((nfloat)X(3.5), (nfloat)Y(5.5)));
-        path.AddLineTo(new CGPoint((nfloat)X(7), (nfloat)Y(2)));
-        path.AddLineTo(new CGPoint((nfloat)X(10.5), (nfloat)Y(5.5)));
-        path.MoveTo(new CGPoint((nfloat)X(2), (nfloat)Y(12)));
-        path.AddLineTo(new CGPoint((nfloat)X(12), (nfloat)Y(12)));
+
+        // Use short cubic cloud segments so the iOS native FAB matches the Avalonia/Android glyph.
+        path.MoveTo(new CGPoint((nfloat)X(4.2), (nfloat)Y(13.1)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(0.9), (nfloat)Y(10.0)),
+            new CGPoint((nfloat)X(2.2), (nfloat)Y(13.1)), new CGPoint((nfloat)X(0.9), (nfloat)Y(11.8)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(3.5), (nfloat)Y(6.6)),
+            new CGPoint((nfloat)X(0.9), (nfloat)Y(8.4)), new CGPoint((nfloat)X(2.0), (nfloat)Y(7.0)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(8.5), (nfloat)Y(2.5)),
+            new CGPoint((nfloat)X(4.0), (nfloat)Y(4.2)), new CGPoint((nfloat)X(6.0), (nfloat)Y(2.5)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(13.5), (nfloat)Y(6.0)),
+            new CGPoint((nfloat)X(10.8), (nfloat)Y(2.5)), new CGPoint((nfloat)X(12.8), (nfloat)Y(3.9)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(17.1), (nfloat)Y(9.8)),
+            new CGPoint((nfloat)X(15.6), (nfloat)Y(6.2)), new CGPoint((nfloat)X(17.1), (nfloat)Y(7.8)));
+        path.AddCurveToPoint(new CGPoint((nfloat)X(13.7), (nfloat)Y(13.1)),
+            new CGPoint((nfloat)X(17.1), (nfloat)Y(11.8)), new CGPoint((nfloat)X(15.7), (nfloat)Y(13.1)));
+        path.AddLineTo(new CGPoint((nfloat)X(4.2), (nfloat)Y(13.1)));
+        path.MoveTo(new CGPoint((nfloat)X(9.0), (nfloat)Y(13.9)));
+        path.AddLineTo(new CGPoint((nfloat)X(9.0), (nfloat)Y(7.2)));
+        path.MoveTo(new CGPoint((nfloat)X(6.7), (nfloat)Y(9.5)));
+        path.AddLineTo(new CGPoint((nfloat)X(9.0), (nfloat)Y(7.2)));
+        path.AddLineTo(new CGPoint((nfloat)X(11.3), (nfloat)Y(9.5)));
         UIColor.FromRGB(255, 247, 248).SetStroke();
         path.Stroke();
     }
