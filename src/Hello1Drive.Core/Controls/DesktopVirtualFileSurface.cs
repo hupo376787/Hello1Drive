@@ -79,6 +79,7 @@ public sealed class DesktopVirtualFileSurface : Control
     private int _renderFrom = -1;
     private int _renderTo = -1;
     private int _hoverIndex = -1;
+    private bool _deferredHoverVisualRefresh;
 
     private readonly record struct TextCacheKey(
         string Text,
@@ -109,6 +110,7 @@ public sealed class DesktopVirtualFileSurface : Control
             if (_hoverIndex < 0)
                 return;
             _hoverIndex = -1;
+            _deferredHoverVisualRefresh = false;
             InvalidateVisual();
         };
         ActualThemeVariantChanged += (_, _) =>
@@ -147,7 +149,20 @@ public sealed class DesktopVirtualFileSurface : Control
     {
         if (_hoverIndex < 0)
             return;
+
+        // Do not redraw the three-viewport retained scene on the first wheel/scrollbar frame.
+        // The old hover highlight can remain in the already-recorded scene for the short active
+        // scroll interval; it is cleared once input becomes idle or by an unrelated scene rebuild.
         _hoverIndex = -1;
+        _deferredHoverVisualRefresh = true;
+    }
+
+    public void FlushDeferredHoverVisual()
+    {
+        if (!_deferredHoverVisualRefresh)
+            return;
+
+        _deferredHoverVisualRefresh = false;
         InvalidateVisual();
     }
 
@@ -248,6 +263,8 @@ public sealed class DesktopVirtualFileSurface : Control
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        // Any real scene rebuild has already removed a hover that was deferred at scroll start.
+        _deferredHoverVisualRefresh = false;
         var vm = _vm;
         if (vm is null || vm.VirtualItems.Count == 0 || Bounds.Width <= 1 || Bounds.Height <= 0)
         {
@@ -396,6 +413,7 @@ public sealed class DesktopVirtualFileSurface : Control
         if (index == _hoverIndex)
             return;
         _hoverIndex = index;
+        _deferredHoverVisualRefresh = false;
         InvalidateVisual();
     }
 

@@ -151,8 +151,12 @@ public partial class MainWindow : Window
     {
         var normalized = Math.Clamp(double.IsFinite(percent) ? percent : 50d, 0d, 100d) / 100d;
         var blurRadius = 28d * normalized;
+
+        // Gaussian blur only changes image content. Blurring the full-window solid-color layer has
+        // no useful visual result but can add another off-screen effect pass whenever the window is
+        // composited during scrolling, so keep the expensive effect on the image layer only.
         WindowBackgroundImageLayer.Effect = blurRadius <= 0.01 ? null : new BlurEffect { Radius = blurRadius };
-        WindowBackgroundColorLayer.Effect = blurRadius <= 0.01 ? null : new BlurEffect { Radius = blurRadius };
+        WindowBackgroundColorLayer.Effect = null;
 
         // A solid color cannot visually blur by itself, so the translucent frost layer also
         // follows the slider. This makes the control meaningful for both image and color backgrounds.

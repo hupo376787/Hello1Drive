@@ -4003,18 +4003,7 @@ public partial class MainViewModel : ViewModelBase
             if (total is null)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
-                    return;
-
-                SetCurrentFolderTotalItemCount(total);
-                if (string.IsNullOrWhiteSpace(SearchText))
-                    ReconcileMobileSlotCount(Math.Max(total.Value, _allItems.Count));
-                if (_folderCache.TryGetValue(cacheKey, out var entry))
-                    entry.TotalItemCount = total;
-                ScheduleStartupSnapshotSave();
-            });
+            await ApplyFolderTotalCountWhenIdleAsync(total.Value, cacheKey, navigationVersion).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -4037,22 +4026,46 @@ public partial class MainViewModel : ViewModelBase
             if (total is null)
                 return;
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
-                    return;
-
-                SetCurrentFolderTotalItemCount(total);
-                if (string.IsNullOrWhiteSpace(SearchText))
-                    ReconcileMobileSlotCount(Math.Max(total.Value, _allItems.Count));
-                if (_folderCache.TryGetValue(cacheKey, out var entry))
-                    entry.TotalItemCount = total;
-                ScheduleStartupSnapshotSave();
-            });
+            await ApplyFolderTotalCountWhenIdleAsync(total.Value, cacheKey, navigationVersion).ConfigureAwait(false);
         }
         catch
         {
             // Item count is supplementary metadata and must never hold up folder navigation.
+        }
+    }
+
+    private async Task ApplyFolderTotalCountWhenIdleAsync(
+        int total,
+        string cacheKey,
+        long navigationVersion)
+    {
+        while (true)
+        {
+            // Establishing a previously unknown count can allocate thousands of fixed slots. It is
+            // supplementary metadata, so never let that collection growth land inside a desktop
+            // wheel/scrollbar gesture. Mobile native lists keep their existing immediate behavior.
+            while (!IsMobilePlatform && _desktopListScrolling)
+                await Task.Delay(24).ConfigureAwait(false);
+
+            var result = await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                    return -1;
+                if (!IsMobilePlatform && _desktopListScrolling)
+                    return 0;
+
+                SetCurrentFolderTotalItemCount(total);
+                if (string.IsNullOrWhiteSpace(SearchText))
+                    ReconcileMobileSlotCount(Math.Max(total, _allItems.Count));
+                if (_folderCache.TryGetValue(cacheKey, out var entry))
+                    entry.TotalItemCount = total;
+                ScheduleStartupSnapshotSave();
+                return 1;
+            }, DispatcherPriority.Background);
+
+            if (result != 0)
+                return;
+            await Task.Delay(24).ConfigureAwait(false);
         }
     }
 
