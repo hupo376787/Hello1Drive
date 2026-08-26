@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - mobile-thumbnail-upload-polish
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
