@@ -1,0 +1,65 @@
+name: Apply mobile thumbnail and upload polish
+
+on:
+  push:
+    branches:
+      - mobile-thumbnail-upload-polish
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mobile-thumbnail-upload-polish
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply source patch
+        run: python3 scripts/patch-mobile-thumbnail-upload-polish.py
+
+      - name: Validate patch invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'PublishPrefetchedThumbnail(position, item.Id)' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q 'NotifyItemChanged(position)' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q 'UpdateScrollDirection(dy)' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          grep -q 'Cloud + upward arrow' src/Hello1Drive.Core/Views/MainView.axaml
+          grep -q 'BuildUploadIconPath' src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs
+          git diff --check
+
+      - name: Build desktop Release
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Publish Android Release
+        run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
+
+      - name: Remove one-shot helper
+        run: |
+          rm -f scripts/patch-mobile-thumbnail-upload-polish.py
+          rm -f .github/workflows/apply-mobile-thumbnail-upload-polish.yml
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Polish upload FAB and native thumbnail recovery'
+          git push origin HEAD:mobile-thumbnail-upload-polish
