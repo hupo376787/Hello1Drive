@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - master
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
 
 jobs:
   apply-build-push:
+    if: github.event_name == 'push' || github.event.comment.body == '/apply-mobile-thumbnail-upload-polish'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
