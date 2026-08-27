@@ -5,6 +5,7 @@ using Avalonia.Android;
 using Avalonia.Platform;
 using AndroidX.RecyclerView.Widget;
 using Hello1Drive.Controls;
+using Hello1Drive.Services;
 
 namespace Hello1Drive.Android.Services;
 
