@@ -15,7 +15,7 @@ public partial class MainView
         // replace its old generic arrow/tray with the same cloud-upload language used by Android.
         // Doing this here avoids adding another visual layer and leaves the existing drag surface,
         // hit testing, accent color and 48-DIP geometry untouched.
-        FloatingUploadButton.Content = new Path
+        FloatingUploadButton.Content = new Avalonia.Controls.Shapes.Path
         {
             Width = 20,
             Height = 20,
