@@ -3556,7 +3556,8 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var refreshesPresentedFolder = forceRemote &&
-            string.Equals(_presentedFolderCacheKey, cacheKey, StringComparison.Ordinal);
+            string.Equals(_presentedFolderCacheKey, cacheKey, StringComparison.Ordinal) &&
+            (_allItems.Count > 0 || MobileItems.Count > 0 || _folderCache.ContainsKey(cacheKey));
         if (refreshesPresentedFolder)
         {
             if (sizeSortFallback)
@@ -4508,7 +4509,13 @@ public partial class MainViewModel : ViewModelBase
     private void InvalidateFolderCache(string? folderId)
     {
         var key = FolderCacheKey(folderId);
-        if (_folderCache.Remove(key, out var entry))
+        if (!_folderCache.Remove(key, out var entry))
+            return;
+
+        // Invalidating the folder currently on screen is a network/cache coherency operation, not
+        // a request to tear down its visual state. The rendered _allItems still own these models and
+        // their decoded thumbnails until the incremental cloud result arrives.
+        if (!string.Equals(key, _presentedFolderCacheKey, StringComparison.Ordinal))
             DisposeItemThumbnails(entry.Items);
     }
 
@@ -4517,6 +4524,7 @@ public partial class MainViewModel : ViewModelBase
         foreach (var entry in _folderCache.Values)
             DisposeItemThumbnails(entry.Items);
         _folderCache.Clear();
+        _presentedFolderCacheKey = "__ROOT__";
         _allItems.Clear();
         Items.Clear();
         ClearMobileSlots();
