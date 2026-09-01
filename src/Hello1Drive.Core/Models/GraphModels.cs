@@ -395,6 +395,83 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         return index == 0 ? $"{value:0} {units[index]}" : $"{value:0.##} {units[index]}";
     }
 
+    /// <summary>
+    /// Applies fresh Graph metadata while preserving this model instance and its transient UI state.
+    /// Folder revalidation can therefore update one visible row without replacing every cached model
+    /// or throwing away already-decoded thumbnails. Callers only invoke this when meaningful metadata
+    /// changed, so the forwarded notifications stay proportional to the actual cloud diff.
+    /// </summary>
+    public void ApplyMetadataFrom(DriveItemModel source)
+    {
+        if (source is null || ReferenceEquals(this, source))
+            return;
+
+        Id = source.Id;
+        Name = source.Name;
+        Size = source.Size;
+        WebUrl = source.WebUrl;
+        CreatedDateTime = source.CreatedDateTime;
+        LastModifiedDateTime = source.LastModifiedDateTime;
+        ETag = source.ETag;
+        CTag = source.CTag;
+        Folder = source.Folder;
+        File = source.File;
+        RemoteItem = source.RemoteItem;
+        SpecialFolder = source.SpecialFolder;
+        ParentReference = source.ParentReference;
+        Deleted = source.Deleted;
+        Root = source.Root;
+        Thumbnails = source.Thumbnails;
+
+        // The Graph fields above are intentionally plain DTO properties. Publish the small set of
+        // UI-facing/computed notifications only for models that the diff engine found changed.
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(Size));
+        OnPropertyChanged(nameof(WebUrl));
+        OnPropertyChanged(nameof(CreatedDateTime));
+        OnPropertyChanged(nameof(LastModifiedDateTime));
+        OnPropertyChanged(nameof(ETag));
+        OnPropertyChanged(nameof(CTag));
+        OnPropertyChanged(nameof(Folder));
+        OnPropertyChanged(nameof(File));
+        OnPropertyChanged(nameof(RemoteItem));
+        OnPropertyChanged(nameof(SpecialFolder));
+        OnPropertyChanged(nameof(ParentReference));
+        OnPropertyChanged(nameof(Deleted));
+        OnPropertyChanged(nameof(Root));
+        OnPropertyChanged(nameof(Thumbnails));
+        OnPropertyChanged(nameof(IsFolder));
+        OnPropertyChanged(nameof(IsFile));
+        OnPropertyChanged(nameof(IsDeleted));
+        OnPropertyChanged(nameof(IsDriveRoot));
+        OnPropertyChanged(nameof(ChildCount));
+        OnPropertyChanged(nameof(MimeType));
+        OnPropertyChanged(nameof(Extension));
+        OnPropertyChanged(nameof(IsImage));
+        OnPropertyChanged(nameof(IsVideo));
+        OnPropertyChanged(nameof(IsAudio));
+        OnPropertyChanged(nameof(IsPdf));
+        OnPropertyChanged(nameof(IsArchive));
+        OnPropertyChanged(nameof(IsWord));
+        OnPropertyChanged(nameof(IsExcel));
+        OnPropertyChanged(nameof(IsPowerPoint));
+        OnPropertyChanged(nameof(IsUrlShortcut));
+        OnPropertyChanged(nameof(IsMedia));
+        OnPropertyChanged(nameof(IsText));
+        OnPropertyChanged(nameof(SupportsThumbnail));
+        OnPropertyChanged(nameof(HasWebUrl));
+        OnPropertyChanged(nameof(IsGenericFile));
+        OnPropertyChanged(nameof(VersionToken));
+        OnPropertyChanged(nameof(ThumbnailUrl));
+        OnPropertyChanged(nameof(TypeDisplay));
+        OnPropertyChanged(nameof(SizeDisplay));
+        OnPropertyChanged(nameof(ModifiedDisplay));
+        OnPropertyChanged(nameof(IconText));
+        OnPropertyChanged(nameof(FileBadgeText));
+        OnPropertyChanged(nameof(ShowMobileFileBadge));
+        OnPropertyChanged(nameof(ShowVideoThumbnailBadge));
+    }
+
     public void Dispose()
     {
         ThumbnailImage?.Dispose();

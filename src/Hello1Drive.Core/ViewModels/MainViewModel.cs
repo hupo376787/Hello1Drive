@@ -104,6 +104,9 @@ public partial class MainViewModel : ViewModelBase
     private int? _currentFolderTotalItemCount;
     private bool _startupSnapshotRestored;
     private string _startupSnapshotAccountId = string.Empty;
+    // Tracks which folder the currently rendered stable slots belong to. A force-remote refresh of
+    // that same folder must keep the cached list on screen until the complete cloud diff is ready.
+    private string _presentedFolderCacheKey = "__ROOT__";
 
     public AvaloniaList<DriveItemModel> Items { get; } = [];
     // Shared fixed-slot collection used by every file surface. The historic MobileItems name is
@@ -117,6 +120,8 @@ public partial class MainViewModel : ViewModelBase
 
     public event EventHandler<FolderNavigationEventArgs>? FolderNavigating;
     public event EventHandler<FolderNavigationEventArgs>? FolderLoaded;
+    public event EventHandler? FolderItemsIncrementalChanging;
+    public event EventHandler? FolderItemsIncrementalChanged;
 
     public IReadOnlyList<string> ThemeOptions { get; } = ["跟随系统", "浅色", "深色"];
     public IReadOnlyList<string> BackgroundModeOptions { get; } = ["默认", "纯色", "本地图片", "图片 URL", "本地文件夹", "OneDrive 文件夹"];
@@ -2850,6 +2855,7 @@ public partial class MainViewModel : ViewModelBase
             : $"{_allItems.Count} 个项目 · 正在同步";
 
         var cacheKey = FolderCacheKey(CurrentFolderId);
+        _presentedFolderCacheKey = cacheKey;
         _folderCache[cacheKey] = new FolderCacheEntry(
             restoredItems.ToList(),
             snapshot.NextLink,
@@ -3119,11 +3125,10 @@ public partial class MainViewModel : ViewModelBase
                 FolderCacheKey(CurrentFolderId) == restoredCacheKey &&
                 restoredLocalSnapshot.Items.Count >= _allItems.Count)
             {
-                StoreFolderCache(restoredCacheKey, restoredLocalSnapshot.Items, null, restoredLocalSnapshot.TotalCount);
+                SetCurrentFolderTotalItemCount(restoredLocalSnapshot.TotalCount);
+                ApplyFolderItemsIncrementally(restoredLocalSnapshot.Items, restoredLocalSnapshot.TotalCount, restoredCacheKey);
                 if (_folderCache.TryGetValue(restoredCacheKey, out var restoredEntry))
                     restoredEntry.LastValidatedUtc = restoredLocalSnapshot.LastSyncedUtc ?? DateTimeOffset.MinValue;
-                SetCurrentFolderTotalItemCount(restoredLocalSnapshot.TotalCount);
-                ApplyFolderItems(restoredLocalSnapshot.Items, restoredLocalSnapshot.TotalCount);
             }
             else if (restoredLocalSnapshot is not null)
             {
@@ -3550,6 +3555,27 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        var refreshesPresentedFolder = forceRemote &&
+            string.Equals(_presentedFolderCacheKey, cacheKey, StringComparison.Ordinal);
+        if (refreshesPresentedFolder)
+        {
+            if (sizeSortFallback)
+                StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
+            else
+                StatusText = $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 个项目 · 正在同步";
+
+            FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
+            StartFolderMetadataSync(
+                folderId,
+                cacheKey,
+                navigationVersion,
+                orderBy,
+                seedItems: page.Items,
+                nextLink: page.NextLink,
+                streamIntoPlaceholders: false);
+            return;
+        }
+
         _nextChildrenLink = page.NextLink;
         HasMoreItems = page.HasMore;
         var totalCount = _currentFolderTotalItemCount;
@@ -3802,33 +3828,44 @@ public partial class MainViewModel : ViewModelBase
                 finalCount,
                 token).ConfigureAwait(false);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            var reconciliationDone = false;
+            while (!reconciliationDone)
             {
-                if (navigationVersion != _folderNavigationVersion ||
-                    FolderCacheKey(CurrentFolderId) != cacheKey)
-                    return;
+                token.ThrowIfCancellationRequested();
+                await WaitForMetadataPresentationWindowAsync(DateTime.UtcNow, token).ConfigureAwait(false);
 
-                _nextChildrenLink = null;
-                HasMoreItems = false;
-                SetCurrentFolderTotalItemCount(finalCount);
-
-                if (streamIntoPlaceholders)
+                var reconcileResult = await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    ReconcileMobileSlotCount(finalCount);
-                    if (_folderCache.TryGetValue(cacheKey, out var entry))
+                    if (navigationVersion != _folderNavigationVersion ||
+                        FolderCacheKey(CurrentFolderId) != cacheKey)
+                        return -1;
+
+                    // The disk/index save above can take long enough for a new wheel/fling gesture
+                    // to start. Re-check on the UI thread and let input finish before touching slots.
+                    if ((IsMobilePlatform && _mobileListScrolling) ||
+                        (!IsMobilePlatform && _desktopListScrolling))
+                        return 0;
+
+                    _nextChildrenLink = null;
+                    HasMoreItems = false;
+                    SetCurrentFolderTotalItemCount(finalCount);
+
+                    if (streamIntoPlaceholders)
                     {
-                        entry.NextLink = null;
-                        entry.TotalItemCount = finalCount;
-                        entry.LastAccessUtc = DateTimeOffset.UtcNow;
-                        entry.LastValidatedUtc = DateTimeOffset.UtcNow;
+                        ReconcileMobileSlotCount(finalCount);
+                        if (_folderCache.TryGetValue(cacheKey, out var entry))
+                        {
+                            entry.NextLink = null;
+                            entry.TotalItemCount = finalCount;
+                            entry.LastAccessUtc = DateTimeOffset.UtcNow;
+                            entry.LastValidatedUtc = DateTimeOffset.UtcNow;
+                        }
+                        StatusText = $"{finalCount} 个项目";
+                        ScheduleStartupSnapshotSave();
+                        return 1;
                     }
-                    StatusText = $"{finalCount} 个项目";
-                    ScheduleStartupSnapshotSave();
-                }
-                else
-                {
-                    // If the server says nothing visible changed, retain the exact same model/slot
-                    // instances. That avoids a needless collection reset after every cache validation.
+
+                    // No cloud-visible change: keep every model, slot, thumbnail and scroll anchor.
                     if (FolderItemsEquivalent(_allItems, collected))
                     {
                         if (_folderCache.TryGetValue(cacheKey, out var unchangedEntry))
@@ -3841,24 +3878,29 @@ public partial class MainViewModel : ViewModelBase
                         DisposeItemThumbnails(collected);
                         StatusText = $"{finalCount} 个项目";
                         ScheduleStartupSnapshotSave();
-                        return;
+                        return 1;
                     }
 
-                    // Do not reshuffle items under a user's active long-press selection. The new
-                    // metadata is already durable in LocalDriveIndex and will be shown on the next
-                    // navigation/refresh; preserving selection is more important than a live reorder.
+                    // Do not move items under an active long-press/multi-selection. The durable local
+                    // index already contains the new metadata and the next navigation can show it.
                     if (SelectionCount > 0)
                     {
                         DisposeItemThumbnails(collected);
                         StatusText = $"{finalCount} 个项目";
-                        return;
+                        return 1;
                     }
 
-                    StoreFolderCache(cacheKey, collected, null, finalCount);
-                    ApplyFolderItems(collected, finalCount);
+                    ApplyFolderItemsIncrementally(collected, finalCount, cacheKey);
                     StatusText = $"{finalCount} 个项目";
-                }
-            }, DispatcherPriority.Background);
+                    return 1;
+                }, DispatcherPriority.Background);
+
+                if (reconcileResult < 0)
+                    return;
+                reconciliationDone = reconcileResult > 0;
+                if (!reconciliationDone)
+                    await Task.Delay(40, token).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -3974,6 +4016,191 @@ public partial class MainViewModel : ViewModelBase
         return true;
     }
 
+    private void ApplyFolderItemsIncrementally(
+        IReadOnlyList<DriveItemModel> incomingItems,
+        int finalCount,
+        string cacheKey)
+    {
+        // Normalize duplicate Graph rows before comparing order. IDs are the stable OneDrive identity.
+        var incoming = new List<DriveItemModel>(incomingItems.Count);
+        var incomingIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in incomingItems)
+        {
+            if (string.IsNullOrWhiteSpace(item.Id) || incomingIds.Add(item.Id))
+            {
+                incoming.Add(item);
+            }
+            else
+            {
+                item.Dispose();
+            }
+        }
+
+        var orderChanged = _allItems.Count != incoming.Count;
+        if (!orderChanged)
+        {
+            for (var i = 0; i < incoming.Count; i++)
+            {
+                if (!string.Equals(_allItems[i].Id, incoming[i].Id, StringComparison.Ordinal))
+                {
+                    orderChanged = true;
+                    break;
+                }
+            }
+        }
+
+        // Capture the top visible item before any position changes. MainView restores the same ID
+        // after reconciliation, so inserts/deletes above the viewport do not move what the user sees.
+        if (orderChanged)
+            FolderItemsIncrementalChanging?.Invoke(this, EventArgs.Empty);
+
+        var existingById = new Dictionary<string, DriveItemModel>(StringComparer.Ordinal);
+        foreach (var current in _allItems)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Id))
+                existingById.TryAdd(current.Id, current);
+        }
+
+        var merged = new List<DriveItemModel>(incoming.Count);
+        foreach (var fresh in incoming)
+        {
+            if (!string.IsNullOrWhiteSpace(fresh.Id) && existingById.Remove(fresh.Id, out var existing))
+            {
+                if (!FolderItemEquivalent(existing, fresh))
+                {
+                    var oldVersion = existing.VersionToken;
+                    existing.ApplyMetadataFrom(fresh);
+                    if (!string.Equals(oldVersion, existing.VersionToken, StringComparison.Ordinal))
+                    {
+                        // Keep the currently displayed bitmap during the diff to avoid a placeholder
+                        // flash, but invalidate persistent bodies so a future load uses the new version.
+                        _thumbnailCache.Invalidate(existing.Id);
+                        _fileCache.Invalidate(existing.Id);
+                    }
+                }
+
+                // The existing object owns all transient state (thumbnail/gallery/selection). The
+                // fresh Graph DTO is no longer needed after its metadata has been copied.
+                fresh.Dispose();
+                existing.IsMobileSelectionMode = MobileSelectionModeActive;
+                merged.Add(existing);
+            }
+            else
+            {
+                fresh.IsMobileSelectionMode = MobileSelectionModeActive;
+                merged.Add(fresh);
+            }
+        }
+
+        var removedItems = existingById.Values.ToArray();
+
+        _allItems.Clear();
+        _allItems.AddRange(merged);
+        _currentItemIds.Clear();
+        foreach (var item in merged)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Id))
+                _currentItemIds.Add(item.Id);
+        }
+
+        var keyword = SearchText.Trim();
+        var visible = string.IsNullOrWhiteSpace(keyword)
+            ? merged.ToArray()
+            : merged.Where(item => item.Name.Contains(keyword, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+        var slotCount = string.IsNullOrWhiteSpace(keyword)
+            ? Math.Max(finalCount, visible.Length)
+            : visible.Length;
+
+        // Preserve the stable VirtualDriveItemSlot collection. Only positions whose item identity
+        // actually changed are rebound; a rename/size/date update keeps the exact same slot/model.
+        ReconcileMobileSlotCount(slotCount);
+        for (var i = 0; i < MobileItems.Count; i++)
+        {
+            var nextItem = i < visible.Length ? visible[i] : null;
+            if (!ReferenceEquals(MobileItems[i].Item, nextItem))
+                MobileItems[i].SetItem(nextItem, compactNotification: !IsMobilePlatform);
+        }
+
+        // Desktop UI renders VirtualItems directly; Items is only a compatibility shadow.
+        if (!IsMobilePlatform)
+        {
+            Items.Clear();
+            Items.AddRange(visible);
+        }
+
+        if (_folderCache.TryGetValue(cacheKey, out var entry))
+        {
+            entry.Items.Clear();
+            entry.Items.AddRange(merged);
+            entry.NextLink = null;
+            entry.TotalItemCount = finalCount;
+            entry.LastAccessUtc = DateTimeOffset.UtcNow;
+            entry.LastValidatedUtc = DateTimeOffset.UtcNow;
+        }
+        else
+        {
+            _folderCache[cacheKey] = new FolderCacheEntry(
+                merged.ToList(),
+                null,
+                finalCount,
+                DateTimeOffset.UtcNow,
+                GetGraphOrderBy());
+            TrimFolderCache(cacheKey);
+        }
+
+        _presentedFolderCacheKey = cacheKey;
+        _nextChildrenLink = null;
+        HasMoreItems = false;
+        SetCurrentFolderTotalItemCount(finalCount);
+        CurrentLocation = string.Join(" / ", Breadcrumbs.Select(x => x.Name));
+
+        // Native adapters own decoded bitmaps and listen for this lightweight page/list signal.
+        // Desktop reuses the existing thumbnail objects and only queues genuinely new visible files.
+        if (UsesNativeMobileFileList)
+        {
+            OnPropertyChanged(nameof(MobileItems));
+        }
+        else if (!IsMobilePlatform)
+        {
+            var wanted = new HashSet<string>(StringComparer.Ordinal);
+            var candidates = new List<DriveItemModel>();
+            foreach (var index in _desktopThumbnailVisibleSlotIndices)
+            {
+                if (index < 0 || index >= MobileItems.Count || MobileItems[index].Item is not { } item ||
+                    string.IsNullOrWhiteSpace(item.Id))
+                    continue;
+
+                wanted.Add(item.Id);
+                if (item.SupportsThumbnail && !item.HasThumbnailImage)
+                    candidates.Add(item);
+            }
+            _desktopThumbnailWantedIds = wanted;
+            if (candidates.Count > 0)
+                StartThumbnailLoading(candidates, requireVisibleOnDesktop: true);
+        }
+
+        // Removed rows are no longer referenced by slots/cache. Preserve a currently open preview;
+        // otherwise release transient bitmaps after the new scene is already wired up.
+        foreach (var removed in removedItems)
+        {
+            if (_mobileThumbnailLruNodes.Remove(removed.Id, out var node))
+                _mobileThumbnailLru.Remove(node);
+            if (!ReferenceEquals(PreviewItem, removed))
+                removed.Dispose();
+        }
+
+        RememberCurrentFolderViewMode();
+        RememberCurrentFolderSortRule();
+        if (RememberLastFolder)
+            CaptureCurrentFolderMemory();
+        _ = _settingsService.SaveAsync();
+        if (IsAuthenticated && !string.IsNullOrWhiteSpace(CurrentAccountId))
+            ScheduleStartupSnapshotSave();
+
+        if (orderChanged)
+            FolderItemsIncrementalChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private async Task RefreshFolderInBackgroundAsync(string? folderId, string cacheKey, long navigationVersion)
     {
         try
@@ -4004,8 +4231,10 @@ public partial class MainViewModel : ViewModelBase
 
                 _nextChildrenLink = remotePage.NextLink;
                 HasMoreItems = remotePage.HasMore;
-                StoreFolderCache(cacheKey, remotePage.Items, remotePage.NextLink, _currentFolderTotalItemCount);
-                ApplyFolderItems(remotePage.Items);
+                if (!remotePage.HasMore)
+                    ApplyFolderItemsIncrementally(remotePage.Items, remotePage.Items.Count, cacheKey);
+                else
+                    StartFolderMetadataSync(folderId, cacheKey, navigationVersion, GetGraphOrderBy(), remotePage.Items, remotePage.NextLink, streamIntoPlaceholders: false);
             });
         }
         catch
@@ -4113,6 +4342,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void ApplyFolderItems(IReadOnlyList<DriveItemModel> items, int? totalItemCount = null)
     {
+        _presentedFolderCacheKey = FolderCacheKey(CurrentFolderId);
         CancelThumbnailLoading();
         ResetMobileThumbnailWindow();
         ResetDesktopThumbnailViewport();
@@ -4313,6 +4543,13 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    private static bool FolderItemEquivalent(DriveItemModel a, DriveItemModel b) =>
+        string.Equals(a.Id, b.Id, StringComparison.Ordinal) &&
+        string.Equals(a.Name, b.Name, StringComparison.Ordinal) &&
+        string.Equals(a.VersionToken, b.VersionToken, StringComparison.Ordinal) &&
+        a.Size == b.Size &&
+        a.ChildCount == b.ChildCount;
+
     private static bool FolderItemsEquivalent(IReadOnlyList<DriveItemModel> left, IReadOnlyList<DriveItemModel> right)
     {
         if (left.Count != right.Count)
@@ -4320,16 +4557,8 @@ public partial class MainViewModel : ViewModelBase
 
         for (var i = 0; i < left.Count; i++)
         {
-            var a = left[i];
-            var b = right[i];
-            if (!string.Equals(a.Id, b.Id, StringComparison.Ordinal) ||
-                !string.Equals(a.Name, b.Name, StringComparison.Ordinal) ||
-                !string.Equals(a.VersionToken, b.VersionToken, StringComparison.Ordinal) ||
-                a.Size != b.Size ||
-                a.ChildCount != b.ChildCount)
-            {
+            if (!FolderItemEquivalent(left[i], right[i]))
                 return false;
-            }
         }
 
         return true;
