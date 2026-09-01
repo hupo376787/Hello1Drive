@@ -11,6 +11,7 @@ public static class AppServices
     private static IStartupRegistrationService? _startupRegistrationService;
     private static ITransferBackgroundService? _transferBackgroundService;
     private static INativeMobileFileListFactory? _nativeMobileFileListFactory;
+    private static INativeDesktopFileListFactory? _nativeDesktopFileListFactory;
     private static IDesktopInputSettingsService? _desktopInputSettingsService;
     private static readonly AppSettingsService _settings = new();
     private static readonly FileCacheService _fileCache = new();
@@ -38,6 +39,7 @@ public static class AppServices
     public static IStartupRegistrationService? StartupRegistrationService => _startupRegistrationService;
     public static ITransferBackgroundService? TransferBackgroundService => _transferBackgroundService;
     public static INativeMobileFileListFactory? NativeMobileFileListFactory => _nativeMobileFileListFactory;
+    public static INativeDesktopFileListFactory? NativeDesktopFileListFactory => _nativeDesktopFileListFactory;
     public static IDesktopInputSettingsService? DesktopInputSettingsService => _desktopInputSettingsService;
 
     public static void Configure(
@@ -49,6 +51,7 @@ public static class AppServices
         IStartupRegistrationService? startupRegistrationService = null,
         ITransferBackgroundService? transferBackgroundService = null,
         INativeMobileFileListFactory? nativeMobileFileListFactory = null,
+        INativeDesktopFileListFactory? nativeDesktopFileListFactory = null,
         IDesktopInputSettingsService? desktopInputSettingsService = null,
         IOneDriveService? oneDriveService = null)
     {
@@ -61,6 +64,7 @@ public static class AppServices
         _startupRegistrationService = startupRegistrationService;
         _transferBackgroundService = transferBackgroundService;
         _nativeMobileFileListFactory = nativeMobileFileListFactory;
+        _nativeDesktopFileListFactory = nativeDesktopFileListFactory;
         _desktopInputSettingsService = desktopInputSettingsService;
     }
 }
