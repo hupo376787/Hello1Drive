@@ -812,20 +812,20 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     {
         try
         {
-            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (_scrolling)
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
 
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (TryGetBitmap(item, out var existing) && existing is not null)
                     return;
 
@@ -835,14 +835,14 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                     FileViewMode.LargeIcons => 256,
                     _ => 128
                 };
-                var bitmap = await Task.Run(() => DecodeScaled(path, targetPx), generationToken).ConfigureAwait(false);
+                var bitmap = await Task.Run(() => DecodeScaled(path, targetPx)).ConfigureAwait(false);
                 if (bitmap is null)
                     return;
 
                 if (generationToken.IsCancellationRequested)
                 {
                     bitmap.Dispose();
-                    generationToken.ThrowIfCancellationRequested();
+                    if (generationToken.IsCancellationRequested) return;
                 }
 
                 AddBitmapToCache(item, bitmap);
@@ -893,20 +893,20 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     {
         try
         {
-            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (_scrolling)
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
 
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 var targetPx = Mode switch
                 {
                     FileViewMode.ExtraLargeIcons => 320,
@@ -914,7 +914,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                     _ => 128
                 };
 
-                var bitmap = await Task.Run(() => DecodeScaled(path, targetPx), generationToken).ConfigureAwait(false);
+                var bitmap = await Task.Run(() => DecodeScaled(path, targetPx)).ConfigureAwait(false);
                 if (bitmap is null)
                     return;
 

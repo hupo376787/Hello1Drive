@@ -840,31 +840,31 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     {
         try
         {
-            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (_scrolling)
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
 
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (TryGetImage(item, out var existing) && existing is not null)
                     return;
 
-                var image = await Task.Run(() => UIImage.FromFile(path), generationToken).ConfigureAwait(false);
+                var image = await Task.Run(() => UIImage.FromFile(path)).ConfigureAwait(false);
                 if (image is null)
                     return;
 
                 if (generationToken.IsCancellationRequested)
                 {
                     image.Dispose();
-                    generationToken.ThrowIfCancellationRequested();
+                    if (generationToken.IsCancellationRequested) return;
                 }
 
                 AddImageToCache(item, image);
@@ -915,21 +915,21 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     {
         try
         {
-            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                generationToken.ThrowIfCancellationRequested();
+                if (generationToken.IsCancellationRequested) return;
                 if (_scrolling)
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
 
-                generationToken.ThrowIfCancellationRequested();
-                var image = await Task.Run(() => UIImage.FromFile(path), generationToken).ConfigureAwait(false);
+                if (generationToken.IsCancellationRequested) return;
+                var image = await Task.Run(() => UIImage.FromFile(path)).ConfigureAwait(false);
                 if (image is null)
                     return;
 
