@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -96,7 +95,7 @@ public partial class MainView
 
     private static Button CreateDesktopPreviewEdgeButton(string toolTip, HorizontalAlignment alignment, string geometry)
     {
-        var path = new Path
+        var path = new Avalonia.Controls.Shapes.Path
         {
             Width = 18,
             Height = 18,
