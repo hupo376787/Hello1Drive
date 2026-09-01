@@ -22,10 +22,10 @@ jobs:
 
           selection = Path('src/Hello1Drive.Core/Views/MainView.SelectionActions.cs')
           text = selection.read_text(encoding='utf-8')
-          old = '''    private void InitializeSelectionActionEnhancements()\n    {\n        if (IsMobilePlatform)\n            EnsureMobileSelectionRenameButton();\n        else\n            EnsureDesktopSelectionContextActions();\n    }'''
-          new = '''    private void InitializeSelectionActionEnhancements()\n    {\n        if (IsMobilePlatform)\n        {\n            EnsureMobileSelectionRenameButton();\n        }\n        else\n        {\n            EnsureDesktopSelectionContextActions();\n            InitializeDesktopExperienceEnhancements();\n        }\n    }'''
+          old = '            EnsureDesktopDestinationDialogPresentation();\n'
+          new = '            EnsureDesktopDestinationDialogPresentation();\n            InitializeDesktopExperienceEnhancements();\n'
           if old not in text:
-              raise SystemExit('selection initialization block not found')
+              raise SystemExit('selection initialization anchor not found')
           text = text.replace(old, new, 1)
           old = '''        _mobileSelectionRenameButton = null;\n\n        if (_desktopDestinationOverlayHooksAttached)'''
           new = '''        _mobileSelectionRenameButton = null;\n\n        if (!IsMobilePlatform)\n            DisposeDesktopExperienceEnhancements();\n\n        if (_desktopDestinationOverlayHooksAttached)'''
