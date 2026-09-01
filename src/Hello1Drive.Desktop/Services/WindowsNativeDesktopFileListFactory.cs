@@ -48,7 +48,7 @@ internal sealed class WindowsNativeDesktopFileListController : IDisposable
 
     private const int GWL_STYLE = -16;
     private const int GWLP_WNDPROC = -4;
-    private const uint WM_SETREDRAW = 0x000B;
+    private const int WM_SETREDRAW = 0x000B;
     private const uint WM_LBUTTONUP = 0x0202;
     private const uint WM_LBUTTONDBLCLK = 0x0203;
     private const uint WM_RBUTTONUP = 0x0205;
