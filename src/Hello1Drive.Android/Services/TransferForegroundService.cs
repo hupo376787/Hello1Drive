@@ -4,6 +4,7 @@ namespace Hello1Drive.Android.Services;
 
 [global::Android.App.Service(
     Exported = false,
+    StopWithTask = false,
     ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync)]
 public sealed class TransferForegroundService : global::Android.App.Service
 {
@@ -68,6 +69,11 @@ public sealed class TransferForegroundService : global::Android.App.Service
             UploadCount: intent?.GetIntExtra(ExtraUploadCount, 0) ?? 0,
             DownloadCount: intent?.GetIntExtra(ExtraDownloadCount, 0) ?? 0,
             CacheCount: intent?.GetIntExtra(ExtraCacheCount, 0) ?? 0);
+
+        // Waiting -> Running can happen immediately after StartForegroundService returns, before
+        // Android has constructed this Service. Consume the newest state so the first foreground
+        // notification and wake-lock decision never get stuck on the stale "waiting" snapshot.
+        state = AndroidTransferBackgroundService.GetLatestState(state);
 
         if (!state.HasActiveTransfers)
         {
