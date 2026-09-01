@@ -83,7 +83,7 @@ public partial class MainView
     private void Vm_FolderLoadedStable(object? sender, FolderNavigationEventArgs e)
     {
         if (sender is MainViewModel vm &&
-            e.Reason is FolderNavigationReason.Refresh or FolderNavigationReason.Sort &&
+            (e.Reason is FolderNavigationReason.Refresh or FolderNavigationReason.Sort) &&
             vm.MobileItems.Any(static slot => slot.Item is not null) &&
             (vm.StatusText.Contains("正在同步", StringComparison.Ordinal) ||
              vm.StatusText.StartsWith("当前账户后端不支持大小排序", StringComparison.Ordinal)))
@@ -101,12 +101,13 @@ public partial class MainView
         if (_finishedTransferActionHooked || DataContext is not MainViewModel vm)
             return;
 
-        // The XAML button intentionally keeps the generated command as its locator. Once the
-        // visual tree is loaded, replace that one binding with the smarter dual-purpose action:
-        // retry failed rows first; only when no failure remains does it clean completed rows.
+        // Prefer the generated command as the locator. On a visual-tree reattach our previous
+        // local Command=null override can still be present, so also recognize the two footer labels.
         var button = this.GetVisualDescendants()
             .OfType<Button>()
-            .FirstOrDefault(candidate => ReferenceEquals(candidate.Command, vm.ClearFinishedTransfersCommand));
+            .FirstOrDefault(candidate =>
+                ReferenceEquals(candidate.Command, vm.ClearFinishedTransfersCommand) ||
+                candidate.Content is string text && text is "清理完成" or "重试失败");
         if (button is null)
             return;
 
