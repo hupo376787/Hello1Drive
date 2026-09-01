@@ -175,8 +175,8 @@ public partial class MainView
         };
 
         // Wider independent columns keep both markers visually centered without changing glyph size.
-        header.ColumnDefinitions.Add(new ColumnDefinition(16, GridUnitType.Pixel));
-        header.ColumnDefinitions.Add(new ColumnDefinition(30, GridUnitType.Pixel));
+        header.ColumnDefinitions.Add(new ColumnDefinition(10, GridUnitType.Pixel));
+        header.ColumnDefinitions.Add(new ColumnDefinition(50, GridUnitType.Pixel));
         header.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Auto));
 
         Grid.SetColumn(dot, 0);
