@@ -11,7 +11,7 @@ namespace Hello1Drive.Views;
 
 public partial class MainView
 {
-    private bool _desktopViewModeMenuLayoutNormalized;
+    private bool _desktopMenuLayoutNormalized;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -39,36 +39,36 @@ public partial class MainView
         };
 
         // MenuFlyout objects are created by XAML but are not part of the normal visual tree.
-        // Wait until the view is fully attached, then move the selected-state dot out of the
-        // MenuItem.Icon presenter. The presenter has a fixed icon slot and was scaling the whole
-        // "dot + icon" grid down, which made the original 15-DIP view icon visibly smaller.
+        // Wait until the view is fully attached, then normalize desktop view/sort rows to:
+        //   selected-state dot | full-size icon | text
+        // The dot gets its own fixed column and never participates in the icon presenter's sizing.
         if (!OperatingSystem.IsAndroid() && !OperatingSystem.IsIOS())
-            Dispatcher.UIThread.Post(NormalizeDesktopViewModeMenuLayout, DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(NormalizeDesktopMenuLayout, DispatcherPriority.Loaded);
     }
 
-    private void NormalizeDesktopViewModeMenuLayout()
+    private void NormalizeDesktopMenuLayout()
     {
-        if (_desktopViewModeMenuLayoutNormalized)
+        if (_desktopMenuLayoutNormalized)
             return;
 
         var changed = 0;
 
-        // Toolbar view-mode flyout(s).
+        // Toolbar sort/view flyouts.
         foreach (var button in this.GetVisualDescendants().OfType<Button>())
         {
             if (button.Flyout is MenuFlyout flyout)
-                changed += NormalizeViewModeMenuItems(flyout.Items);
+                changed += NormalizeDesktopMenuItems(flyout.Items);
         }
 
-        // The file-area context menu contains another "查看方式" submenu.
+        // The file-area context menu contains another view/sort submenu.
         if (FileArea.ContextMenu is ContextMenu contextMenu)
-            changed += NormalizeViewModeMenuItems(contextMenu.Items);
+            changed += NormalizeDesktopMenuItems(contextMenu.Items);
 
         if (changed > 0)
-            _desktopViewModeMenuLayoutNormalized = true;
+            _desktopMenuLayoutNormalized = true;
     }
 
-    private static int NormalizeViewModeMenuItems(IEnumerable? items)
+    private static int NormalizeDesktopMenuItems(IEnumerable? items)
     {
         if (items is null)
             return 0;
@@ -79,10 +79,10 @@ public partial class MainView
             if (rawItem is not MenuItem menuItem)
                 continue;
 
-            if (NormalizeViewModeMenuItem(menuItem))
+            if (NormalizeViewModeMenuItem(menuItem) || NormalizeSortMenuItem(menuItem))
                 changed++;
 
-            changed += NormalizeViewModeMenuItems(menuItem.Items);
+            changed += NormalizeDesktopMenuItems(menuItem.Items);
         }
 
         return changed;
@@ -96,10 +96,8 @@ public partial class MainView
             return false;
         }
 
-        // The previous layout stored both the dot and the Path inside MenuItem.Icon.
-        // Extract them and rebuild the visible row as three independent columns:
-        //   selection dot | original 15-DIP icon | label
-        // This keeps the dot from participating in the icon presenter's size calculation.
+        // The XAML stores both the dot and the Path inside MenuItem.Icon. Extract them and
+        // rebuild the visible row so the 15-DIP icon keeps its original size.
         if (menuItem.Icon is not Grid oldIconGrid)
             return false;
 
@@ -121,25 +119,62 @@ public partial class MainView
             }
         };
 
-        // Detach the old header before placing the same TextBlock into the new Grid.
         menuItem.Header = null;
         menuItem.Icon = null;
 
-        icon.Width = 15;
-        icon.Height = 15;
-        icon.Stretch = Stretch.Uniform;
-        icon.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
-        icon.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+        PrepareMenuIcon(icon);
+        PrepareSelectionDot(dot);
+        label.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+        menuItem.Header = BuildThreeColumnMenuHeader(dot, icon, label);
+        return true;
+    }
 
-        dot.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
-        dot.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+    private static bool NormalizeSortMenuItem(MenuItem menuItem)
+    {
+        if (menuItem.Tag is not string tag || tag is not (
+                "Inherit:Default" or
+                "Name:Ascending" or
+                "Name:Descending" or
+                "Modified:Ascending" or
+                "Modified:Descending" or
+                "Size:Ascending" or
+                "Size:Descending"))
+        {
+            return false;
+        }
+
+        // Sort selection dots currently live in the Header while some items also use MenuItem.Icon.
+        // Pull the dot and label out, discard the old icon, and rebuild every sort row consistently.
+        if (menuItem.Header is not Grid oldHeaderGrid)
+            return false;
+
+        var dot = oldHeaderGrid.Children.OfType<Ellipse>().FirstOrDefault();
+        var label = oldHeaderGrid.Children.OfType<TextBlock>().FirstOrDefault();
+        if (dot is null || label is null)
+            return false;
+
+        oldHeaderGrid.Children.Remove(dot);
+        oldHeaderGrid.Children.Remove(label);
+        menuItem.Header = null;
+        menuItem.Icon = null;
+
+        PrepareSelectionDot(dot);
         label.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
 
+        var icon = CreateSortMenuIcon(tag);
+        menuItem.Header = BuildThreeColumnMenuHeader(dot, icon, label);
+        return true;
+    }
+
+    private static Grid BuildThreeColumnMenuHeader(Control dot, Control icon, Control label)
+    {
         var header = new Grid
         {
             ColumnSpacing = 6,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
         };
+
+        // Independent fixed columns prevent the selection marker from ever shrinking the icon.
         header.ColumnDefinitions.Add(new ColumnDefinition(8, GridUnitType.Pixel));
         header.ColumnDefinitions.Add(new ColumnDefinition(15, GridUnitType.Pixel));
         header.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Auto));
@@ -150,8 +185,66 @@ public partial class MainView
         header.Children.Add(dot);
         header.Children.Add(icon);
         header.Children.Add(label);
+        return header;
+    }
 
-        menuItem.Header = header;
-        return true;
+    private static void PrepareSelectionDot(Ellipse dot)
+    {
+        dot.Width = 6;
+        dot.Height = 6;
+        dot.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+        dot.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+    }
+
+    private static void PrepareMenuIcon(Avalonia.Controls.Shapes.Path icon)
+    {
+        icon.Width = 15;
+        icon.Height = 15;
+        icon.Stretch = Stretch.Uniform;
+        icon.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+        icon.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+    }
+
+    private static Avalonia.Controls.Shapes.Path CreateSortMenuIcon(string tag)
+    {
+        // Each sorting family has its own visual language:
+        // default = neutral list, name = A/Z, date = calendar, size = graduated boxes.
+        var data = tag switch
+        {
+            "Inherit:Default" =>
+                "M2,3 H12 M2,7 H12 M2,11 H12 M4.2,1.8 V4.2 M9.2,5.8 V8.2 M6.4,9.8 V12.2",
+
+            "Name:Ascending" =>
+                "M3.2,12 V3 M1.4,5 L3.2,3 L5,5 " +
+                "M7.6,7 L9.8,3 L12,7 M8.3,5.6 H11.3 M7.7,9 H12 L7.7,12 H12",
+            "Name:Descending" =>
+                "M3.2,3 V12 M1.4,10 L3.2,12 L5,10 " +
+                "M7.7,3 H12 L7.7,6 H12 M7.6,12 L9.8,8 L12,12 M8.3,10.6 H11.3",
+
+            "Modified:Ascending" =>
+                "M3.2,12 V4 M1.4,5.8 L3.2,4 L5,5.8 " +
+                "M7,4 H13 V12 H7 Z M8.5,2.5 V5 M11.5,2.5 V5 M7,6.5 H13 " +
+                "M8.5,8.5 H10 M11.5,8.5 H12 M8.5,10.5 H10",
+            "Modified:Descending" =>
+                "M3.2,4 V12 M1.4,10.2 L3.2,12 L5,10.2 " +
+                "M7,4 H13 V12 H7 Z M8.5,2.5 V5 M11.5,2.5 V5 M7,6.5 H13 " +
+                "M8.5,8.5 H10 M11.5,8.5 H12 M8.5,10.5 H10",
+
+            "Size:Ascending" =>
+                "M3.2,12 V3 M1.4,5 L3.2,3 L5,5 " +
+                "M8,3.5 H9.5 V5 H8 Z M8,6.5 H10.5 V9 H8 Z M8,10 H12 V14 H8 Z",
+            _ =>
+                "M3.2,3 V12 M1.4,10 L3.2,12 L5,10 " +
+                "M8,2 H12 V6 H8 Z M8,7 H10.5 V9.5 H8 Z M8,11 H9.5 V12.5 H8 Z"
+        };
+
+        var icon = new Avalonia.Controls.Shapes.Path
+        {
+            Data = Geometry.Parse(data)
+        };
+        icon.Classes.Add("menuIcon");
+        icon.Classes.Add("iconSort");
+        PrepareMenuIcon(icon);
+        return icon;
     }
 }
