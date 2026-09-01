@@ -1,0 +1,19 @@
+name: One-time Core build
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore src/Hello1Drive.Core/Hello1Drive.Core.csproj
+      - run: dotnet build src/Hello1Drive.Core/Hello1Drive.Core.csproj -c Release --no-restore
