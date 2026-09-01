@@ -568,7 +568,7 @@ internal sealed class WindowsNativeDesktopFileListController : IDisposable
     private static nint SetWindowLongPtr(nint hwnd, int index, nint newValue) =>
         IntPtr.Size == 8 ? SetWindowLongPtr64(hwnd, index, newValue) : (nint)SetWindowLong32(hwnd, index, (int)newValue);
 
-    [DllImport("user32.dll")]
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern nint GetModuleHandleW(string? moduleName);
 
     [DllImport("user32.dll")]

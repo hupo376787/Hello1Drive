@@ -28,6 +28,7 @@ public partial class MainView
         {
             EnsureDesktopSelectionContextActions();
             EnsureDesktopDestinationDialogPresentation();
+            InitializeDesktopExperienceEnhancements();
         }
     }
 
@@ -36,6 +37,9 @@ public partial class MainView
         if (_mobileSelectionRenameButton is not null)
             _mobileSelectionRenameButton.Click -= MobileSelectionRename_Click;
         _mobileSelectionRenameButton = null;
+
+        if (!IsMobilePlatform)
+            DisposeDesktopExperienceEnhancements();
 
         if (_desktopDestinationOverlayHooksAttached)
         {
