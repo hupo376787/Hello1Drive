@@ -828,30 +828,36 @@
                 <MenuFlyout>
                   <MenuItem Tag="Details" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
-    <TextBlock Grid.Column="1" Text="详细信息" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
+                    <TextBlock Text="详细信息" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" />
+                    </Grid>
+                  </MenuItem.Icon>
                   </MenuItem>
                   <MenuItem Tag="LargeIcons" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
-    <TextBlock Grid.Column="1" Text="大图标" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
+                    <TextBlock Text="大图标" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" />
+                    </Grid>
+                  </MenuItem.Icon>
                   </MenuItem>
                   <MenuItem Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
-    <TextBlock Grid.Column="1" Text="超大图标" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                    <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
+                    <TextBlock Text="超大图标" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" />
+                    </Grid>
+                  </MenuItem.Icon>
                   </MenuItem>
                 </MenuFlyout>
               </Button.Flyout>
@@ -902,30 +908,36 @@
               <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
               <MenuItem Tag="Details" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
-    <TextBlock Grid.Column="1" Text="详细信息" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
+                    <TextBlock Text="详细信息" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" />
+                    </Grid>
+                  </MenuItem.Icon>
               </MenuItem>
               <MenuItem Tag="LargeIcons" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
-    <TextBlock Grid.Column="1" Text="大图标" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
+                    <TextBlock Text="大图标" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" />
+                    </Grid>
+                  </MenuItem.Icon>
               </MenuItem>
               <MenuItem Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
                   <MenuItem.Header>
-  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
-    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
-    <TextBlock Grid.Column="1" Text="超大图标" VerticalAlignment="Center" />
-  </Grid>
-</MenuItem.Header>
-                <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
+                    <TextBlock Text="超大图标" VerticalAlignment="Center" />
+                  </MenuItem.Header>
+                  <MenuItem.Icon>
+                    <Grid ColumnDefinitions="8,14" ColumnSpacing="4" Width="26">
+                      <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
+                      <Path Grid.Column="1" Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" />
+                    </Grid>
+                  </MenuItem.Icon>
               </MenuItem>
             </MenuItem>
             <MenuItem Header="排序方式">
