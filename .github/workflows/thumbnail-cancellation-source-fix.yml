@@ -1,0 +1,66 @@
+name: One-time thumbnail cancellation source fix
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[thumbnail-cancel-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch native thumbnail generations
+        shell: python
+        run: |
+          from pathlib import Path
+
+          patches = {
+              Path('src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs'): [
+                  ('await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);',
+                   'await _thumbnailGate.WaitAsync().ConfigureAwait(false);', 2),
+                  ('generationToken.ThrowIfCancellationRequested();',
+                   'if (generationToken.IsCancellationRequested) return;', 5),
+                  ('GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)',
+                   'GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)', 2),
+                  ('Task.Run(() => DecodeScaled(path, targetPx), generationToken)',
+                   'Task.Run(() => DecodeScaled(path, targetPx))', 2),
+              ],
+              Path('src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs'): [
+                  ('await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);',
+                   'await _thumbnailGate.WaitAsync().ConfigureAwait(false);', 2),
+                  ('generationToken.ThrowIfCancellationRequested();',
+                   'if (generationToken.IsCancellationRequested) return;', 5),
+                  ('GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)',
+                   'GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)', 2),
+                  ('Task.Run(() => UIImage.FromFile(path), generationToken)',
+                   'Task.Run(() => UIImage.FromFile(path))', 2),
+              ],
+          }
+
+          for path, replacements in patches.items():
+              text = path.read_text(encoding='utf-8')
+              for old, new, expected in replacements:
+                  actual = text.count(old)
+                  if actual != expected:
+                      raise SystemExit(f'{path}: expected {expected} occurrences of {old!r}, found {actual}')
+                  text = text.replace(old, new)
+              path.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/Hello1Drive.Android/Services/AndroidNativeMobileFileListFactory.cs src/Hello1Drive.iOS/Services/IosNativeMobileFileListFactory.cs
+          git commit -m "[thumbnail-cancel-fix] Avoid navigation cancellation exceptions"
+          git push
