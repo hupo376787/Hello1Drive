@@ -87,16 +87,19 @@ public partial class MainView
     private void Vm_FolderLoadedStable(object? sender, FolderNavigationEventArgs e)
     {
         if (sender is MainViewModel vm &&
-            (e.Reason is FolderNavigationReason.Refresh or FolderNavigationReason.Sort) &&
+            e.Reason == FolderNavigationReason.Refresh &&
             vm.MobileItems.Any(static slot => slot.Item is not null) &&
-            (vm.StatusText.Contains("正在同步", StringComparison.Ordinal) ||
-             vm.StatusText.StartsWith("当前账户后端不支持大小排序", StringComparison.Ordinal)))
+            vm.StatusText.Contains("正在同步", StringComparison.Ordinal))
         {
-            // The current scene is deliberately still authoritative. The later incremental diff
-            // will notify only changed slots and preserve the existing viewport anchor.
+            // Same-folder refresh/revalidation deliberately keeps the current scene authoritative.
+            // Do not ask the native/desktop surface to present the exact same slots a second time;
+            // the later incremental diff will notify only changed rows and preserve the viewport.
             return;
         }
 
+        // Sort is intentionally not suppressed here. Its existing FolderLoaded semantics reset the
+        // viewport to the top; treating Sort like a background Refresh would leave users anchored
+        // in the middle of a newly ordered folder.
         Vm_FolderLoaded(sender, e);
     }
 
@@ -111,7 +114,7 @@ public partial class MainView
             .OfType<Button>()
             .FirstOrDefault(candidate =>
                 ReferenceEquals(candidate.Command, vm.ClearFinishedTransfersCommand) ||
-                candidate.Content is string text && text is "清理完成" or "重试失败");
+                candidate.Content is string text && (text == "清理完成" || text == "重试失败"));
         if (button is null)
             return;
 
