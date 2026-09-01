@@ -170,13 +170,13 @@ public partial class MainView
     {
         var header = new Grid
         {
-            ColumnSpacing = 6,
+            ColumnSpacing = 0,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
         };
 
-        // Independent fixed columns prevent the selection marker from ever shrinking the icon.
-        header.ColumnDefinitions.Add(new ColumnDefinition(8, GridUnitType.Pixel));
-        header.ColumnDefinitions.Add(new ColumnDefinition(15, GridUnitType.Pixel));
+        // Wider independent columns keep both markers visually centered without changing glyph size.
+        header.ColumnDefinitions.Add(new ColumnDefinition(16, GridUnitType.Pixel));
+        header.ColumnDefinitions.Add(new ColumnDefinition(30, GridUnitType.Pixel));
         header.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Auto));
 
         Grid.SetColumn(dot, 0);
