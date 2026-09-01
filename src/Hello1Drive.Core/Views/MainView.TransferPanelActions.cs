@@ -12,6 +12,7 @@ public partial class MainView
     private Button? _finishedTransferActionButton;
     private MainViewModel? _finishedTransferActionViewModel;
     private bool _finishedTransferActionHooked;
+    private bool _preparingPersistedFailedRetries;
     private MainViewModel? _stableFolderLoadedViewModel;
 
     protected override void OnInitialized()
@@ -28,6 +29,9 @@ public partial class MainView
         // Replace just that handler with the guarded version below before initialization finishes.
         AttachStableFolderLoadedHandler();
         AttachFinishedTransferAction();
+
+        if (DataContext is MainViewModel { IsAuthenticated: true } vm)
+            _ = PreparePersistedFailedTransferRetriesAsync(vm);
     }
 
     private void TransferActions_Unloaded(object? sender, RoutedEventArgs e)
@@ -138,9 +142,75 @@ public partial class MainView
 
     private void FinishedTransferActionViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_finishedTransferActionViewModel is not { } vm)
+            return;
+
+        if (e.PropertyName == nameof(MainViewModel.IsAuthenticated))
+        {
+            if (vm.IsAuthenticated)
+                _ = PreparePersistedFailedTransferRetriesAsync(vm);
+            return;
+        }
+
         // RaiseTransferSummary publishes both of these whenever a transfer changes state.
         if (e.PropertyName is nameof(MainViewModel.TransferSummaryText) or nameof(MainViewModel.ActiveTransferCount))
             UpdateFinishedTransferActionButton();
+    }
+
+    /// <summary>
+    /// Failed rows are deliberately persisted, but the original restart path only prepared
+    /// Waiting/Running rows. Recreate RetryAction for persisted Failed rows as well so the footer's
+    /// "重试失败" action keeps working after an app/process restart instead of becoming a dead end.
+    /// </summary>
+    private async Task PreparePersistedFailedTransferRetriesAsync(MainViewModel vm)
+    {
+        if (_preparingPersistedFailedRetries || !vm.IsAuthenticated)
+            return;
+
+        var provider = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (provider is null)
+            return;
+
+        _preparingPersistedFailedRetries = true;
+        try
+        {
+            foreach (var transfer in vm.Transfers
+                         .Where(static x => x.State == TransferState.Failed && x.RetryAction is null && x.ResumeInfo is not null)
+                         .OrderBy(static x => x.StartedAt)
+                         .ToArray())
+            {
+                var resume = transfer.ResumeInfo!;
+                if (string.IsNullOrWhiteSpace(resume.AccountId) ||
+                    !string.Equals(resume.AccountId, vm.CurrentAccountId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                Func<Task>? action = resume.Kind switch
+                {
+                    TransferResumeKind.UploadFile => CreateResumeUploadAction(vm, provider, transfer, resume),
+                    TransferResumeKind.DownloadFile => CreateResumeDownloadFileAction(vm, provider, transfer, resume),
+                    TransferResumeKind.DownloadToFolder => CreateResumeDownloadFolderAction(vm, provider, transfer, resume),
+                    TransferResumeKind.CacheFile => CreateResumeCacheAction(vm, transfer, resume),
+                    _ => null
+                };
+
+                if (action is not null)
+                    vm.MarkTransferResumePrepared(transfer, action);
+            }
+
+            await vm.FlushTransferPersistenceAsync();
+        }
+        catch
+        {
+            // A bookmark/provider can become unavailable after an OS restart. Keep the Failed row
+            // visible rather than clearing it; its existing message explains the failure state.
+        }
+        finally
+        {
+            _preparingPersistedFailedRetries = false;
+            UpdateFinishedTransferActionButton();
+        }
     }
 
     private void UpdateFinishedTransferActionButton()
@@ -166,6 +236,9 @@ public partial class MainView
         {
             return;
         }
+
+        if (vm.Transfers.Any(static transfer => transfer.State == TransferState.Failed && transfer.RetryAction is null))
+            await PreparePersistedFailedTransferRetriesAsync(vm);
 
         var failed = vm.Transfers
             .Where(static transfer => transfer.State == TransferState.Failed)
