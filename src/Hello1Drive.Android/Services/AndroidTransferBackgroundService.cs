@@ -15,9 +15,17 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
     private static readonly object ServiceSync = new();
     private static bool _notificationPermissionRequestedThisProcess;
     private static bool _serviceStarted;
+    private static bool _hasLatestState;
+    private static TransferBackgroundState _latestState;
 
     public void Update(TransferBackgroundState state)
     {
+        lock (ServiceSync)
+        {
+            _latestState = state;
+            _hasLatestState = true;
+        }
+
         var context = global::Android.App.Application.Context;
         var intent = new global::Android.Content.Intent(context, typeof(TransferForegroundService));
 
@@ -53,7 +61,7 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
 
         // Start the FGS while the user-visible transfer is first queued. If a start is already in
         // flight but OnCreate has not published the service instance yet, do not issue a second
-        // background start; the first intent already contains enough state to promote the service.
+        // background start; OnStartCommand reads the latest queue state captured above.
         lock (ServiceSync)
         {
             if (_serviceStarted)
@@ -69,6 +77,12 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
 
             _serviceStarted = true;
         }
+    }
+
+    internal static TransferBackgroundState GetLatestState(TransferBackgroundState fallback)
+    {
+        lock (ServiceSync)
+            return _hasLatestState ? _latestState : fallback;
     }
 
     internal static void NotifyServiceStopped()
