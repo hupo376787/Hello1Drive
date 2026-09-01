@@ -21,6 +21,7 @@ public class AndroidApp : AvaloniaAndroidApplication<global::Hello1Drive.App>
             new AndroidEmbeddedMediaPlayerFactory(),
             new AndroidPlatformShareService(),
             new AndroidPlatformAppLifecycleService(),
+            platformConfirmationService: new AndroidPlatformConfirmationService(),
             transferBackgroundService: new AndroidTransferBackgroundService(),
             nativeMobileFileListFactory: new PolishedAndroidNativeMobileFileListFactory());
         base.OnCreate();
