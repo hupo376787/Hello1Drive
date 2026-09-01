@@ -152,6 +152,25 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         ".url", ".webloc", ".website"
     };
 
+    // Cache maintenance and visual presentation intentionally have different lifetimes. A folder
+    // refresh may dispose an old cache entry while the exact same DriveItemModel is still retained
+    // by the visible virtual slot. Keep that bitmap alive until the final slot detaches, then offer
+    // it briefly to the replacement model with the same OneDrive item ID. This prevents the visible
+    // thumbnail -> IMG/VID badge -> thumbnail flash during local-index/cloud reconciliation.
+    private const int MaxThumbnailHandoffCount = 512;
+    private static readonly TimeSpan ThumbnailHandoffLifetime = TimeSpan.FromSeconds(4);
+    private static readonly object ThumbnailHandoffGate = new();
+    private static readonly Dictionary<string, ThumbnailHandoffEntry> ThumbnailHandoffs = new(StringComparer.Ordinal);
+    private static readonly System.Threading.Timer ThumbnailHandoffCleanupTimer = new(
+        static _ => CleanupExpiredThumbnailHandoffs(),
+        null,
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(5));
+
+    private readonly object _lifetimeGate = new();
+    private int _presentationReferenceCount;
+    private bool _disposeRequested;
+
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
@@ -472,13 +491,147 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowVideoThumbnailBadge));
     }
 
+    /// <summary>
+    /// Called by a stable virtual slot before the model becomes visible. A cache disposal request
+    /// that arrived while the model was still presented is cancelled, and a recently handed-off
+    /// decoded thumbnail for the same OneDrive item is adopted before bindings/rendering inspect it.
+    /// </summary>
+    internal void AttachPresentation()
+    {
+        lock (_lifetimeGate)
+        {
+            _presentationReferenceCount++;
+            _disposeRequested = false;
+            if (_thumbnailImage is null && TryTakeThumbnailHandoff(Id, out var handedOff))
+                _thumbnailImage = handedOff;
+        }
+    }
+
+    /// <summary>
+    /// Called when a virtual slot stops presenting this model. If cache maintenance already asked
+    /// to dispose it, release resources only after the final visible slot has detached.
+    /// </summary>
+    internal void DetachPresentation()
+    {
+        Bitmap? thumbnailToHandoff = null;
+        Bitmap? galleryToDispose = null;
+
+        lock (_lifetimeGate)
+        {
+            if (_presentationReferenceCount > 0)
+                _presentationReferenceCount--;
+
+            if (_presentationReferenceCount == 0 && _disposeRequested)
+                TakeDisposedResourcesLocked(out thumbnailToHandoff, out galleryToDispose);
+        }
+
+        ReleaseDisposedResources(thumbnailToHandoff, galleryToDispose);
+    }
+
     public void Dispose()
     {
-        ThumbnailImage?.Dispose();
-        ThumbnailImage = null;
-        GalleryImage?.Dispose();
-        GalleryImage = null;
+        Bitmap? thumbnailToHandoff = null;
+        Bitmap? galleryToDispose = null;
+
+        lock (_lifetimeGate)
+        {
+            _disposeRequested = true;
+            if (_presentationReferenceCount == 0)
+                TakeDisposedResourcesLocked(out thumbnailToHandoff, out galleryToDispose);
+        }
+
+        ReleaseDisposedResources(thumbnailToHandoff, galleryToDispose);
     }
+
+    private void TakeDisposedResourcesLocked(out Bitmap? thumbnail, out Bitmap? gallery)
+    {
+        _disposeRequested = false;
+        thumbnail = _thumbnailImage;
+        gallery = _galleryImage;
+        _thumbnailImage = null;
+        _galleryImage = null;
+    }
+
+    private void ReleaseDisposedResources(Bitmap? thumbnail, Bitmap? gallery)
+    {
+        if (thumbnail is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(Id))
+                StoreThumbnailHandoff(Id, thumbnail);
+            else
+                thumbnail.Dispose();
+        }
+
+        gallery?.Dispose();
+    }
+
+    private static void StoreThumbnailHandoff(string id, Bitmap bitmap)
+    {
+        lock (ThumbnailHandoffGate)
+        {
+            CleanupExpiredThumbnailHandoffsLocked(DateTimeOffset.UtcNow);
+
+            if (ThumbnailHandoffs.Remove(id, out var previous) && !ReferenceEquals(previous.Bitmap, bitmap))
+                previous.Bitmap.Dispose();
+
+            ThumbnailHandoffs[id] = new ThumbnailHandoffEntry(bitmap, DateTimeOffset.UtcNow);
+
+            if (ThumbnailHandoffs.Count <= MaxThumbnailHandoffCount)
+                return;
+
+            foreach (var pair in ThumbnailHandoffs
+                         .OrderBy(static x => x.Value.StoredAtUtc)
+                         .Take(ThumbnailHandoffs.Count - MaxThumbnailHandoffCount)
+                         .ToArray())
+            {
+                if (ThumbnailHandoffs.Remove(pair.Key, out var evicted))
+                    evicted.Bitmap.Dispose();
+            }
+        }
+    }
+
+    private static bool TryTakeThumbnailHandoff(string id, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (string.IsNullOrWhiteSpace(id))
+            return false;
+
+        lock (ThumbnailHandoffGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            CleanupExpiredThumbnailHandoffsLocked(now);
+            if (!ThumbnailHandoffs.Remove(id, out var entry))
+                return false;
+
+            if (now - entry.StoredAtUtc > ThumbnailHandoffLifetime)
+            {
+                entry.Bitmap.Dispose();
+                return false;
+            }
+
+            bitmap = entry.Bitmap;
+            return true;
+        }
+    }
+
+    private static void CleanupExpiredThumbnailHandoffs()
+    {
+        lock (ThumbnailHandoffGate)
+            CleanupExpiredThumbnailHandoffsLocked(DateTimeOffset.UtcNow);
+    }
+
+    private static void CleanupExpiredThumbnailHandoffsLocked(DateTimeOffset now)
+    {
+        foreach (var pair in ThumbnailHandoffs
+                     .Where(x => now - x.Value.StoredAtUtc > ThumbnailHandoffLifetime)
+                     .ToArray())
+        {
+            if (ThumbnailHandoffs.Remove(pair.Key, out var expired))
+                expired.Bitmap.Dispose();
+        }
+    }
+
+    private sealed record ThumbnailHandoffEntry(Bitmap Bitmap, DateTimeOffset StoredAtUtc);
 }
 
 public sealed class ThumbnailSetModel
