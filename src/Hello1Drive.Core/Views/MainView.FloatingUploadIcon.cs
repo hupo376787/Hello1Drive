@@ -2,6 +2,7 @@ using System.Collections;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -43,7 +44,28 @@ public partial class MainView
         //   selected-state dot | full-size icon | text
         // The dot gets its own fixed column and never participates in the icon presenter's sizing.
         if (!OperatingSystem.IsAndroid() && !OperatingSystem.IsIOS())
+        {
             Dispatcher.UIThread.Post(NormalizeDesktopMenuLayout, DispatcherPriority.Loaded);
+        }
+        else
+        {
+            // Mobile keeps touch scrolling, but the transfer list should not draw a right-side scrollbar.
+            Dispatcher.UIThread.Post(HideMobileTransferListScrollbar, DispatcherPriority.Loaded);
+        }
+    }
+
+    private void HideMobileTransferListScrollbar()
+    {
+        var transferList = this.GetVisualDescendants()
+            .OfType<ListBox>()
+            .FirstOrDefault(listBox => listBox.Classes.Contains("transferList"));
+
+        if (transferList is null)
+            return;
+
+        transferList.SetValue(
+            ScrollViewer.VerticalScrollBarVisibilityProperty,
+            ScrollBarVisibility.Hidden);
     }
 
     private void NormalizeDesktopMenuLayout()
