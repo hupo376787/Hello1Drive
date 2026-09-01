@@ -7,6 +7,7 @@ public static class AppServices
     private static IEmbeddedMediaPlayerFactory? _mediaPlayerFactory;
     private static IPlatformShareService? _platformShareService;
     private static IPlatformAppLifecycleService? _platformAppLifecycleService;
+    private static IPlatformConfirmationService? _platformConfirmationService;
     private static IStartupRegistrationService? _startupRegistrationService;
     private static ITransferBackgroundService? _transferBackgroundService;
     private static INativeMobileFileListFactory? _nativeMobileFileListFactory;
@@ -33,6 +34,7 @@ public static class AppServices
     public static IEmbeddedMediaPlayerFactory? MediaPlayerFactory => _mediaPlayerFactory;
     public static IPlatformShareService? PlatformShareService => _platformShareService;
     public static IPlatformAppLifecycleService? PlatformAppLifecycleService => _platformAppLifecycleService;
+    public static IPlatformConfirmationService? PlatformConfirmationService => _platformConfirmationService;
     public static IStartupRegistrationService? StartupRegistrationService => _startupRegistrationService;
     public static ITransferBackgroundService? TransferBackgroundService => _transferBackgroundService;
     public static INativeMobileFileListFactory? NativeMobileFileListFactory => _nativeMobileFileListFactory;
@@ -43,6 +45,7 @@ public static class AppServices
         IEmbeddedMediaPlayerFactory? mediaPlayerFactory = null,
         IPlatformShareService? platformShareService = null,
         IPlatformAppLifecycleService? platformAppLifecycleService = null,
+        IPlatformConfirmationService? platformConfirmationService = null,
         IStartupRegistrationService? startupRegistrationService = null,
         ITransferBackgroundService? transferBackgroundService = null,
         INativeMobileFileListFactory? nativeMobileFileListFactory = null,
@@ -53,6 +56,7 @@ public static class AppServices
         _mediaPlayerFactory = mediaPlayerFactory;
         _platformShareService = platformShareService;
         _platformAppLifecycleService = platformAppLifecycleService;
+        _platformConfirmationService = platformConfirmationService;
         _startupRegistrationService = startupRegistrationService;
         _transferBackgroundService = transferBackgroundService;
         _nativeMobileFileListFactory = nativeMobileFileListFactory;
