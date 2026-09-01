@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -49,8 +50,11 @@ public partial class MainView
         }
         else
         {
-            // Mobile keeps touch scrolling, but the transfer list should not draw a right-side scrollbar.
-            Dispatcher.UIThread.Post(HideMobileTransferListScrollbar, DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(() =>
+            {
+                HideMobileTransferListScrollbar();
+                PolishMobileViewAndSortUi();
+            }, DispatcherPriority.Loaded);
         }
     }
 
@@ -66,6 +70,149 @@ public partial class MainView
         transferList.SetValue(
             ScrollViewer.VerticalScrollBarVisibilityProperty,
             ScrollBarVisibility.Hidden);
+    }
+
+    private void PolishMobileViewAndSortUi()
+    {
+        ReorderMobileViewModeBeforeSort();
+        DecorateMobileActionOverlay(MobileViewModeActionsOverlay, isSortOverlay: false);
+        DecorateMobileActionOverlay(MobileSortActionsOverlay, isSortOverlay: true);
+    }
+
+    private void ReorderMobileViewModeBeforeSort()
+    {
+        // Desktop sort/view buttons own MenuFlyouts. Mobile buttons have no Flyout and use Click
+        // handlers to open the in-page overlays, so this reliably targets the mobile toolbar only.
+        foreach (var panel in EnumerateControls(this).OfType<StackPanel>())
+        {
+            var directButtons = panel.Children.OfType<Button>().ToList();
+            var viewButton = directButtons.FirstOrDefault(button =>
+                button.Flyout is null && ButtonHasIconClass(button, "iconView"));
+            var sortButton = directButtons.FirstOrDefault(button =>
+                button.Flyout is null && ButtonHasIconClass(button, "iconSort"));
+
+            if (viewButton is null || sortButton is null)
+                continue;
+
+            var viewIndex = panel.Children.IndexOf(viewButton);
+            var sortIndex = panel.Children.IndexOf(sortButton);
+            if (viewIndex < 0 || sortIndex < 0 || viewIndex < sortIndex)
+                return;
+
+            panel.Children.Remove(viewButton);
+            sortIndex = panel.Children.IndexOf(sortButton);
+            panel.Children.Insert(sortIndex, viewButton);
+            return;
+        }
+    }
+
+    private static bool ButtonHasIconClass(Button button, string className)
+        => button.Content is Avalonia.Controls.Shapes.Path path && path.Classes.Contains(className);
+
+    private static void DecorateMobileActionOverlay(Grid overlay, bool isSortOverlay)
+    {
+        foreach (var button in EnumerateControls(overlay).OfType<Button>().ToArray())
+        {
+            if (button.Tag is not string tag || button.Content is not Grid oldContent)
+                continue;
+
+            var isExpectedTag = isSortOverlay
+                ? tag is "Inherit:Default" or "Name:Ascending" or "Name:Descending" or
+                    "Modified:Ascending" or "Modified:Descending" or "Size:Ascending" or "Size:Descending"
+                : tag is "Details" or "LargeIcons" or "ExtraLargeIcons";
+            if (!isExpectedTag)
+                continue;
+
+            var dot = oldContent.Children.OfType<Ellipse>().FirstOrDefault();
+            var label = oldContent.Children.OfType<TextBlock>().FirstOrDefault();
+            if (dot is null || label is null)
+                continue;
+
+            oldContent.Children.Remove(dot);
+            oldContent.Children.Remove(label);
+            button.Content = null;
+
+            PrepareSelectionDot(dot);
+            label.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+
+            var icon = isSortOverlay
+                ? CreateSortMenuIcon(tag)
+                : CreateViewModeMenuIcon(tag);
+            PrepareMobileMenuIcon(icon);
+
+            var row = new Grid
+            {
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition(18, GridUnitType.Pixel));
+            row.ColumnDefinitions.Add(new ColumnDefinition(30, GridUnitType.Pixel));
+            row.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Star));
+
+            Grid.SetColumn(dot, 0);
+            Grid.SetColumn(icon, 1);
+            Grid.SetColumn(label, 2);
+            row.Children.Add(dot);
+            row.Children.Add(icon);
+            row.Children.Add(label);
+            button.Content = row;
+        }
+    }
+
+    private static IEnumerable<Control> EnumerateControls(Control root)
+    {
+        yield return root;
+
+        switch (root)
+        {
+            case Panel panel:
+                foreach (var child in panel.Children)
+                {
+                    foreach (var descendant in EnumerateControls(child))
+                        yield return descendant;
+                }
+                break;
+
+            case Decorator decorator when decorator.Child is Control child:
+                foreach (var descendant in EnumerateControls(child))
+                    yield return descendant;
+                break;
+
+            case ContentControl contentControl when contentControl.Content is Control content:
+                foreach (var descendant in EnumerateControls(content))
+                    yield return descendant;
+                break;
+        }
+    }
+
+    private static Avalonia.Controls.Shapes.Path CreateViewModeMenuIcon(string tag)
+    {
+        var data = tag switch
+        {
+            "Details" =>
+                "M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12",
+            "LargeIcons" =>
+                "M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z",
+            _ =>
+                "M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z"
+        };
+
+        var icon = new Avalonia.Controls.Shapes.Path
+        {
+            Data = Geometry.Parse(data)
+        };
+        icon.Classes.Add("menuIcon");
+        icon.Classes.Add("iconView");
+        return icon;
+    }
+
+    private static void PrepareMobileMenuIcon(Avalonia.Controls.Shapes.Path icon)
+    {
+        icon.Width = 18;
+        icon.Height = 18;
+        icon.Stretch = Stretch.Uniform;
+        icon.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+        icon.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
     }
 
     private void NormalizeDesktopMenuLayout()
