@@ -76,6 +76,9 @@ public partial class MainView : UserControl
 
     private readonly Dictionary<string, Vector> _folderScrollPositions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _nativeFolderScrollPositions = new(StringComparer.Ordinal);
+    private string? _incrementalRefreshAnchorId;
+    private int _incrementalRefreshAnchorIndex = -1;
+    private double _incrementalRefreshAnchorOffset;
     private TopLevel? _topLevel;
 
     private bool _marqueeSelecting;
@@ -237,6 +240,8 @@ public partial class MainView : UserControl
             vm.PropertyChanged += ViewModel_PropertyChanged;
             vm.FolderNavigating += Vm_FolderNavigating;
             vm.FolderLoaded += Vm_FolderLoaded;
+            vm.FolderItemsIncrementalChanging += Vm_FolderItemsIncrementalChanging;
+            vm.FolderItemsIncrementalChanged += Vm_FolderItemsIncrementalChanged;
             ApplyTheme(vm.Settings.ThemeMode);
             ApplyFileItemBackground(vm);
             ApplySettingsAcrylicBlur(vm.AcrylicBlurPercent);
@@ -630,6 +635,8 @@ public partial class MainView : UserControl
             DestroyNativeMobileFileListHost();
         if (DataContext is MainViewModel mobileVm)
         {
+            mobileVm.FolderItemsIncrementalChanging -= Vm_FolderItemsIncrementalChanging;
+            mobileVm.FolderItemsIncrementalChanged -= Vm_FolderItemsIncrementalChanged;
             mobileVm.SetMobileListScrolling(false);
             mobileVm.SetDesktopListScrolling(false);
         }
@@ -868,6 +875,83 @@ public partial class MainView : UserControl
                 _backgroundUrlApplyCts = null;
             cts.Dispose();
         }
+    }
+
+    private void Vm_FolderItemsIncrementalChanging(object? sender, EventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        _incrementalRefreshAnchorId = null;
+        _incrementalRefreshAnchorIndex = -1;
+        _incrementalRefreshAnchorOffset = 0;
+
+        if (UsesNativeMobileFileList)
+        {
+            var index = _nativeMobileFileListHost?.LastFirstVisibleIndex ?? -1;
+            var item = vm.GetMobileItemAtIndex(index);
+            if (item is null || string.IsNullOrWhiteSpace(item.Id))
+                return;
+
+            _incrementalRefreshAnchorId = item.Id;
+            _incrementalRefreshAnchorIndex = index;
+            return;
+        }
+
+        if (IsMobilePlatform)
+            return;
+
+        var (first, _) = DesktopFileSurface.GetVisibleRange();
+        var firstItem = vm.GetMobileItemAtIndex(first);
+        if (firstItem is null || string.IsNullOrWhiteSpace(firstItem.Id))
+            return;
+
+        _incrementalRefreshAnchorId = firstItem.Id;
+        _incrementalRefreshAnchorIndex = first;
+        _incrementalRefreshAnchorOffset =
+            DesktopVirtualScrollViewer.Offset.Y - DesktopFileSurface.GetItemTop(first);
+    }
+
+    private void Vm_FolderItemsIncrementalChanged(object? sender, EventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || string.IsNullOrWhiteSpace(_incrementalRefreshAnchorId))
+            return;
+
+        var anchorId = _incrementalRefreshAnchorId;
+        var oldIndex = _incrementalRefreshAnchorIndex;
+        var offsetWithinItem = _incrementalRefreshAnchorOffset;
+        _incrementalRefreshAnchorId = null;
+        _incrementalRefreshAnchorIndex = -1;
+        _incrementalRefreshAnchorOffset = 0;
+
+        var newIndex = -1;
+        for (var i = 0; i < vm.MobileItems.Count; i++)
+        {
+            if (string.Equals(vm.MobileItems[i].Item?.Id, anchorId, StringComparison.Ordinal))
+            {
+                newIndex = i;
+                break;
+            }
+        }
+
+        if (newIndex < 0 || newIndex == oldIndex)
+            return;
+
+        if (UsesNativeMobileFileList)
+        {
+            Dispatcher.UIThread.Post(() => _nativeMobileFileListHost?.ScrollToPosition(newIndex), DispatcherPriority.Loaded);
+            return;
+        }
+
+        if (IsMobilePlatform)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            var targetY = Math.Max(0, DesktopFileSurface.GetItemTop(newIndex) + offsetWithinItem);
+            DesktopVirtualScrollViewer.Offset = new Vector(DesktopVirtualScrollViewer.Offset.X, targetY);
+            SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
+        }, DispatcherPriority.Loaded);
     }
 
     private void Vm_FolderNavigating(object? sender, FolderNavigationEventArgs e)

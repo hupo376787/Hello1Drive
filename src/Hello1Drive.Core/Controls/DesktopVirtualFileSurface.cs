@@ -204,6 +204,17 @@ public sealed class DesktopVirtualFileSurface : Control
     public (int First, int Last) GetVisibleRange() =>
         CalculateVisibleRange(_viewportOffsetY, _viewportHeight, Math.Max(1, _viewportWidth));
 
+    public double GetItemTop(int index)
+    {
+        if (index <= 0)
+            return 0;
+        if (Mode == FileViewMode.Details)
+            return index * DetailsRowHeight;
+
+        var metrics = GetGridMetrics(LayoutWidth);
+        return (index / Math.Max(1, metrics.Columns)) * (metrics.Height + GridSpacing);
+    }
+
     public DriveItemModel? GetItemAt(Point point)
     {
         var index = GetIndexAt(point);
