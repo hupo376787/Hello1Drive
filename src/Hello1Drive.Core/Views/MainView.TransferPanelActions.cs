@@ -5,7 +5,6 @@ using Avalonia.Layout;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Hello1Drive.Models;
-using Hello1Drive.Services;
 using Hello1Drive.ViewModels;
 
 namespace Hello1Drive.Views;
@@ -42,6 +41,7 @@ public partial class MainView
         AttachNativeScrollAnchorHandler();
         AttachFinishedTransferAction();
         PolishMobileSelectionActionBar();
+        InitializeSelectionActionEnhancements();
 
         if (DataContext is MainViewModel { IsAuthenticated: true } vm)
             _ = PreparePersistedFailedTransferRetriesAsync(vm);
@@ -49,6 +49,7 @@ public partial class MainView
 
     private void TransferActions_Unloaded(object? sender, RoutedEventArgs e)
     {
+        DisposeSelectionActionEnhancements();
         DetachFinishedTransferAction();
         DetachStableFolderLoadedHandler();
         DetachNativeScrollAnchorHandler();
