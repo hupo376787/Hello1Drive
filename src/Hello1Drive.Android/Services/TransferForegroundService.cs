@@ -4,7 +4,6 @@ namespace Hello1Drive.Android.Services;
 
 [global::Android.App.Service(
     Exported = false,
-    StopWithTask = false,
     ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync)]
 public sealed class TransferForegroundService : global::Android.App.Service
 {
