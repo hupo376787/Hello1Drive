@@ -28,8 +28,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (msg == WM_ERASEBKGND && wParam != 0)
         {
+            // The native host sits above Avalonia in HWND z-order. Ask the parent to paint its
+            // current wallpaper/acrylic backdrop into this child instead of replacing it with an
+            // opaque system brush. This is the classic transparent-child pattern used by themed
+            // Win32 controls and keeps the native scrolling engine without losing the app backdrop.
             GetClientRect(hwnd, out var client);
-            FillRectColor(wParam, client, _palette.Background);
+            DrawThemeParentBackground(hwnd, wParam, ref client);
             return 1;
         }
 
@@ -39,6 +43,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ResizeListToHost();
             if (_viewModel?.ViewMode != FileViewMode.Details)
                 SendMessage(ListHandle, LVM_ARRANGE, LVA_DEFAULT, 0);
+            InvalidateRect(hwnd, 0, true);
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
         }
         return result;
@@ -46,6 +51,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private nint ListWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
+        if (msg == WM_ERASEBKGND && wParam != 0)
+        {
+            GetClientRect(hwnd, out var client);
+            DrawThemeParentBackground(hwnd, wParam, ref client);
+            return 1;
+        }
+
         var result = CallWindowProcW(_oldListWndProc, hwnd, msg, wParam, lParam);
         if (_disposed)
             return result;
@@ -103,30 +115,71 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (index < 0 || index >= _viewModel.VirtualItems.Count)
             return (nint)CDRF_SKIPDEFAULT;
 
-        DrawItem(custom.nmcd.hdc, custom.nmcd.rc, index, _viewModel.VirtualItems[index]);
+        var nativeRect = TryGetNativeItemRect(index, out var itemRect)
+            ? itemRect
+            : custom.nmcd.rc;
+        DrawItem(custom.nmcd.hdc, nativeRect, index, _viewModel.VirtualItems[index]);
         return (nint)CDRF_SKIPDEFAULT;
+    }
+
+    private bool TryGetNativeItemRect(int index, out RECT rect)
+    {
+        rect = new RECT(LVIR_BOUNDS, 0, 0, 0);
+        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<RECT>());
+        try
+        {
+            Marshal.StructureToPtr(rect, ptr, false);
+            if (SendMessage(ListHandle, LVM_GETITEMRECT, (nint)index, ptr) == 0)
+                return false;
+
+            rect = Marshal.PtrToStructure<RECT>(ptr);
+            return rect.Width > 0 && rect.Height > 0;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
     }
 
     private void DrawItem(nint hdc, RECT nativeRect, int index, VirtualDriveItemSlot slot)
     {
         var palette = _palette;
-        SetBkMode(hdc, TRANSPARENT);
-
+        RECT drawRect;
         if (_viewModel?.ViewMode == FileViewMode.Details)
         {
             GetClientRect(ListHandle, out var client);
-            var row = new RECT(0, nativeRect.top, client.right, nativeRect.bottom);
-            DrawDetailsItem(hdc, row, index, slot, palette);
-            return;
+            drawRect = new RECT(0, nativeRect.top, client.right, nativeRect.bottom);
+        }
+        else
+        {
+            drawRect = NormalizeGridCell(nativeRect, _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons);
         }
 
-        var cell = NormalizeGridCell(nativeRect, _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons);
-        DrawGridItem(hdc, cell, index, slot, palette);
+        // NM_CUSTOMDRAW supplies an HDC clipped to the control's default icon/text rectangle.
+        // Hello1Drive draws a larger card (and in details mode a full row), so retaining that clip
+        // made every item appear chopped and effectively piled into the upper-left corner. Use the
+        // real ListView item bounds above, then replace the clip with exactly our card/row bounds.
+        var savedDc = SaveDC(hdc);
+        try
+        {
+            SelectClipRgn(hdc, 0);
+            IntersectClipRect(hdc, drawRect.left, drawRect.top, drawRect.right, drawRect.bottom);
+            SetBkMode(hdc, TRANSPARENT);
+
+            if (_viewModel?.ViewMode == FileViewMode.Details)
+                DrawDetailsItem(hdc, drawRect, index, slot, palette);
+            else
+                DrawGridItem(hdc, drawRect, index, slot, palette);
+        }
+        finally
+        {
+            if (savedDc != 0)
+                RestoreDC(hdc, savedDc);
+        }
     }
 
     private void DrawDetailsItem(nint hdc, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
     {
-        FillRectColor(hdc, rect, palette.Background);
         var selected = IsItemSelected(index) || slot.Item?.IsMobileSelected == true;
         var hover = _hotIndex == index && !selected;
         var surface = Inset(rect, ScaleInt(2), ScaleInt(2));
@@ -180,7 +233,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void DrawGridItem(nint hdc, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
     {
-        FillRectColor(hdc, rect, palette.Background);
         var selected = IsItemSelected(index) || slot.Item?.IsMobileSelected == true;
         var hover = _hotIndex == index && !selected;
         var extra = _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons;

@@ -55,8 +55,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return color;
         }
 
-        // HWND content cannot participate in Avalonia's acrylic bitmap composition. Use the same
-        // neutral base tone as the old desktop surface so custom cards still look native to the app.
+        // Card/placeholder blending still needs a stable base color. The ListView background itself
+        // is CLR_NONE and is painted from the Avalonia parent by DrawThemeParentBackground.
         return dark ? Rgb(31, 32, 36) : Rgb(247, 247, 248);
     }
 
@@ -114,12 +114,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if (ListHandle == 0)
             return;
+
         _palette = BuildPalette();
         var palette = _palette;
         SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
-        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)palette.Background);
-        SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)(long)palette.Background);
+
+        // CLR_NONE is important here: a normal COLORREF makes the native control erase the whole
+        // file area before custom draw, which is exactly the opaque white rectangle visible in the
+        // regression screenshot. Transparent background + parent painting preserves the wallpaper.
+        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)CLR_NONE);
+        SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)(long)CLR_NONE);
         SendMessage(ListHandle, LVM_SETTEXTCOLOR, 0, (nint)(long)palette.Text);
+
+        if (Handle != 0)
+            InvalidateRect(Handle, 0, true);
+        InvalidateRect(ListHandle, 0, false);
     }
 
     private void ConfigureColumns()

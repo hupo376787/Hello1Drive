@@ -42,15 +42,18 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint WS_CHILD = 0x40000000;
     private const uint WS_VISIBLE = 0x10000000;
     private const uint WS_TABSTOP = 0x00010000;
-    private const uint WS_CLIPCHILDREN = 0x02000000;
+    private const uint WS_EX_TRANSPARENT = 0x00000020;
     private const uint LVS_REPORT = 0x0001;
     private const uint LVS_SHOWSELALWAYS = 0x0008;
     private const uint LVS_SHAREIMAGELISTS = 0x0040;
+    private const uint LVS_NOLABELWRAP = 0x0080;
     private const uint LVS_AUTOARRANGE = 0x0100;
     private const uint LVS_NOCOLUMNHEADER = 0x4000;
     private const uint LVS_EX_FULLROWSELECT = 0x00000020;
     private const uint LVS_EX_DOUBLEBUFFER = 0x00010000;
     private const uint LVS_EX_LABELTIP = 0x00004000;
+    private const uint LVS_EX_TRANSPARENTBKGND = 0x00400000;
+    private const uint LVS_EX_TRANSPARENTSHADOWTEXT = 0x00800000;
 
     private const int GWLP_WNDPROC = -4;
     private const int WM_SETREDRAW = 0x000B;
@@ -73,6 +76,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int LVM_FIRST = 0x1000;
     private const int LVM_DELETEALLITEMS = LVM_FIRST + 9;
     private const int LVM_GETNEXTITEM = LVM_FIRST + 12;
+    private const int LVM_GETITEMRECT = LVM_FIRST + 14;
     private const int LVM_ENSUREVISIBLE = LVM_FIRST + 19;
     private const int LVM_REDRAWITEMS = LVM_FIRST + 21;
     private const int LVM_ARRANGE = LVM_FIRST + 22;
@@ -95,6 +99,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
 
     private const int LVNI_SELECTED = 0x0002;
     private const int LVNI_VISIBLEONLY = 0x0040;
+    private const int LVIR_BOUNDS = 0;
     private const uint LVIS_SELECTED = 0x0002;
     private const uint LVIF_TEXT = 0x0001;
     private const uint LVIF_IMAGE = 0x0002;
@@ -110,6 +115,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint ILC_MASK = 0x0001;
     private const uint ILC_COLOR32 = 0x0020;
     private const int LVA_DEFAULT = 0x0000;
+    private const uint CLR_NONE = 0xFFFFFFFF;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
     private const uint CDDS_PREPAINT = 0x00000001;
@@ -176,10 +182,10 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _gdiPlusToken = StartGdiPlus();
 
         Handle = CreateWindowExW(
-            0,
+            WS_EX_TRANSPARENT,
             "STATIC",
             string.Empty,
-            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+            WS_CHILD | WS_VISIBLE,
             0, 0, 100, 100,
             parent,
             0,
@@ -194,11 +200,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
             throw new InvalidOperationException($"Unable to subclass native desktop host: {Marshal.GetLastWin32Error()}");
 
         ListHandle = CreateWindowExW(
-            0,
+            WS_EX_TRANSPARENT,
             "SysListView32",
             string.Empty,
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS |
-            LVS_SHAREIMAGELISTS | LVS_AUTOARRANGE | LVS_NOCOLUMNHEADER,
+            LVS_SHAREIMAGELISTS | LVS_NOLABELWRAP | LVS_AUTOARRANGE | LVS_NOCOLUMNHEADER,
             0, 0, 100, 100,
             Handle,
             0,
@@ -210,7 +216,8 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _dpi = Math.Max(96u, GetDpiForWindow(ListHandle));
         RecreateNativeResources();
         SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
-            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP));
+            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP |
+                   LVS_EX_TRANSPARENTBKGND | LVS_EX_TRANSPARENTSHADOWTEXT));
         SetWindowTheme(ListHandle, "Explorer", null);
         ConfigureColumns();
         ApplyPaletteToNativeWindow();

@@ -211,6 +211,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     private static extern int SetWindowTheme(nint hwnd, string? subAppName, string? subIdList);
 
+    [DllImport("uxtheme.dll")]
+    private static extern int DrawThemeParentBackground(nint hwnd, nint hdc, ref RECT rect);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint LoadIconW(nint hInstance, nint iconName);
 
@@ -226,6 +229,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     [DllImport("gdi32.dll")]
     private static extern nint GetStockObject(int index);
+
+    [DllImport("gdi32.dll")]
+    private static extern int SaveDC(nint hdc);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RestoreDC(nint hdc, int savedDc);
+
+    [DllImport("gdi32.dll")]
+    private static extern int SelectClipRgn(nint hdc, nint region);
+
+    [DllImport("gdi32.dll")]
+    private static extern int IntersectClipRect(nint hdc, int left, int top, int right, int bottom);
 
     [DllImport("user32.dll")]
     private static extern int FillRect(nint hdc, ref RECT rect, nint brush);
