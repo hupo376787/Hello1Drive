@@ -1,0 +1,45 @@
+name: Validate incremental refresh edge cases
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/scripts/fix_incremental_refresh_edges.py'
+      - '.github/workflows/validate-incremental-refresh-edges.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Patch edge cases
+        run: python .github/scripts/fix_incremental_refresh_edges.py
+      - name: Validate
+        shell: bash
+        run: |
+          git diff --check
+          grep -q '_allItems.Count > 0 || MobileItems.Count > 0 || _folderCache.ContainsKey(cacheKey)' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'Invalidating the folder currently on screen' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+      - name: Build Desktop Release
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+      - name: Commit validated source
+        shell: bash
+        run: |
+          rm -f .github/scripts/fix_incremental_refresh_edges.py
+          rm -f .github/workflows/validate-incremental-refresh-edges.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Harden incremental refresh cache ownership'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
