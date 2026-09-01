@@ -94,6 +94,11 @@ public sealed class AppSettingsService
             .Select(g => g.Last())
             .ToList();
 
+        // View mode is no longer a mutable global fallback. Every folder has its own
+        // remembered choice; folders without a saved rule always start in Large Icons.
+        // Normalize the legacy fallback as well so older settings.json files migrate cleanly.
+        Current.ViewMode = FileViewMode.LargeIcons;
+
         if (!Enum.IsDefined(typeof(FileSortColumn), Current.DefaultSortColumn) ||
             Current.DefaultSortColumn == FileSortColumn.LegacyType ||
             !Enum.IsDefined(typeof(SortCycleState), Current.DefaultSortState))

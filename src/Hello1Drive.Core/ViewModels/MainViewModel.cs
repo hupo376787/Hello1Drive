@@ -147,7 +147,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool isSettingsPanelVisible;
     [ObservableProperty] private bool isTransferPanelVisible;
 
-    [ObservableProperty] private FileViewMode viewMode = FileViewMode.Details;
+    [ObservableProperty] private FileViewMode viewMode = FileViewMode.LargeIcons;
     [ObservableProperty] private FileSortColumn sortColumn = FileSortColumn.None;
     [ObservableProperty] private SortCycleState sortState = SortCycleState.Original;
     [ObservableProperty] private int selectionCount;
@@ -220,6 +220,14 @@ public partial class MainViewModel : ViewModelBase
     public bool IsDetailsView => ViewMode == FileViewMode.Details;
     public bool IsLargeIconView => ViewMode == FileViewMode.LargeIcons;
     public bool IsExtraLargeIconView => ViewMode == FileViewMode.ExtraLargeIcons;
+
+    public bool IsSystemDefaultSort => SortState == SortCycleState.Original || SortColumn == FileSortColumn.None;
+    public bool IsNameAscendingSort => SortColumn == FileSortColumn.Name && SortState == SortCycleState.Ascending;
+    public bool IsNameDescendingSort => SortColumn == FileSortColumn.Name && SortState == SortCycleState.Descending;
+    public bool IsModifiedAscendingSort => SortColumn == FileSortColumn.Modified && SortState == SortCycleState.Ascending;
+    public bool IsModifiedDescendingSort => SortColumn == FileSortColumn.Modified && SortState == SortCycleState.Descending;
+    public bool IsSizeAscendingSort => SortColumn == FileSortColumn.Size && SortState == SortCycleState.Ascending;
+    public bool IsSizeDescendingSort => SortColumn == FileSortColumn.Size && SortState == SortCycleState.Descending;
 
     public string NameSortIndicator => SortIndicator(FileSortColumn.Name);
     public string SizeSortIndicator => SortIndicator(FileSortColumn.Size);
@@ -1417,9 +1425,8 @@ public partial class MainViewModel : ViewModelBase
     {
         ViewMode = mode;
 
-        // Keep the existing setting as the fallback for a folder that has never been visited,
-        // and remember the explicit choice for this account + folder independently.
-        Settings.ViewMode = mode;
+        // View mode is strictly per account + folder. Do not mutate a global fallback when
+        // one folder changes; an unremembered folder always starts in Large Icons.
         RememberCurrentFolderViewMode();
         await _settingsService.SaveAsync();
     }
@@ -1446,7 +1453,7 @@ public partial class MainViewModel : ViewModelBase
         var key = CurrentFolderViewMemoryKey();
         var remembered = Settings.FolderViewModes.LastOrDefault(
             x => string.Equals(x.FolderKey, key, StringComparison.Ordinal));
-        ViewMode = remembered?.ViewMode ?? Settings.ViewMode;
+        ViewMode = remembered?.ViewMode ?? FileViewMode.LargeIcons;
     }
 
     public async Task CycleSortAsync(FileSortColumn column)
@@ -1501,10 +1508,11 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task UseDefaultSortForCurrentFolderAsync()
     {
-        var key = CurrentFolderSortMemoryKey();
-        Settings.FolderSortRules.RemoveAll(x => string.Equals(x.FolderKey, key, StringComparison.Ordinal));
-        ApplyGlobalDefaultSortToCurrentState();
-        await _settingsService.SaveAsync();
+        // “系统默认” is an explicit folder choice: use the OneDrive/API original order and
+        // persist it just like every other sort option. It must not silently inherit a global rule.
+        SortColumn = FileSortColumn.None;
+        SortState = SortCycleState.Original;
+        await PersistCurrentFolderSortRuleAsync();
 
         var navigation = BeginFolderNavigation(FolderNavigationReason.Sort);
         await RunFolderNavigationAsync(
@@ -1565,20 +1573,23 @@ public partial class MainViewModel : ViewModelBase
         SortState = rule.State;
     }
 
-    private async Task PersistCurrentFolderSortRuleAsync()
+    private void RememberCurrentFolderSortRule()
     {
         var key = CurrentFolderSortMemoryKey();
         Settings.FolderSortRules.RemoveAll(x => string.Equals(x.FolderKey, key, StringComparison.Ordinal));
 
-        // Always persist the folder choice, including API-original order.
-        // This is what lets one folder override a non-default global sort.
         Settings.FolderSortRules.Add(new RememberedFolderSortRule
         {
             FolderKey = key,
             Column = SortState == SortCycleState.Original ? FileSortColumn.None : SortColumn,
             State = SortState
         });
+    }
 
+    private async Task PersistCurrentFolderSortRuleAsync()
+    {
+        // Always persist the folder choice, including API-original order.
+        RememberCurrentFolderSortRule();
         await _settingsService.SaveAsync();
     }
 
@@ -1617,13 +1628,16 @@ public partial class MainViewModel : ViewModelBase
         Settings.DefaultSortColumn = column;
         Settings.DefaultSortState = state;
 
-        // The user explicitly asked that changing the setting overwrite all
-        // folder-specific rules. New per-folder overrides can be created afterwards.
-        Settings.FolderSortRules.Clear();
-        ApplyGlobalDefaultSortToCurrentState();
+        // A default only applies to folders that have never recorded their own choice.
+        // Existing per-folder rules remain independent and must never be erased here.
+        var currentKey = CurrentFolderSortMemoryKey();
+        var currentHasOwnRule = Settings.FolderSortRules.Any(
+            x => string.Equals(x.FolderKey, currentKey, StringComparison.Ordinal));
+        if (!currentHasOwnRule)
+            ApplyGlobalDefaultSortToCurrentState();
         await _settingsService.SaveAsync();
 
-        if (!IsAuthenticated)
+        if (!IsAuthenticated || currentHasOwnRule)
             return;
 
         var navigation = BeginFolderNavigation(FolderNavigationReason.Sort);
@@ -1667,6 +1681,13 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(NameSortIndicator));
         OnPropertyChanged(nameof(SizeSortIndicator));
         OnPropertyChanged(nameof(ModifiedSortIndicator));
+        OnPropertyChanged(nameof(IsSystemDefaultSort));
+        OnPropertyChanged(nameof(IsNameAscendingSort));
+        OnPropertyChanged(nameof(IsNameDescendingSort));
+        OnPropertyChanged(nameof(IsModifiedAscendingSort));
+        OnPropertyChanged(nameof(IsModifiedDescendingSort));
+        OnPropertyChanged(nameof(IsSizeAscendingSort));
+        OnPropertyChanged(nameof(IsSizeDescendingSort));
     }
 
     public async Task LoadPreviewAsync(DriveItemModel item, bool preserveSlideshow = false)
@@ -2719,7 +2740,7 @@ public partial class MainViewModel : ViewModelBase
             AppThemeMode.Dark => "深色",
             _ => "跟随系统"
         };
-        ViewMode = s.ViewMode;
+        ViewMode = FileViewMode.LargeIcons;
         SelectedBackgroundModeText = s.BackgroundMode switch
         {
             WindowBackgroundMode.Color => "纯色",
@@ -3351,9 +3372,10 @@ public partial class MainViewModel : ViewModelBase
 
     private CancellationTokenSource BeginFolderNavigation(FolderNavigationReason reason)
     {
-        // Capture the view of the folder we are leaving before Breadcrumbs changes. This makes
-        // even inherited/default views become an explicit per-folder memory after the first visit.
+        // Capture the view and sort of the folder we are leaving before Breadcrumbs changes.
+        // Even untouched defaults become explicit per-folder JSON after the first visit.
         RememberCurrentFolderViewMode();
+        RememberCurrentFolderSortRule();
         _ = _settingsService.SaveAsync();
 
         // Stop work that belongs to the folder we are leaving. Old thumbnail requests and the
@@ -4112,11 +4134,14 @@ public partial class MainViewModel : ViewModelBase
         CurrentLocation = string.Join(" / ", Breadcrumbs.Select(x => x.Name));
         StatusText = $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 个项目";
         SetSelectedItems([]);
+
+        // Persist the effective state for every folder that is actually presented, including the
+        // Large Icons / System Default first-visit defaults. This keeps restart behavior deterministic.
+        RememberCurrentFolderViewMode();
+        RememberCurrentFolderSortRule();
         if (RememberLastFolder)
-        {
             CaptureCurrentFolderMemory();
-            _ = _settingsService.SaveAsync();
-        }
+        _ = _settingsService.SaveAsync();
 
         if (IsAuthenticated && !string.IsNullOrWhiteSpace(CurrentAccountId))
             ScheduleStartupSnapshotSave();

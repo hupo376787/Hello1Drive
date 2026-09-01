@@ -69,13 +69,13 @@ public sealed class RememberedFolderSortRule
 public sealed class RememberedFolderViewMode
 {
     public string FolderKey { get; set; } = string.Empty;
-    public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
+    public FileViewMode ViewMode { get; set; } = FileViewMode.LargeIcons;
 }
 
 public sealed class AppSettings
 {
     public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
-    public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
+    public FileViewMode ViewMode { get; set; } = FileViewMode.LargeIcons;
     public WindowBackgroundMode BackgroundMode { get; set; } = WindowBackgroundMode.Default;
     public string BackgroundColor { get; set; } = "#F7F7F8";
     public string BackgroundUrl { get; set; } = string.Empty;

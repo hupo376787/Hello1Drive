@@ -762,14 +762,63 @@
               <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
               <Button.Flyout>
                 <MenuFlyout>
-                  <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
+                  <MenuItem Tag="Inherit:Default" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSystemDefaultSort}" />
+    <TextBlock Grid.Column="1" Text="系统默认" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                   <Separator />
-                  <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
-                  <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
-                  <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
-                  <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
-                  <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
-                  <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
+                  <MenuItem Tag="Name:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                  <MenuItem Tag="Name:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                  <MenuItem Tag="Modified:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                  <MenuItem Tag="Modified:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                  <MenuItem Tag="Size:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                  <MenuItem Tag="Size:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                 </MenuFlyout>
               </Button.Flyout>
             </Button>
@@ -777,13 +826,31 @@
               <Path Classes="toolbarIcon iconView opticalUp" Data="M1.5,2.4 H5.4 M1.5,7 H5.4 M1.5,11.6 H5.4 M8.4,2.4 H11.8 V5.8 H8.4 Z M8.4,8.2 H11.8 V11.6 H8.4 Z" />
               <Button.Flyout>
                 <MenuFlyout>
-                  <MenuItem Header="详细信息" Tag="Details" Click="ViewContextMenu_Click">
+                  <MenuItem Tag="Details" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
+    <TextBlock Grid.Column="1" Text="详细信息" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                     <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
                   </MenuItem>
-                  <MenuItem Header="大图标" Tag="LargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem Tag="LargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
+    <TextBlock Grid.Column="1" Text="大图标" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                     <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
                   </MenuItem>
-                  <MenuItem Header="超大图标" Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
+    <TextBlock Grid.Column="1" Text="超大图标" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                     <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
                   </MenuItem>
                 </MenuFlyout>
@@ -833,26 +900,87 @@
             </MenuItem>
             <MenuItem Header="查看">
               <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
-              <MenuItem Header="详细信息" Tag="Details" Click="ViewContextMenu_Click">
+              <MenuItem Tag="Details" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
+    <TextBlock Grid.Column="1" Text="详细信息" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                 <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,3 H4 M5.5,3 H12 M1.5,7 H4 M5.5,7 H12 M1.5,11 H4 M5.5,11 H12" /></MenuItem.Icon>
               </MenuItem>
-              <MenuItem Header="大图标" Tag="LargeIcons" Click="ViewContextMenu_Click">
+              <MenuItem Tag="LargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
+    <TextBlock Grid.Column="1" Text="大图标" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                 <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H6 V6 H1.5 Z M8,1.5 H12.5 V6 H8 Z M1.5,8 H6 V12.5 H1.5 Z M8,8 H12.5 V12.5 H8 Z" /></MenuItem.Icon>
               </MenuItem>
-              <MenuItem Header="超大图标" Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+              <MenuItem Tag="ExtraLargeIcons" Click="ViewContextMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
+    <TextBlock Grid.Column="1" Text="超大图标" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
                 <MenuItem.Icon><Path Classes="menuIcon iconView" Data="M1.5,1.5 H7 V7 H1.5 Z M8.5,1.5 H12.5 V7 H8.5 Z M1.5,8.5 H7 V12.5 H1.5 Z M8.5,8.5 H12.5 V12.5 H8.5 Z" /></MenuItem.Icon>
               </MenuItem>
             </MenuItem>
             <MenuItem Header="排序方式">
               <MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M2,3 H11 M4,7 H11 M6,11 H11" /></MenuItem.Icon>
-              <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
+              <MenuItem Tag="Inherit:Default" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSystemDefaultSort}" />
+    <TextBlock Grid.Column="1" Text="系统默认" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
               <Separator />
-              <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
-              <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
-              <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
-              <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
-              <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
-              <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click"><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Name:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Name:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,4 H12 M8,7 H11 M8,10 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Modified:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Modified:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,3 H12 M8,7 H11 M8,11 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Size:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,11 V3 M2,5 L4,3 L6,5 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
+              <MenuItem Tag="Size:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header><MenuItem.Icon><Path Classes="menuIcon iconSort" Data="M4,3 V11 M2,9 L4,11 L6,9 M8,10 H12 M8,7 H11 M8,4 H10" /></MenuItem.Icon></MenuItem>
             </MenuItem>
             <MenuItem Header="返回主页" Command="{Binding GoRootCommand}">
               <MenuItem.Icon><Path Classes="menuIcon iconHome" Data="M1.5,6.2 L7,1.8 L12.5,6.2 M3.5,5.1 V11.5 H10.5 V5.1" /></MenuItem.Icon>
@@ -877,14 +1005,63 @@
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
                 <Button.Flyout>
                   <MenuFlyout>
-                    <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
+                    <MenuItem Tag="Inherit:Default" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSystemDefaultSort}" />
+    <TextBlock Grid.Column="1" Text="系统默认" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                     <Separator />
-                    <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
+                    <MenuItem Tag="Name:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Name:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Modified:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Modified:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Size:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Size:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                   </MenuFlyout>
                 </Button.Flyout>
               </Button>
@@ -938,14 +1115,63 @@
                 <Path Classes="toolbarIcon iconSort" Width="12" Height="12" Data="M2,3 H11 M4,7 H11 M6,11 H11" />
                 <Button.Flyout>
                   <MenuFlyout>
-                    <MenuItem Header="系统默认" Tag="Inherit:Default" Click="SortMenu_Click" />
+                    <MenuItem Tag="Inherit:Default" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSystemDefaultSort}" />
+    <TextBlock Grid.Column="1" Text="系统默认" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                     <Separator />
-                    <MenuItem Header="名称 · 升序" Tag="Name:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="名称 · 降序" Tag="Name:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 升序" Tag="Modified:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="日期 · 降序" Tag="Modified:Descending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 升序" Tag="Size:Ascending" Click="SortMenu_Click" />
-                    <MenuItem Header="大小 · 降序" Tag="Size:Descending" Click="SortMenu_Click" />
+                    <MenuItem Tag="Name:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Name:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="名称 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Modified:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Modified:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="日期 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Size:Ascending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeAscendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 升序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
+                    <MenuItem Tag="Size:Descending" Click="SortMenu_Click">
+                  <MenuItem.Header>
+  <Grid ColumnDefinitions="10,*" ColumnSpacing="6">
+    <Ellipse Width="6" Height="6" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeDescendingSort}" />
+    <TextBlock Grid.Column="1" Text="大小 · 降序" VerticalAlignment="Center" />
+  </Grid>
+</MenuItem.Header>
+                </MenuItem>
                   </MenuFlyout>
                 </Button.Flyout>
               </Button>
@@ -1437,21 +1663,42 @@
               BorderBrush="#28FFFFFF" BorderThickness="1"
               PointerPressed="OverlayContent_PointerPressed">
         <StackPanel HorizontalAlignment="Stretch">
-          <Button Content="详细信息" Tag="Details"
+          <Button Tag="Details"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileViewModeAction_Click" />
-          <Button Content="大图标" Tag="LargeIcons"
+                  Click="MobileViewModeAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDetailsView}" />
+                <TextBlock Grid.Column="1" Text="详细信息" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="LargeIcons"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileViewModeAction_Click" />
-          <Button Content="超大图标" Tag="ExtraLargeIcons"
+                  Click="MobileViewModeAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsLargeIconView}" />
+                <TextBlock Grid.Column="1" Text="大图标" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="ExtraLargeIcons"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileViewModeAction_Click" />
+                  Click="MobileViewModeAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsExtraLargeIconView}" />
+                <TextBlock Grid.Column="1" Text="超大图标" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
         </StackPanel>
       </Border>
     </Grid>
@@ -1469,41 +1716,90 @@
               BorderBrush="#28FFFFFF" BorderThickness="1"
               PointerPressed="OverlayContent_PointerPressed">
         <StackPanel HorizontalAlignment="Stretch">
-          <Button Content="系统默认" Tag="Inherit:Default"
+          <Button Tag="Inherit:Default"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="名称 · 升序" Tag="Name:Ascending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSystemDefaultSort}" />
+                <TextBlock Grid.Column="1" Text="系统默认" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Name:Ascending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="名称 · 降序" Tag="Name:Descending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameAscendingSort}" />
+                <TextBlock Grid.Column="1" Text="名称 · 升序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Name:Descending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="日期 · 升序" Tag="Modified:Ascending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsNameDescendingSort}" />
+                <TextBlock Grid.Column="1" Text="名称 · 降序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Modified:Ascending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="日期 · 降序" Tag="Modified:Descending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedAscendingSort}" />
+                <TextBlock Grid.Column="1" Text="日期 · 升序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Modified:Descending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="大小 · 升序" Tag="Size:Ascending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsModifiedDescendingSort}" />
+                <TextBlock Grid.Column="1" Text="日期 · 降序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Size:Ascending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
-          <Button Content="大小 · 降序" Tag="Size:Descending"
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeAscendingSort}" />
+                <TextBlock Grid.Column="1" Text="大小 · 升序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
+          <Button Tag="Size:Descending"
                   Height="58" Padding="20,0" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
                   FontSize="18" Foreground="White" Background="Transparent" BorderThickness="0"
-                  Click="MobileSortAction_Click" />
+                  Click="MobileSortAction_Click">
+            <Button.Content>
+              <Grid ColumnDefinitions="12,*" ColumnSpacing="8">
+                <Ellipse Width="7" Height="7" Fill="{DynamicResource HelloAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsSizeDescendingSort}" />
+                <TextBlock Grid.Column="1" Text="大小 · 降序" Foreground="White" VerticalAlignment="Center" />
+              </Grid>
+            </Button.Content>
+          </Button>
         </StackPanel>
       </Border>
     </Grid>
