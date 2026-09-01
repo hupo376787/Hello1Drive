@@ -18,7 +18,10 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         Index = index;
         _item = item;
         if (_item is not null)
+        {
+            _item.AttachPresentation();
             _item.PropertyChanged += Item_PropertyChanged;
+        }
     }
 
     public int Index { get; }
@@ -47,12 +50,21 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
             return;
 
         if (_item is not null)
+        {
             _item.PropertyChanged -= Item_PropertyChanged;
+            _item.DetachPresentation();
+        }
 
         _item = item;
 
         if (_item is not null)
+        {
+            // Attach before exposing the new item to bindings/rendering. If the cache layer just
+            // replaced an equivalent model, AttachPresentation can adopt the decoded bitmap handed
+            // off by the old model, so the slot never paints an intermediate IMG/VID placeholder.
+            _item.AttachPresentation();
             _item.PropertyChanged += Item_PropertyChanged;
+        }
 
         // Desktop uses one retained self-drawn surface and reads the DriveItemModel directly.
         // A 200-item Graph page therefore needs only one notification per slot instead
@@ -79,7 +91,10 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
     public void Dispose()
     {
         if (_item is not null)
+        {
             _item.PropertyChanged -= Item_PropertyChanged;
+            _item.DetachPresentation();
+        }
         _item = null;
     }
 
