@@ -14,6 +14,7 @@ public class AppDelegate : AvaloniaAppDelegate<App>
         AppServices.Configure(
             new IosAuthenticationService(),
             platformShareService: new IosPlatformShareService(),
+            platformConfirmationService: new IosPlatformConfirmationService(),
             nativeMobileFileListFactory: new IosNativeMobileFileListFactory());
         return base.CustomizeAppBuilder(builder).LogToTrace();
     }
