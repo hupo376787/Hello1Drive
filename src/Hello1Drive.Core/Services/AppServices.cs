@@ -49,7 +49,7 @@ public static class AppServices
         IDesktopInputSettingsService? desktopInputSettingsService = null)
     {
         _authentication = authentication;
-        _oneDrive = new OneDriveService(authentication);
+        _oneDrive = new ResilientOneDriveService(new OneDriveService(authentication));
         _mediaPlayerFactory = mediaPlayerFactory;
         _platformShareService = platformShareService;
         _platformAppLifecycleService = platformAppLifecycleService;
