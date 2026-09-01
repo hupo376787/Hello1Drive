@@ -1,3 +1,5 @@
+using Hello1Drive.Services;
+
 namespace Hello1Drive.Android.Services;
 
 [global::Android.App.Service(
@@ -13,6 +15,10 @@ public sealed class TransferForegroundService : global::Android.App.Service
 
     private const string ChannelId = "hello1drive_transfers";
     private const int NotificationId = 14101;
+    private static readonly object InstanceSync = new();
+    private static TransferForegroundService? _instance;
+
+    private global::Android.OS.PowerManager.WakeLock? _transferWakeLock;
 
     public override global::Android.OS.IBinder? OnBind(global::Android.Content.Intent? intent) => null;
 
@@ -20,6 +26,35 @@ public sealed class TransferForegroundService : global::Android.App.Service
     {
         base.OnCreate();
         EnsureNotificationChannel();
+        lock (InstanceSync)
+            _instance = this;
+    }
+
+    /// <summary>
+    /// Updates an already-running foreground service without calling Context.StartService again.
+    /// Android restricts background service starts; once the dataSync FGS exists, updating its
+    /// notification directly is both cheaper and safe while the Activity is backgrounded.
+    /// </summary>
+    internal static bool TryUpdate(TransferBackgroundState state)
+    {
+        TransferForegroundService? instance;
+        lock (InstanceSync)
+            instance = _instance;
+
+        if (instance is null)
+            return false;
+
+        try
+        {
+            instance.ApplyState(state);
+            return true;
+        }
+        catch
+        {
+            // The service may be in the middle of OnDestroy. The bridge will keep the latest
+            // queue state and can start a new FGS on the next foreground-visible transfer event.
+            return false;
+        }
     }
 
     public override global::Android.App.StartCommandResult OnStartCommand(
@@ -27,19 +62,23 @@ public sealed class TransferForegroundService : global::Android.App.Service
         global::Android.App.StartCommandFlags flags,
         int startId)
     {
-        var activeCount = intent?.GetIntExtra(ExtraActiveCount, 0) ?? 0;
-        var runningCount = intent?.GetIntExtra(ExtraRunningCount, 0) ?? 0;
-        if (activeCount <= 0)
+        var state = new TransferBackgroundState(
+            ActiveCount: intent?.GetIntExtra(ExtraActiveCount, 0) ?? 0,
+            RunningCount: intent?.GetIntExtra(ExtraRunningCount, 0) ?? 0,
+            UploadCount: intent?.GetIntExtra(ExtraUploadCount, 0) ?? 0,
+            DownloadCount: intent?.GetIntExtra(ExtraDownloadCount, 0) ?? 0,
+            CacheCount: intent?.GetIntExtra(ExtraCacheCount, 0) ?? 0);
+
+        if (!state.HasActiveTransfers)
         {
+            ReleaseTransferWakeLock();
             StopForegroundCompat();
             StopSelf(startId);
             return global::Android.App.StartCommandResult.NotSticky;
         }
 
-        var uploadCount = intent?.GetIntExtra(ExtraUploadCount, 0) ?? 0;
-        var downloadCount = intent?.GetIntExtra(ExtraDownloadCount, 0) ?? 0;
-        var cacheCount = intent?.GetIntExtra(ExtraCacheCount, 0) ?? 0;
-        var notification = BuildNotification(activeCount, runningCount, uploadCount, downloadCount, cacheCount);
+        EnsureTransferWakeLock();
+        var notification = BuildNotification(state.ActiveCount, state.RunningCount, state.UploadCount, state.DownloadCount, state.CacheCount);
 
         // The overload that declares a foreground-service type was introduced in Android 10
         // (API 29). Android 9 and earlier use the original two-argument overload.
@@ -60,19 +99,83 @@ public sealed class TransferForegroundService : global::Android.App.Service
         return global::Android.App.StartCommandResult.NotSticky;
     }
 
+    private void ApplyState(TransferBackgroundState state)
+    {
+        if (!state.HasActiveTransfers)
+        {
+            ReleaseTransferWakeLock();
+            StopForegroundCompat();
+            StopSelf();
+            return;
+        }
+
+        EnsureTransferWakeLock();
+        var manager = GetSystemService(global::Android.Content.Context.NotificationService) as global::Android.App.NotificationManager;
+        manager?.Notify(
+            NotificationId,
+            BuildNotification(state.ActiveCount, state.RunningCount, state.UploadCount, state.DownloadCount, state.CacheCount));
+    }
+
     public override void OnTimeout(int startId, global::Android.Content.PM.ForegroundService fgsType)
     {
         // Android 15+ limits dataSync FGS time. Stop promptly when the platform asks us to avoid
-        // RemoteServiceException/ANR. A later foreground visit can resume persisted pending work.
+        // RemoteServiceException/ANR. Pending transfer metadata remains persisted for a later retry.
+        ReleaseTransferWakeLock();
         StopForegroundCompat();
         StopSelf(startId);
     }
 
     public override void OnDestroy()
     {
+        lock (InstanceSync)
+        {
+            if (ReferenceEquals(_instance, this))
+                _instance = null;
+        }
+
         AndroidTransferBackgroundService.NotifyServiceStopped();
+        ReleaseTransferWakeLock();
         StopForegroundCompat();
         base.OnDestroy();
+    }
+
+    private void EnsureTransferWakeLock()
+    {
+        if (_transferWakeLock?.IsHeld == true)
+            return;
+
+        var powerManager = GetSystemService(global::Android.Content.Context.PowerService) as global::Android.OS.PowerManager;
+        if (powerManager is null)
+            return;
+
+        _transferWakeLock ??= powerManager.NewWakeLock(
+            global::Android.OS.WakeLockFlags.Partial,
+            $"{PackageName}:Hello1DriveTransfer");
+        _transferWakeLock.SetReferenceCounted(false);
+        if (!_transferWakeLock.IsHeld)
+            _transferWakeLock.Acquire();
+    }
+
+    private void ReleaseTransferWakeLock()
+    {
+        var wakeLock = _transferWakeLock;
+        _transferWakeLock = null;
+        if (wakeLock is null)
+            return;
+
+        try
+        {
+            if (wakeLock.IsHeld)
+                wakeLock.Release();
+        }
+        catch
+        {
+            // The OS may have already released it while tearing down the service.
+        }
+        finally
+        {
+            wakeLock.Dispose();
+        }
     }
 
     private void StopForegroundCompat()
