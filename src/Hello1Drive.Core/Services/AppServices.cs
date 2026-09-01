@@ -49,10 +49,11 @@ public static class AppServices
         IStartupRegistrationService? startupRegistrationService = null,
         ITransferBackgroundService? transferBackgroundService = null,
         INativeMobileFileListFactory? nativeMobileFileListFactory = null,
-        IDesktopInputSettingsService? desktopInputSettingsService = null)
+        IDesktopInputSettingsService? desktopInputSettingsService = null,
+        IOneDriveService? oneDriveService = null)
     {
         _authentication = authentication;
-        _oneDrive = new ResilientOneDriveService(new OneDriveService(authentication));
+        _oneDrive = oneDriveService ?? new ResilientOneDriveService(new OneDriveService(authentication));
         _mediaPlayerFactory = mediaPlayerFactory;
         _platformShareService = platformShareService;
         _platformAppLifecycleService = platformAppLifecycleService;
