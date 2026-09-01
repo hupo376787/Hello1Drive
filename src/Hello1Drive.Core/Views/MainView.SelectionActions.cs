@@ -1,6 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
 using Hello1Drive.Models;
 using Hello1Drive.Services;
 using Hello1Drive.ViewModels;
@@ -11,13 +15,20 @@ public partial class MainView
 {
     private Button? _mobileSelectionRenameButton;
     private bool _desktopSelectionContextActionsAdded;
+    private Border? _desktopDestinationDialogChrome;
+    private bool _desktopDestinationOverlayHooksAttached;
 
     private void InitializeSelectionActionEnhancements()
     {
         if (IsMobilePlatform)
+        {
             EnsureMobileSelectionRenameButton();
+        }
         else
+        {
             EnsureDesktopSelectionContextActions();
+            EnsureDesktopDestinationDialogPresentation();
+        }
     }
 
     private void DisposeSelectionActionEnhancements()
@@ -25,6 +36,13 @@ public partial class MainView
         if (_mobileSelectionRenameButton is not null)
             _mobileSelectionRenameButton.Click -= MobileSelectionRename_Click;
         _mobileSelectionRenameButton = null;
+
+        if (_desktopDestinationOverlayHooksAttached)
+        {
+            MobileDestinationOverlay.PointerPressed -= DesktopDestinationOverlay_PointerPressed;
+            MobileDestinationOverlay.SizeChanged -= DesktopDestinationOverlay_SizeChanged;
+            _desktopDestinationOverlayHooksAttached = false;
+        }
     }
 
     private void EnsureMobileSelectionRenameButton()
@@ -120,6 +138,84 @@ public partial class MainView
         _desktopSelectionContextActionsAdded = true;
     }
 
+    private void EnsureDesktopDestinationDialogPresentation()
+    {
+        if (IsMobilePlatform)
+            return;
+
+        if (_desktopDestinationDialogChrome is null)
+        {
+            // MobileDestinationOverlay was originally a full-page mobile sheet. On desktop keep the
+            // existing folder-browser content, but host it inside a centered modal surface and turn
+            // the remaining area into a dismissible scrim.
+            var content = MobileDestinationOverlay.Children.OfType<Grid>().FirstOrDefault();
+            if (content is not null)
+            {
+                var originalBackground = MobileDestinationOverlay.Background;
+                MobileDestinationOverlay.Children.Remove(content);
+
+                _desktopDestinationDialogChrome = new Border
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = originalBackground,
+                    CornerRadius = new CornerRadius(12),
+                    ClipToBounds = true,
+                    Child = content
+                };
+
+                MobileDestinationOverlay.Background = new SolidColorBrush(Color.FromArgb(112, 0, 0, 0));
+                MobileDestinationOverlay.Children.Add(_desktopDestinationDialogChrome);
+            }
+        }
+
+        if (!_desktopDestinationOverlayHooksAttached)
+        {
+            MobileDestinationOverlay.PointerPressed += DesktopDestinationOverlay_PointerPressed;
+            MobileDestinationOverlay.SizeChanged += DesktopDestinationOverlay_SizeChanged;
+            _desktopDestinationOverlayHooksAttached = true;
+        }
+
+        ApplyDesktopDestinationDialogBounds();
+    }
+
+    private void DesktopDestinationOverlay_SizeChanged(object? sender, SizeChangedEventArgs e) =>
+        ApplyDesktopDestinationDialogBounds();
+
+    private void ApplyDesktopDestinationDialogBounds()
+    {
+        if (IsMobilePlatform || _desktopDestinationDialogChrome is not { } chrome)
+            return;
+
+        var width = MobileDestinationOverlay.Bounds.Width;
+        var height = MobileDestinationOverlay.Bounds.Height;
+        if (width <= 1)
+            width = Bounds.Width;
+        if (height <= 1)
+            height = Bounds.Height;
+        if (width <= 1 || height <= 1)
+            return;
+
+        // Requested desktop size: exactly half of the app width. Keep a modest vertical margin so
+        // the surface reads as a dialog instead of another full-screen page.
+        chrome.Width = width * 0.5;
+        chrome.Height = Math.Max(320, height * 0.84);
+    }
+
+    private void DesktopDestinationOverlay_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (IsMobilePlatform || !MobileDestinationOverlay.IsVisible)
+            return;
+
+        // Routed pointer events keep the original hit-test source. A click on the modal Border or
+        // anything inside it therefore does nothing; only the exposed outer Grid (the scrim) closes.
+        if (ReferenceEquals(e.Source, MobileDestinationOverlay))
+        {
+            CloseMobileDestinationPicker();
+            e.Handled = true;
+        }
+    }
+
     private async void DesktopSelectionCopyTo_Click(object? sender, RoutedEventArgs e) =>
         await OpenDesktopSelectionDestinationPickerAsync(MobileDestinationOperation.Copy);
 
@@ -142,6 +238,8 @@ public partial class MainView
         if (selected.Length == 0)
             return;
 
+        EnsureDesktopDestinationDialogPresentation();
+
         _mobileDestinationOperation = operation;
         _mobileDestinationPendingItems = selected;
         MobileDestinationTitle.Text = operation == MobileDestinationOperation.Move ? "移动到" : "复制到";
@@ -150,6 +248,8 @@ public partial class MainView
         // Reuse the existing OneDrive-only destination browser. On desktop it behaves as a modal
         // in-app folder chooser instead of invoking an OS local-folder picker.
         MobileDestinationOverlay.IsVisible = true;
+        ApplyDesktopDestinationDialogBounds();
+        Dispatcher.UIThread.Post(ApplyDesktopDestinationDialogBounds, DispatcherPriority.Loaded);
         vm.IsBusy = true;
         try
         {
