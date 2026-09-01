@@ -1,8 +1,11 @@
 using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Hello1Drive.Models;
+using Hello1Drive.Services;
 using Hello1Drive.ViewModels;
 
 namespace Hello1Drive.Views;
@@ -14,6 +17,14 @@ public partial class MainView
     private bool _finishedTransferActionHooked;
     private bool _preparingPersistedFailedRetries;
     private MainViewModel? _stableFolderLoadedViewModel;
+
+    // The old mobile restore path remembered only an integer row index. That is not a stable
+    // position once a folder receives a cloud diff while we are inside a child folder. Keep the
+    // first visible OneDrive item ID as the primary anchor and use the saved index only as fallback.
+    private readonly Dictionary<string, string> _nativeFolderScrollAnchorIds = new(StringComparer.Ordinal);
+    private MainViewModel? _nativeScrollAnchorViewModel;
+
+    private Button? _mobileSelectionDeleteButton;
 
     protected override void OnInitialized()
     {
@@ -28,7 +39,9 @@ public partial class MainView
         // pre-await section has therefore already subscribed the default FolderLoaded handler.
         // Replace just that handler with the guarded version below before initialization finishes.
         AttachStableFolderLoadedHandler();
+        AttachNativeScrollAnchorHandler();
         AttachFinishedTransferAction();
+        PolishMobileSelectionActionBar();
 
         if (DataContext is MainViewModel { IsAuthenticated: true } vm)
             _ = PreparePersistedFailedTransferRetriesAsync(vm);
@@ -38,6 +51,11 @@ public partial class MainView
     {
         DetachFinishedTransferAction();
         DetachStableFolderLoadedHandler();
+        DetachNativeScrollAnchorHandler();
+
+        if (_mobileSelectionDeleteButton is not null)
+            _mobileSelectionDeleteButton.Click -= MobileSelectionDeleteDialog_Click;
+        _mobileSelectionDeleteButton = null;
 
         if (DataContext is MainViewModel vm)
         {
@@ -84,6 +102,66 @@ public partial class MainView
         _stableFolderLoadedViewModel = null;
     }
 
+    private void AttachNativeScrollAnchorHandler()
+    {
+        if (!UsesNativeMobileFileList || DataContext is not MainViewModel vm)
+            return;
+        if (ReferenceEquals(_nativeScrollAnchorViewModel, vm))
+            return;
+
+        DetachNativeScrollAnchorHandler();
+        vm.FolderNavigating += CaptureNativeFolderScrollAnchor;
+        _nativeScrollAnchorViewModel = vm;
+    }
+
+    private void DetachNativeScrollAnchorHandler()
+    {
+        if (_nativeScrollAnchorViewModel is not { } vm)
+            return;
+
+        vm.FolderNavigating -= CaptureNativeFolderScrollAnchor;
+        _nativeScrollAnchorViewModel = null;
+    }
+
+    private void CaptureNativeFolderScrollAnchor(object? sender, FolderNavigationEventArgs e)
+    {
+        if (!UsesNativeMobileFileList || sender is not MainViewModel vm || _nativeMobileFileListHost is null)
+            return;
+
+        var slots = vm.MobileItems;
+        if (slots.Count == 0)
+            return;
+
+        var index = Math.Clamp(_nativeMobileFileListHost.LastFirstVisibleIndex, 0, slots.Count - 1);
+        string? anchorId = null;
+
+        // The first visible slot is normally loaded. If it is a temporary virtual placeholder,
+        // search the nearest loaded slot rather than throwing away the stable OneDrive identity.
+        for (var i = index; i < Math.Min(slots.Count, index + 12); i++)
+        {
+            if (slots[i].Item is { Id.Length: > 0 } item)
+            {
+                anchorId = item.Id;
+                break;
+            }
+        }
+
+        if (anchorId is null)
+        {
+            for (var i = index - 1; i >= Math.Max(0, index - 12); i--)
+            {
+                if (slots[i].Item is { Id.Length: > 0 } item)
+                {
+                    anchorId = item.Id;
+                    break;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(anchorId))
+            _nativeFolderScrollAnchorIds[e.FolderKey] = anchorId;
+    }
+
     private void Vm_FolderLoadedStable(object? sender, FolderNavigationEventArgs e)
     {
         if (sender is MainViewModel vm &&
@@ -97,10 +175,196 @@ public partial class MainView
             return;
         }
 
+        var resolvedNativePosition = -1;
+        if (sender is MainViewModel loadedVm && UsesNativeMobileFileList && e.ShouldRestoreScroll &&
+            _nativeFolderScrollAnchorIds.TryGetValue(e.FolderKey, out var anchorId))
+        {
+            for (var i = 0; i < loadedVm.MobileItems.Count; i++)
+            {
+                if (string.Equals(loadedVm.MobileItems[i].Id, anchorId, StringComparison.Ordinal))
+                {
+                    resolvedNativePosition = i;
+                    _nativeFolderScrollPositions[e.FolderKey] = i;
+                    break;
+                }
+            }
+        }
+
         // Sort is intentionally not suppressed here. Its existing FolderLoaded semantics reset the
         // viewport to the top; treating Sort like a background Refresh would leave users anchored
         // in the middle of a newly ordered folder.
         Vm_FolderLoaded(sender, e);
+
+        if (sender is not MainViewModel currentVm || !UsesNativeMobileFileList || !e.ShouldRestoreScroll)
+            return;
+
+        if (resolvedNativePosition < 0 &&
+            _nativeFolderScrollPositions.TryGetValue(e.FolderKey, out var savedPosition))
+        {
+            resolvedNativePosition = savedPosition;
+        }
+
+        if (resolvedNativePosition < 0)
+            return;
+
+        var position = resolvedNativePosition;
+
+        // Vm_FolderLoaded historically called ScrollToPosition and then RefreshNativePresentation.
+        // Some RecyclerView/UICollectionView reload paths apply their layout after that first scroll
+        // and move the list again. Re-apply the stable anchor once after the native presentation has
+        // completed. This is the key fix for "back to parent but not at the old position".
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(DataContext, currentVm) ||
+                !string.Equals(CurrentMobileFolderKey(currentVm), e.FolderKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _nativeMobileFileListHost?.ScrollToPosition(position);
+        }, DispatcherPriority.Loaded);
+    }
+
+    private static string CurrentMobileFolderKey(MainViewModel vm) =>
+        string.IsNullOrWhiteSpace(vm.CurrentFolderId) ? "__ROOT__" : vm.CurrentFolderId;
+
+    private void PolishMobileSelectionActionBar()
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        var actionStrip = EnumerateControls(MobileSelectionActionBar)
+            .OfType<StackPanel>()
+            .FirstOrDefault(panel =>
+                panel.Orientation == Orientation.Horizontal &&
+                panel.Children.OfType<Button>().Count() >= 4);
+        if (actionStrip is null)
+            return;
+
+        var buttons = actionStrip.Children.OfType<Button>().ToArray();
+        var shareButton = buttons.FirstOrDefault(button => ButtonContainsText(button, "分享"));
+        var deleteButton = buttons.FirstOrDefault(button => ButtonContainsText(button, "删除"));
+
+        // Sharing is intentionally the least common bulk action. Keep the destructive/local file
+        // actions together and move Share to the far right as requested.
+        if (shareButton is not null && !ReferenceEquals(actionStrip.Children.LastOrDefault(), shareButton))
+        {
+            actionStrip.Children.Remove(shareButton);
+            actionStrip.Children.Add(shareButton);
+        }
+
+        if (deleteButton is null)
+            return;
+
+        // Replace the XAML page-style delete confirmation with a platform-native alert. Because
+        // this is another partial of MainView we can unsubscribe the original private handler
+        // directly instead of layering a second routed click on top of it.
+        deleteButton.Click -= MobileSelectionDelete_Click;
+        deleteButton.Click -= MobileSelectionDeleteDialog_Click;
+        deleteButton.Click += MobileSelectionDeleteDialog_Click;
+        _mobileSelectionDeleteButton = deleteButton;
+    }
+
+    private static bool ButtonContainsText(Button button, string expected)
+    {
+        if (button.Content is string text && string.Equals(text, expected, StringComparison.Ordinal))
+            return true;
+
+        return EnumerateControls(button)
+            .OfType<TextBlock>()
+            .Any(textBlock => string.Equals(textBlock.Text, expected, StringComparison.Ordinal));
+    }
+
+    private async void MobileSelectionDeleteDialog_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm)
+            return;
+
+        var selected = vm.SelectedItemsSnapshot.ToArray();
+        if (selected.Length == 0)
+            return;
+
+        var title = selected.Length == 1 ? "删除项目" : $"删除 {selected.Length} 个项目";
+        var message = selected.Length == 1
+            ? $"确定删除“{selected[0].Name}”吗？此操作会将项目移入 OneDrive 回收站。"
+            : $"确定删除已选择的 {selected.Length} 个项目吗？这些项目会移入 OneDrive 回收站。";
+
+        var confirmation = AppServices.PlatformConfirmationService;
+        if (confirmation is null)
+        {
+            // Non-mobile/fallback heads keep the existing Avalonia confirmation behavior.
+            vm.ShowConfirmation(
+                title,
+                message,
+                async () => await DeleteMobileSelectionWithoutReloadAsync(vm, selected),
+                useBusy: false);
+            return;
+        }
+
+        var accepted = await confirmation.ConfirmAsync(title, message, "删除", "取消");
+        if (!accepted)
+            return;
+
+        await DeleteMobileSelectionWithoutReloadAsync(vm, selected);
+    }
+
+    private async Task DeleteMobileSelectionWithoutReloadAsync(
+        MainViewModel vm,
+        IReadOnlyList<DriveItemModel> selected)
+    {
+        if (_mobileSelectionDeleteButton is { } deleteButton)
+            deleteButton.IsEnabled = false;
+
+        var deletedIds = new List<string>(selected.Count);
+        var failures = new List<string>();
+
+        try
+        {
+            foreach (var item in selected)
+            {
+                try
+                {
+                    await AppServices.OneDrive.DeleteAsync(item.Id);
+                    AppServices.FileCache.Invalidate(item.Id);
+                    AppServices.ThumbnailCache.Invalidate(item.Id);
+                    deletedIds.Add(item.Id);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{item.Name}：{ex.Message}");
+                }
+            }
+
+            if (deletedIds.Count > 0)
+            {
+                // The successful rows disappear through the same stable-slot incremental path used
+                // by cloud reconciliation. Do not clear the folder and do not call
+                // LoadCurrentFolderAsync/RefreshCurrentFolderAsync here.
+                vm.RemoveCurrentFolderItemsIncrementally(deletedIds);
+            }
+
+            ClearListSelections();
+
+            if (failures.Count == 0)
+            {
+                vm.ErrorMessage = null;
+                vm.StatusText = deletedIds.Count == 1
+                    ? "已移入 OneDrive 回收站"
+                    : $"已删除 {deletedIds.Count} 个项目";
+            }
+            else
+            {
+                vm.ErrorMessage = string.Join(Environment.NewLine, failures.Take(3));
+                vm.StatusText = deletedIds.Count > 0
+                    ? $"已删除 {deletedIds.Count} 项，{failures.Count} 项失败"
+                    : "删除失败";
+            }
+        }
+        finally
+        {
+            if (_mobileSelectionDeleteButton is { } button)
+                button.IsEnabled = true;
+        }
     }
 
     private void AttachFinishedTransferAction()
