@@ -23,6 +23,10 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
 
         if (!state.HasActiveTransfers)
         {
+            // If the service instance is alive, let it release the partial wake lock before
+            // StopService tears it down. This also updates state synchronously when the final
+            // transfer completes while the Activity is already backgrounded.
+            TransferForegroundService.TryUpdate(state);
             context.StopService(intent);
             lock (ServiceSync)
                 _serviceStarted = false;
@@ -31,22 +35,29 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
 
         TryRequestNotificationPermission();
 
+        // Once the foreground service is running, never call Context.StartService just to refresh
+        // counts. Android applies background-service start restrictions even when an FGS already
+        // exists; update the notification/wake-lock state through the live service instance instead.
+        if (TransferForegroundService.TryUpdate(state))
+        {
+            lock (ServiceSync)
+                _serviceStarted = true;
+            return;
+        }
+
         intent.PutExtra(TransferForegroundService.ExtraActiveCount, state.ActiveCount);
         intent.PutExtra(TransferForegroundService.ExtraRunningCount, state.RunningCount);
         intent.PutExtra(TransferForegroundService.ExtraUploadCount, state.UploadCount);
         intent.PutExtra(TransferForegroundService.ExtraDownloadCount, state.DownloadCount);
         intent.PutExtra(TransferForegroundService.ExtraCacheCount, state.CacheCount);
 
-        // Start the FGS while the user-visible transfer is first queued. Once it already exists,
-        // regular StartService calls only update its notification; this avoids trying to create a
-        // new foreground service from the background between queued files.
+        // Start the FGS while the user-visible transfer is first queued. If a start is already in
+        // flight but OnCreate has not published the service instance yet, do not issue a second
+        // background start; the first intent already contains enough state to promote the service.
         lock (ServiceSync)
         {
             if (_serviceStarted)
-            {
-                context.StartService(intent);
                 return;
-            }
 
             // StartForegroundService was introduced in Android 8.0 (API 26). Older supported
             // Android versions start the service normally and the service immediately promotes
