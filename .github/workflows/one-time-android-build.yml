@@ -1,0 +1,23 @@
+name: One-time Android build
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install Android workload
+        run: dotnet workload install android
+      - name: Restore Android
+        run: dotnet restore src/Hello1Drive.Android/Hello1Drive.Android.csproj
+      - name: Build Android Debug
+        run: dotnet build src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Debug --no-restore
