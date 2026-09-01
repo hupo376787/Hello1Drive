@@ -1,0 +1,53 @@
+name: Validate incremental folder refresh
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/scripts/apply_incremental_folder_refresh.py'
+      - '.github/workflows/validate-incremental-folder-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply incremental refresh patch
+        run: python .github/scripts/apply_incremental_folder_refresh.py
+
+      - name: Validate source diff
+        shell: bash
+        run: |
+          git diff --check
+          grep -q 'ApplyFolderItemsIncrementally' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'FolderItemsIncrementalChanging' src/Hello1Drive.Core/ViewModels/MainViewModel.cs
+          grep -q 'ApplyMetadataFrom' src/Hello1Drive.Core/Models/GraphModels.cs
+          grep -q 'GetItemTop' src/Hello1Drive.Core/Controls/DesktopVirtualFileSurface.cs
+          grep -q 'Vm_FolderItemsIncrementalChanged' src/Hello1Drive.Core/Views/MainView.axaml.cs
+
+      - name: Build Desktop Release
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+      - name: Commit validated source to PR branch
+        shell: bash
+        run: |
+          rm -f .github/scripts/apply_incremental_folder_refresh.py
+          rm -f .github/workflows/validate-incremental-folder-refresh.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Use incremental folder cache reconciliation'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
