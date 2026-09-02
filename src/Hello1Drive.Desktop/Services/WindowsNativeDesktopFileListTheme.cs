@@ -55,8 +55,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return color;
         }
 
-        // Card/placeholder blending still needs a stable base color. The ListView background itself
-        // is CLR_NONE and is painted from the Avalonia parent by DrawThemeParentBackground.
         return dark ? Rgb(31, 32, 36) : Rgb(247, 247, 248);
     }
 
@@ -118,17 +116,17 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _palette = BuildPalette();
         var palette = _palette;
         SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
+        ApplyNativeTransparency();
 
-        // CLR_NONE is important here: a normal COLORREF makes the native control erase the whole
-        // file area before custom draw, which is exactly the opaque white rectangle visible in the
-        // regression screenshot. Transparent background + parent painting preserves the wallpaper.
-        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)CLR_NONE);
+        // The ListView itself paints only a private chroma-key. Because both native HWNDs are
+        // layered with that key, every untouched pixel reveals the Avalonia wallpaper/acrylic.
+        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)NativeTransparentKey);
         SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)(long)CLR_NONE);
         SendMessage(ListHandle, LVM_SETTEXTCOLOR, 0, (nint)(long)palette.Text);
 
         if (Handle != 0)
             InvalidateRect(Handle, 0, true);
-        InvalidateRect(ListHandle, 0, false);
+        InvalidateRect(ListHandle, 0, true);
     }
 
     private void ConfigureColumns()
@@ -220,5 +218,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_smallFont != 0) DeleteObject(_smallFont);
         _normalFont = _mediumFont = _smallFont = 0;
     }
-
 }

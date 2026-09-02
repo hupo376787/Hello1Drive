@@ -18,6 +18,7 @@ public partial class MainView
     private MainViewModel? _nativeDesktopHookedViewModel;
     private Button? _desktopPreviewPreviousButton;
     private Button? _desktopPreviewNextButton;
+    private bool _desktopOverlayVisibilityHooksAttached;
 
     private void InitializeDesktopExperienceEnhancements()
     {
@@ -28,6 +29,8 @@ public partial class MainView
         InitializeDesktopPreviewEdgeNavigation();
         InitializeNativeDesktopFileList();
         AttachNativeDesktopViewModelEvents();
+        AttachDesktopOverlayVisibilityHooks();
+        UpdateNativeDesktopFileListVisibility();
     }
 
     private void DisposeDesktopExperienceEnhancements()
@@ -50,6 +53,7 @@ public partial class MainView
             _nativeDesktopFileListHost.ItemContextRequested -= NativeDesktopFileList_ItemContextRequested;
         }
 
+        DetachDesktopOverlayVisibilityHooks();
         DetachNativeDesktopViewModelEvents();
     }
 
@@ -193,11 +197,72 @@ public partial class MainView
         desktopGrid.Children.Add(host);
         _nativeDesktopFileListHost = host;
 
-        // Keep the existing Avalonia virtual surface as the non-Windows fallback, but do not leave
-        // two scroll engines alive on Windows. SysListView32 now owns wheel input and scrolling.
         DesktopVirtualScrollViewer.IsVisible = false;
         host.IsVisible = true;
         Dispatcher.UIThread.Post(host.RefreshNativePresentation, DispatcherPriority.Loaded);
+    }
+
+    private Control[] GetDesktopAirspaceBlockingOverlays() =>
+    [
+        StartupSplashOverlay,
+        MobileDestinationOverlay,
+        MobileProfileOverlay,
+        MobileViewModeActionsOverlay,
+        MobileSortActionsOverlay,
+        MobilePreviewActionsOverlay,
+        DownloadAllConfirmOverlay
+    ];
+
+    private void AttachDesktopOverlayVisibilityHooks()
+    {
+        if (_desktopOverlayVisibilityHooksAttached)
+            return;
+
+        _desktopOverlayVisibilityHooksAttached = true;
+        foreach (var overlay in GetDesktopAirspaceBlockingOverlays())
+            overlay.PropertyChanged += DesktopOverlayVisibility_PropertyChanged;
+    }
+
+    private void DetachDesktopOverlayVisibilityHooks()
+    {
+        if (!_desktopOverlayVisibilityHooksAttached)
+            return;
+
+        foreach (var overlay in GetDesktopAirspaceBlockingOverlays())
+            overlay.PropertyChanged -= DesktopOverlayVisibility_PropertyChanged;
+        _desktopOverlayVisibilityHooksAttached = false;
+    }
+
+    private void DesktopOverlayVisibility_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.Property.Name, nameof(Control.IsVisible), StringComparison.Ordinal))
+            UpdateNativeDesktopFileListVisibility();
+    }
+
+    private void UpdateNativeDesktopFileListVisibility()
+    {
+        if (IsMobilePlatform || _nativeDesktopFileListHost is null)
+            return;
+
+        var vm = DataContext as MainViewModel;
+        var blockedByViewModel = vm is null || !vm.IsAuthenticated || vm.IsBusy ||
+            vm.IsSettingsPanelVisible || vm.IsTransferPanelVisible || vm.IsPreviewVisible ||
+            vm.IsPromptVisible || vm.IsLogoutConfirmVisible || vm.IsCloseConfirmVisible;
+        var blockedByOverlay = GetDesktopAirspaceBlockingOverlays().Any(static overlay => overlay.IsVisible);
+        var blocked = blockedByViewModel || blockedByOverlay;
+
+        if (blocked && _nativeDesktopFileListHost.IsVisible)
+        {
+            var firstVisible = Math.Max(0, _nativeDesktopFileListHost.LastFirstVisibleIndex);
+            var targetY = DesktopFileSurface.GetItemTop(firstVisible);
+            DesktopVirtualScrollViewer.Offset = new Vector(0, targetY);
+        }
+
+        _nativeDesktopFileListHost.IsVisible = !blocked;
+        DesktopVirtualScrollViewer.IsVisible = blocked;
+
+        if (!blocked)
+            Dispatcher.UIThread.Post(_nativeDesktopFileListHost.RefreshNativePresentation, DispatcherPriority.Loaded);
     }
 
     private void AttachNativeDesktopViewModelEvents()
@@ -231,6 +296,14 @@ public partial class MainView
             nameof(MainViewModel.TransparentFileItemBackground))
         {
             _nativeDesktopFileListHost?.RefreshNativePresentation();
+        }
+
+        if (e.PropertyName is nameof(MainViewModel.IsAuthenticated) or nameof(MainViewModel.IsBusy) or
+            nameof(MainViewModel.IsSettingsPanelVisible) or nameof(MainViewModel.IsTransferPanelVisible) or
+            nameof(MainViewModel.IsPreviewVisible) or nameof(MainViewModel.IsPromptVisible) or
+            nameof(MainViewModel.IsLogoutConfirmVisible) or nameof(MainViewModel.IsCloseConfirmVisible))
+        {
+            UpdateNativeDesktopFileListVisibility();
         }
     }
 

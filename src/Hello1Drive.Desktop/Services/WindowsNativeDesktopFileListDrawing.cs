@@ -28,12 +28,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (msg == WM_ERASEBKGND && wParam != 0)
         {
-            // The native host sits above Avalonia in HWND z-order. Ask the parent to paint its
-            // current wallpaper/acrylic backdrop into this child instead of replacing it with an
-            // opaque system brush. This is the classic transparent-child pattern used by themed
-            // Win32 controls and keeps the native scrolling engine without losing the app backdrop.
-            GetClientRect(hwnd, out var client);
-            DrawThemeParentBackground(hwnd, wParam, ref client);
+            PaintNativeTransparentBackground(hwnd, wParam);
             return 1;
         }
 
@@ -41,8 +36,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (msg == WM_SIZE)
         {
             ResizeListToHost();
-            if (_viewModel?.ViewMode != FileViewMode.Details)
-                SendMessage(ListHandle, LVM_ARRANGE, LVA_DEFAULT, 0);
+            LayoutNativeIconItems(force: false);
             InvalidateRect(hwnd, 0, true);
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
         }
@@ -53,8 +47,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if (msg == WM_ERASEBKGND && wParam != 0)
         {
-            GetClientRect(hwnd, out var client);
-            DrawThemeParentBackground(hwnd, wParam, ref client);
+            PaintNativeTransparentBackground(hwnd, wParam);
             return 1;
         }
 
@@ -155,10 +148,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             drawRect = NormalizeGridCell(nativeRect, _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons);
         }
 
-        // NM_CUSTOMDRAW supplies an HDC clipped to the control's default icon/text rectangle.
-        // Hello1Drive draws a larger card (and in details mode a full row), so retaining that clip
-        // made every item appear chopped and effectively piled into the upper-left corner. Use the
-        // real ListView item bounds above, then replace the clip with exactly our card/row bounds.
         var savedDc = SaveDC(hdc);
         try
         {
@@ -276,13 +265,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         var width = ScaleInt(extra ? ExtraWidth : LargeWidth);
         var height = ScaleInt(extra ? ExtraHeight : LargeHeight);
-        var centerX = nativeRect.left + nativeRect.Width / 2;
-        var centerY = nativeRect.top + nativeRect.Height / 2;
         return new RECT(
-            centerX - width / 2,
-            centerY - height / 2,
-            centerX - width / 2 + width,
-            centerY - height / 2 + height);
+            nativeRect.left,
+            nativeRect.top,
+            nativeRect.left + width,
+            nativeRect.top + height);
     }
 
     private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)
@@ -302,5 +289,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         DrawFileBadge(hdc, item, dest, radius, palette);
     }
-
 }

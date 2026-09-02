@@ -43,11 +43,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint WS_VISIBLE = 0x10000000;
     private const uint WS_TABSTOP = 0x00010000;
     private const uint WS_EX_TRANSPARENT = 0x00000020;
+    private const uint WS_EX_LAYERED = 0x00080000;
     private const uint LVS_REPORT = 0x0001;
     private const uint LVS_SHOWSELALWAYS = 0x0008;
     private const uint LVS_SHAREIMAGELISTS = 0x0040;
     private const uint LVS_NOLABELWRAP = 0x0080;
-    private const uint LVS_AUTOARRANGE = 0x0100;
     private const uint LVS_NOCOLUMNHEADER = 0x4000;
     private const uint LVS_EX_FULLROWSELECT = 0x00000020;
     private const uint LVS_EX_DOUBLEBUFFER = 0x00010000;
@@ -79,12 +79,12 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int LVM_GETITEMRECT = LVM_FIRST + 14;
     private const int LVM_ENSUREVISIBLE = LVM_FIRST + 19;
     private const int LVM_REDRAWITEMS = LVM_FIRST + 21;
-    private const int LVM_ARRANGE = LVM_FIRST + 22;
     private const int LVM_DELETECOLUMN = LVM_FIRST + 28;
     private const int LVM_SETCOLUMNWIDTH = LVM_FIRST + 30;
     private const int LVM_GETTOPINDEX = LVM_FIRST + 39;
     private const int LVM_SETITEMSTATE = LVM_FIRST + 43;
     private const int LVM_GETITEMSTATE = LVM_FIRST + 44;
+    private const int LVM_SETITEMPOSITION32 = LVM_FIRST + 49;
     private const int LVM_SETEXTENDEDLISTVIEWSTYLE = LVM_FIRST + 54;
     private const int LVM_SETBKCOLOR = LVM_FIRST + 1;
     private const int LVM_SETTEXTCOLOR = LVM_FIRST + 36;
@@ -114,8 +114,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int LVSIL_SMALL = 1;
     private const uint ILC_MASK = 0x0001;
     private const uint ILC_COLOR32 = 0x0020;
-    private const int LVA_DEFAULT = 0x0000;
     private const uint CLR_NONE = 0xFFFFFFFF;
+    private const uint LWA_COLORKEY = 0x00000001;
+    // RGB(1,2,3) is reserved as the HWND chroma-key. Native cards/thumbnails are drawn on top;
+    // pixels left in this key color reveal Avalonia's wallpaper/acrylic underneath.
+    private const uint NativeTransparentKey = 0x00030201;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
     private const uint CDDS_PREPAINT = 0x00000001;
@@ -165,6 +168,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private bool _trackingMouseLeave;
     private bool _scrolling;
     private int _hotIndex = -1;
+    private int _lastIconLayoutColumns = -1;
+    private int _lastIconLayoutItemCount = -1;
+    private int _lastIconLayoutMode = -1;
     private uint _dpi = 96;
     private nint _detailsImageList;
     private nint _largeImageList;
@@ -182,7 +188,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _gdiPlusToken = StartGdiPlus();
 
         Handle = CreateWindowExW(
-            WS_EX_TRANSPARENT,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT,
             "STATIC",
             string.Empty,
             WS_CHILD | WS_VISIBLE,
@@ -200,11 +206,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
             throw new InvalidOperationException($"Unable to subclass native desktop host: {Marshal.GetLastWin32Error()}");
 
         ListHandle = CreateWindowExW(
-            WS_EX_TRANSPARENT,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT,
             "SysListView32",
             string.Empty,
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS |
-            LVS_SHAREIMAGELISTS | LVS_NOLABELWRAP | LVS_AUTOARRANGE | LVS_NOCOLUMNHEADER,
+            LVS_SHAREIMAGELISTS | LVS_NOLABELWRAP | LVS_NOCOLUMNHEADER,
             0, 0, 100, 100,
             Handle,
             0,
@@ -220,6 +226,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
                    LVS_EX_TRANSPARENTBKGND | LVS_EX_TRANSPARENTSHADOWTEXT));
         SetWindowTheme(ListHandle, "Explorer", null);
         ConfigureColumns();
+        ApplyNativeTransparency();
         ApplyPaletteToNativeWindow();
 
         _listWndProc = ListWindowProc;
@@ -244,5 +251,4 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         AttachViewModel(_host.ViewModel);
         SyncPresentation(force: false);
     }
-
 }

@@ -28,6 +28,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         _viewModel = vm;
         _lastSignature = string.Empty;
+        ResetNativeIconLayout();
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -47,6 +48,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (e.PropertyName == nameof(MainViewModel.ViewMode))
         {
             _lastSignature = string.Empty;
+            ResetNativeIconLayout();
             SyncPresentation(force: false);
             return;
         }
@@ -140,8 +142,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
         {
             ApplyPaletteToNativeWindow();
+            LayoutNativeIconItems(force: false);
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
-            InvalidateRect(ListHandle, 0, false);
+            InvalidateRect(ListHandle, 0, true);
             return;
         }
 
@@ -159,6 +162,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
             for (var index = 0; index < slots.Count; index++)
                 InsertItem(index, slots[index].Item);
+
+            if (mode != FileViewMode.Details)
+                LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
 
             RestoreSelection();
             var restoreIndex = FindItemIndex(anchorId, firstVisible);
@@ -216,6 +222,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         var nativeView = mode == FileViewMode.Details ? LV_VIEW_DETAILS : LV_VIEW_ICON;
         SendMessage(ListHandle, LVM_SETVIEW, (nint)nativeView, 0);
+        ResetNativeIconLayout();
 
         if (mode == FileViewMode.Details)
         {
@@ -231,7 +238,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var spacingWidth = ScaleInt((extra ? ExtraWidth : LargeWidth) + GridSpacing);
         var spacingHeight = ScaleInt((extra ? ExtraHeight : LargeHeight) + GridSpacing);
         SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(spacingWidth, spacingHeight));
-        SendMessage(ListHandle, LVM_ARRANGE, LVA_DEFAULT, 0);
     }
 
     private void InsertItem(int index, DriveItemModel? item)
@@ -280,5 +286,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
             Marshal.FreeHGlobal(textPtr);
         }
     }
-
 }
