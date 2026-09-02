@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Hello1Drive.Controls;
@@ -58,6 +59,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int GWLP_WNDPROC = -4;
     private const int WM_SETREDRAW = 0x000B;
     private const uint WM_SIZE = 0x0005;
+    private const uint WM_PAINT = 0x000F;
     private const uint WM_ERASEBKGND = 0x0014;
     private const uint WM_NOTIFY = 0x004E;
     private const uint WM_SETFONT = 0x0030;
@@ -70,6 +72,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint WM_VSCROLL = 0x0115;
     private const uint WM_KEYUP = 0x0101;
     private const uint WM_TIMER = 0x0113;
+    private const uint WM_PRINTCLIENT = 0x0318;
     private const uint ScrollIdleTimerId = 0x481D;
     private const uint TME_LEAVE = 0x00000002;
 
@@ -151,6 +154,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const double ExtraHeight = 212;
     private const double LargeArtwork = 94;
     private const double ExtraArtwork = 132;
+
+    private const int SW_HIDE = 0;
+    private const int SW_SHOW = 5;
 
     private readonly NativeDesktopFileListHost _host;
     private readonly WndProc _parentWndProc;
@@ -236,8 +242,10 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
 
         ResizeListToHost();
         _host.HostStateChanged += Host_HostStateChanged;
+        _host.PropertyChanged += Host_PropertyChanged;
         AttachViewModel(_host.ViewModel);
         SyncPresentation(force: true);
+        ShowWindow(Handle, _host.IsVisible ? SW_SHOW : SW_HIDE);
     }
 
     public nint Handle { get; }
@@ -250,5 +258,15 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
 
         AttachViewModel(_host.ViewModel);
         SyncPresentation(force: false);
+    }
+
+    private void Host_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (_disposed || Handle == 0 || e.Property.Name != nameof(NativeDesktopFileListHost.IsVisible))
+            return;
+
+        // NativeControlHost is an HWND airspace island. Avalonia ZIndex cannot cover it, so hide
+        // the actual HWND immediately whenever MainView hides the host for Settings/Preview/modal UI.
+        ShowWindow(Handle, _host.IsVisible ? SW_SHOW : SW_HIDE);
     }
 }

@@ -8,6 +8,24 @@
 
   <description>Hello1Drive</description>
 
+  <!--
+    SysListView32 view switching (LVM_SETVIEW) and several extended ListView styles used by the
+    native desktop file surface are Common Controls v6 features. Without this activation context
+    Windows silently keeps the control in its legacy/report behavior, which makes icon items stack
+    vertically and ignores LVS_EX_TRANSPARENTBKGND.
+  -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
+
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

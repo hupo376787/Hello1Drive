@@ -101,6 +101,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is not null)
             _viewModel.SetDesktopListScrolling(false);
         _host.HostStateChanged -= Host_HostStateChanged;
+        _host.PropertyChanged -= Host_PropertyChanged;
         AttachViewModel(null);
         ClearThumbnailCache();
         if (ListHandle != 0)

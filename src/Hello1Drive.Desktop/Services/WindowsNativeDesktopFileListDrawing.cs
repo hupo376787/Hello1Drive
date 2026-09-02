@@ -26,10 +26,24 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return HandleCustomDraw(lParam);
         }
 
-        if (msg == WM_ERASEBKGND && wParam != 0)
+        // LVS_EX_TRANSPARENTBKGND does not use WM_ERASEBKGND to obtain its background. Microsoft
+        // documents that it asks the parent to paint through WM_PRINTCLIENT. Paint the chroma key
+        // for both paths so the ListView and its native wrapper expose Avalonia's wallpaper.
+        if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
         {
             PaintNativeTransparentBackground(hwnd, wParam);
             return 1;
+        }
+
+        // Keep the wrapper itself chroma-keyed as well. Otherwise the STATIC class can repaint an
+        // opaque background behind the transparent ListView and the user still sees a white panel.
+        if (msg == WM_PAINT)
+        {
+            var hdc = BeginPaint(hwnd, out var paint);
+            if (hdc != 0)
+                PaintNativeTransparentBackground(hwnd, hdc);
+            EndPaint(hwnd, ref paint);
+            return 0;
         }
 
         var result = CallWindowProcW(_oldParentWndProc, hwnd, msg, wParam, lParam);
@@ -45,7 +59,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private nint ListWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
-        if (msg == WM_ERASEBKGND && wParam != 0)
+        if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
         {
             PaintNativeTransparentBackground(hwnd, wParam);
             return 1;
@@ -99,7 +113,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         var custom = Marshal.PtrToStructure<NMLVCUSTOMDRAW>(lParam);
         if (custom.nmcd.dwDrawStage == CDDS_PREPAINT)
+        {
+            // Paint a deterministic chroma-key base before every custom-draw cycle. This avoids a
+            // themed ListView flash/erase from becoming an opaque white file area.
+            PaintNativeTransparentBackground(ListHandle, custom.nmcd.hdc);
             return (nint)CDRF_NOTIFYITEMDRAW;
+        }
 
         if (custom.nmcd.dwDrawStage != CDDS_ITEMPREPAINT || _viewModel is null)
             return 0;
