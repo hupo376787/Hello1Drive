@@ -14,6 +14,8 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private IDisposable? _backgroundFrostBinding;
 
+    public event EventHandler? BackgroundVisualChanged;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -23,6 +25,7 @@ public partial class MainWindow : Window
             if (e.Property == WindowStateProperty)
                 UpdateWindowFrame();
         };
+        ActualThemeVariantChanged += (_, _) => BackgroundVisualChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void TitleBar_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -128,6 +131,8 @@ public partial class MainWindow : Window
         {
             UseThemeBackgroundFrost();
         }
+
+        BackgroundVisualChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void SetWindowBackgroundImage(Bitmap? bitmap)
@@ -137,6 +142,7 @@ public partial class MainWindow : Window
 
         WindowBackgroundImageLayer.Source = bitmap;
         WindowBackgroundImageLayer.IsVisible = bitmap is not null;
+        BackgroundVisualChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void UseThemeBackgroundFrost()
@@ -145,6 +151,7 @@ public partial class MainWindow : Window
         _backgroundFrostBinding = WindowBackgroundFrostLayer.Bind(
             Border.BackgroundProperty,
             this.GetResourceObservable("SystemControlBackgroundAltHighBrush"));
+        BackgroundVisualChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void SetWindowBackgroundAcrylic(double percent)
@@ -161,6 +168,58 @@ public partial class MainWindow : Window
         // A solid color cannot visually blur by itself, so the translucent frost layer also
         // follows the slider. This makes the control meaningful for both image and color backgrounds.
         WindowBackgroundFrostLayer.Opacity = 0.08 + (0.39 * normalized);
+        BackgroundVisualChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Renders only the wallpaper layers into an opaque bitmap for native HWND children.
+    /// NativeControlHost is an HWND airspace island, so a native ListView cannot truly alpha-blend
+    /// with Avalonia content behind it. Painting this exact background snapshot avoids color-key
+    /// artifacts while preserving the same image stretch, blur and frost seen by the rest of the UI.
+    /// </summary>
+    public Bitmap? CaptureWindowBackgroundSnapshot()
+    {
+        var width = Bounds.Width;
+        var height = Bounds.Height;
+        if (width <= 1 || height <= 1 || !IsVisible)
+            return null;
+
+        var scale = Math.Max(1d, RenderScaling);
+        var pixelSize = new PixelSize(
+            Math.Max(1, (int)Math.Ceiling(width * scale)),
+            Math.Max(1, (int)Math.Ceiling(height * scale)));
+        var dpi = new Vector(96d * scale, 96d * scale);
+        var target = new RenderTargetBitmap(pixelSize, dpi);
+        var targetRect = new Rect(0, 0, width, height);
+
+        try
+        {
+            using (var context = target.CreateDrawingContext())
+            {
+                if (WindowBackgroundColorLayer.Background is { } colorBrush)
+                    context.DrawRectangle(colorBrush, null, targetRect);
+
+                if (WindowBackgroundImageLayer.IsVisible && WindowBackgroundImageLayer.Source is not null)
+                {
+                    using var imageLayer = new RenderTargetBitmap(pixelSize, dpi);
+                    imageLayer.Render(WindowBackgroundImageLayer);
+                    context.DrawImage(imageLayer, new Rect(imageLayer.Size), targetRect);
+                }
+
+                if (WindowBackgroundFrostLayer.Background is { } frostBrush && WindowBackgroundFrostLayer.Opacity > 0.001)
+                {
+                    using (context.PushOpacity(WindowBackgroundFrostLayer.Opacity))
+                        context.DrawRectangle(frostBrush, null, targetRect);
+                }
+            }
+
+            return target;
+        }
+        catch
+        {
+            target.Dispose();
+            return null;
+        }
     }
 
     private void ToggleMaximizeRestore()

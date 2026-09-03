@@ -15,7 +15,7 @@ namespace Hello1Drive.Desktop.Services;
 
 /// <summary>
 /// Windows desktop file surface. The scroll/selection/hit-testing engine remains the native
-/// SysListView32 control, while NM_CUSTOMDRAW restores Hello1Drive's card/thumbnail presentation.
+/// SysListView32 control, while Hello1Drive paints the visible file cards itself.
 /// </summary>
 internal sealed class WindowsNativeDesktopFileListFactory : INativeDesktopFileListFactory
 {
@@ -53,8 +53,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint LVS_EX_FULLROWSELECT = 0x00000020;
     private const uint LVS_EX_DOUBLEBUFFER = 0x00010000;
     private const uint LVS_EX_LABELTIP = 0x00004000;
-    private const uint LVS_EX_TRANSPARENTBKGND = 0x00400000;
-    private const uint LVS_EX_TRANSPARENTSHADOWTEXT = 0x00800000;
 
     private const int GWLP_WNDPROC = -4;
     private const int WM_SETREDRAW = 0x000B;
@@ -118,15 +116,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint ILC_MASK = 0x0001;
     private const uint ILC_COLOR32 = 0x0020;
     private const uint CLR_NONE = 0xFFFFFFFF;
-    private const uint LWA_COLORKEY = 0x00000001;
-    // RGB(1,2,3) is reserved as the HWND chroma-key. Native cards/thumbnails are drawn on top;
-    // pixels left in this key color reveal Avalonia's wallpaper/acrylic underneath.
-    private const uint NativeTransparentKey = 0x00030201;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
     private const uint CDDS_PREPAINT = 0x00000001;
-    private const uint CDDS_ITEMPREPAINT = 0x00010001;
-    private const int CDRF_NOTIFYITEMDRAW = 0x00000020;
     private const int CDRF_SKIPDEFAULT = 0x00000004;
 
     private const uint DT_LEFT = 0x00000000;
@@ -138,7 +130,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int TRANSPARENT = 1;
     private const int NULL_PEN = 8;
     private const int FW_NORMAL = 400;
-    private const int FW_SEMIBOLD = 600;
 
     private const uint GMEM_MOVEABLE = 0x0002;
     private const int UnitPixel = 2;
@@ -194,7 +185,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _gdiPlusToken = StartGdiPlus();
 
         Handle = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT,
+            0,
             "STATIC",
             string.Empty,
             WS_CHILD | WS_VISIBLE,
@@ -212,7 +203,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
             throw new InvalidOperationException($"Unable to subclass native desktop host: {Marshal.GetLastWin32Error()}");
 
         ListHandle = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT,
+            0,
             "SysListView32",
             string.Empty,
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS |
@@ -228,11 +219,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _dpi = Math.Max(96u, GetDpiForWindow(ListHandle));
         RecreateNativeResources();
         SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
-            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP |
-                   LVS_EX_TRANSPARENTBKGND | LVS_EX_TRANSPARENTSHADOWTEXT));
+            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP));
         SetWindowTheme(ListHandle, "Explorer", null);
         ConfigureColumns();
-        ApplyNativeTransparency();
         ApplyPaletteToNativeWindow();
 
         _listWndProc = ListWindowProc;

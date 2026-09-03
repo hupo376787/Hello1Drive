@@ -1,14 +1,5 @@
-using System.Collections.Specialized;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
-using Hello1Drive.Controls;
-using Hello1Drive.Models;
-using Hello1Drive.Services;
-using Hello1Drive.ViewModels;
-using Microsoft.Win32;
 
 namespace Hello1Drive.Desktop.Services;
 
@@ -104,6 +95,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _host.PropertyChanged -= Host_PropertyChanged;
         AttachViewModel(null);
         ClearThumbnailCache();
+        DisposeNativeBackdrop();
         if (ListHandle != 0)
         {
             SendMessage(ListHandle, LVM_SETIMAGELIST, LVSIL_SMALL, 0);
@@ -140,7 +132,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         var data = new INITCOMMONCONTROLSEX
         {
-            dwSize = (uint)Marshal.SizeOf<INITCOMMONCONTROLSEX>(),
+            dwSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<INITCOMMONCONTROLSEX>(),
             dwICC = 0x00000001
         };
         InitCommonControlsEx(ref data);

@@ -1,14 +1,5 @@
-using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
-using Hello1Drive.Controls;
 using Hello1Drive.Models;
-using Hello1Drive.Services;
-using Hello1Drive.ViewModels;
-using Microsoft.Win32;
 
 namespace Hello1Drive.Desktop.Services;
 
@@ -26,22 +17,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return HandleCustomDraw(lParam);
         }
 
-        // LVS_EX_TRANSPARENTBKGND does not use WM_ERASEBKGND to obtain its background. Microsoft
-        // documents that it asks the parent to paint through WM_PRINTCLIENT. Paint the chroma key
-        // for both paths so the ListView and its native wrapper expose Avalonia's wallpaper.
         if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
         {
-            PaintNativeTransparentBackground(hwnd, wParam);
+            GetClientRect(hwnd, out var client);
+            PaintNativeBackdrop(wParam, client);
             return 1;
         }
 
-        // Keep the wrapper itself chroma-keyed as well. Otherwise the STATIC class can repaint an
-        // opaque background behind the transparent ListView and the user still sees a white panel.
         if (msg == WM_PAINT)
         {
             var hdc = BeginPaint(hwnd, out var paint);
             if (hdc != 0)
-                PaintNativeTransparentBackground(hwnd, hdc);
+            {
+                GetClientRect(hwnd, out var client);
+                PaintNativeBackdrop(hdc, client);
+            }
             EndPaint(hwnd, ref paint);
             return 0;
         }
@@ -52,6 +42,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ResizeListToHost();
             LayoutNativeIconItems(force: false);
             InvalidateRect(hwnd, 0, true);
+            InvalidateRect(ListHandle, 0, true);
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
         }
         return result;
@@ -61,7 +52,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
         {
-            PaintNativeTransparentBackground(hwnd, wParam);
+            GetClientRect(hwnd, out var client);
+            PaintNativeBackdrop(wParam, client);
             return 1;
         }
 
@@ -100,6 +92,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
                 BeginNativeScroll();
+                // The wallpaper is fixed to the application window while items scroll over it.
+                InvalidateRect(ListHandle, 0, true);
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
@@ -112,26 +106,51 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private nint HandleCustomDraw(nint lParam)
     {
         var custom = Marshal.PtrToStructure<NMLVCUSTOMDRAW>(lParam);
-        if (custom.nmcd.dwDrawStage == CDDS_PREPAINT)
-        {
-            // Paint a deterministic chroma-key base before every custom-draw cycle. This avoids a
-            // themed ListView flash/erase from becoming an opaque white file area.
-            PaintNativeTransparentBackground(ListHandle, custom.nmcd.hdc);
-            return (nint)CDRF_NOTIFYITEMDRAW;
-        }
-
-        if (custom.nmcd.dwDrawStage != CDDS_ITEMPREPAINT || _viewModel is null)
-            return 0;
-
-        var index = checked((int)custom.nmcd.dwItemSpec);
-        if (index < 0 || index >= _viewModel.VirtualItems.Count)
+        if (custom.nmcd.dwDrawStage != CDDS_PREPAINT)
             return (nint)CDRF_SKIPDEFAULT;
 
-        var nativeRect = TryGetNativeItemRect(index, out var itemRect)
-            ? itemRect
-            : custom.nmcd.rc;
-        DrawItem(custom.nmcd.hdc, nativeRect, index, _viewModel.VirtualItems[index]);
+        // Paint the complete native client ourselves and skip SysListView32's client painting.
+        // The ListView still owns scrolling, selection, keyboard navigation and hit testing, but it
+        // can no longer replace the wallpaper with its internal black/white backbuffer on LVM_SETVIEW.
+        SyncBackdrop(force: false);
+        GetClientRect(ListHandle, out var client);
+        PaintNativeBackdrop(custom.nmcd.hdc, client);
+        DrawVisibleItems(custom.nmcd.hdc);
         return (nint)CDRF_SKIPDEFAULT;
+    }
+
+    private void DrawVisibleItems(nint hdc)
+    {
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        var (first, last) = GetVisibleIndexRange();
+        if (first < 0 || last < first)
+            return;
+
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var metrics = CalculateNativeGridMetrics();
+            first = Math.Max(0, (first / metrics.Columns) * metrics.Columns);
+            last = Math.Min(_viewModel.VirtualItems.Count - 1,
+                (((last / metrics.Columns) + 1) * metrics.Columns) - 1);
+        }
+
+        for (var index = first; index <= last; index++)
+        {
+            RECT rect;
+            if (_viewModel.ViewMode == FileViewMode.Details)
+            {
+                if (!TryGetNativeItemRect(index, out rect))
+                    continue;
+            }
+            else if (!TryGetNativeGridCellRect(index, out rect))
+            {
+                continue;
+            }
+
+            DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
+        }
     }
 
     private bool TryGetNativeItemRect(int index, out RECT rect)
@@ -164,13 +183,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
         else
         {
-            drawRect = NormalizeGridCell(nativeRect, _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons);
+            drawRect = nativeRect;
         }
 
         var savedDc = SaveDC(hdc);
         try
         {
-            SelectClipRgn(hdc, 0);
+            // We draw from CDDS_PREPAINT, whose HDC is clipped only to the current invalid region.
+            // Intersect with this card without discarding that update clip.
             IntersectClipRect(hdc, drawRect.left, drawRect.top, drawRect.right, drawRect.bottom);
             SetBkMode(hdc, TRANSPARENT);
 
@@ -262,12 +282,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var padding = ScaleInt(extra ? 12 : 10);
         var captionHeight = ScaleInt(extra ? 23 : 21);
         var sizeHeight = ScaleInt(extra ? 20 : 18);
-        var artworkSize = ScaleInt(extra ? ExtraArtwork : LargeArtwork);
+        var maximumArtwork = ScaleInt(extra ? ExtraArtwork : LargeArtwork);
         var artworkBottom = rect.bottom - padding - captionHeight - sizeHeight - ScaleInt(extra ? 12 : 9);
+        var artworkSize = Math.Max(
+            ScaleInt(32),
+            Math.Min(maximumArtwork, Math.Min(
+                Math.Max(ScaleInt(32), rect.Width - padding * 2),
+                Math.Max(ScaleInt(32), artworkBottom - rect.top - padding))));
         var artworkX = rect.left + (rect.Width - artworkSize) / 2;
-        var availableArtworkHeight = Math.Max(artworkSize, artworkBottom - rect.top - padding);
         var artworkY = Math.Max(rect.top + padding,
-            rect.top + (availableArtworkHeight - artworkSize + padding) / 2);
+            rect.top + (artworkBottom - rect.top - artworkSize + padding) / 2);
         var art = new RECT(artworkX, artworkY, artworkX + artworkSize, artworkY + artworkSize);
         DrawArtwork(hdc, item, art, ScaleInt(extra ? 11 : 9), palette);
 
@@ -278,17 +302,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DrawTextLine(hdc, item.SizeDisplay,
             new RECT(rect.left + padding, rect.bottom - padding - sizeHeight, rect.right - padding, rect.bottom - padding),
             _smallFont, palette.MutedText, center: true);
-    }
-
-    private RECT NormalizeGridCell(RECT nativeRect, bool extra)
-    {
-        var width = ScaleInt(extra ? ExtraWidth : LargeWidth);
-        var height = ScaleInt(extra ? ExtraHeight : LargeHeight);
-        return new RECT(
-            nativeRect.left,
-            nativeRect.top,
-            nativeRect.left + width,
-            nativeRect.top + height);
     }
 
     private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)

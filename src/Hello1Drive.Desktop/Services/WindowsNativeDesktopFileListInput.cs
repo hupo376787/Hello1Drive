@@ -1,14 +1,5 @@
-using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
-using Hello1Drive.Controls;
 using Hello1Drive.Models;
-using Hello1Drive.Services;
-using Hello1Drive.ViewModels;
-using Microsoft.Win32;
 
 namespace Hello1Drive.Desktop.Services;
 
@@ -143,12 +134,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
         else
         {
-            var extra = mode == FileViewMode.ExtraLargeIcons;
-            var pitchX = Math.Max(1, ScaleInt((extra ? ExtraWidth : LargeWidth) + GridSpacing));
-            var pitchY = Math.Max(1, ScaleInt((extra ? ExtraHeight : LargeHeight) + GridSpacing));
-            var columns = Math.Max(1, client.Width / pitchX);
+            var metrics = CalculateNativeGridMetrics();
+            var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
             var rows = Math.Max(1, client.Height / pitchY + 2);
-            count = columns * rows + columns;
+            count = metrics.Columns * rows + metrics.Columns;
         }
 
         return (first, Math.Min(_viewModel.VirtualItems.Count - 1, first + count - 1));

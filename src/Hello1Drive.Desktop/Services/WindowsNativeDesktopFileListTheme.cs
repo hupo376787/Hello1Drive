@@ -1,19 +1,12 @@
-using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
-using Hello1Drive.Controls;
-using Hello1Drive.Models;
-using Hello1Drive.Services;
-using Hello1Drive.ViewModels;
 using Microsoft.Win32;
 
 namespace Hello1Drive.Desktop.Services;
 
 internal sealed partial class WindowsNativeDesktopFileListController
 {
+    private const int NativeFontMedium = 500;
+
     private Palette BuildPalette()
     {
         var dark = IsDarkTheme();
@@ -33,13 +26,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 Rgb(0, 0, 0));
         }
 
+        // Avalonia's original desktop surface used a partially opaque #1B1B1F foreground over
+        // the wallpaper. GDI text has no brush opacity, so use the visually equivalent softened
+        // dark tone instead of the previous fully opaque near-black text.
         return new Palette(
             background,
             Blend(background, Rgb(255, 255, 255), 0.72),
             Blend(background, Rgb(225, 232, 242), 0.58),
             Blend(background, Rgb(47, 128, 237), 0.20),
-            Rgb(27, 27, 31),
-            Rgb(101, 103, 111),
+            Rgb(43, 43, 47),
+            Rgb(104, 106, 113),
             Rgb(232, 234, 238),
             Rgb(248, 250, 252),
             Rgb(242, 243, 246),
@@ -115,15 +111,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         _palette = BuildPalette();
         var palette = _palette;
-        SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
-        ApplyNativeTransparency();
 
-        // The ListView itself paints only a private chroma-key. Because both native HWNDs are
-        // layered with that key, every untouched pixel reveals the Avalonia wallpaper/acrylic.
-        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)NativeTransparentKey);
+        // The old implementation used WS_EX_LAYERED + a chroma key. That made antialiased text
+        // retain dark fringe pixels and let SysListView32 expose a black backbuffer after LVM_SETVIEW.
+        // Use a normal opaque HWND and paint the cached Avalonia wallpaper ourselves instead.
+        DisableLegacyColorKeyLayering();
+        SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
+            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP));
+        SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
+        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)palette.Background);
         SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)(long)CLR_NONE);
         SendMessage(ListHandle, LVM_SETTEXTCOLOR, 0, (nint)(long)palette.Text);
 
+        SyncBackdrop(force: false);
         if (Handle != 0)
             InvalidateRect(Handle, 0, true);
         InvalidateRect(ListHandle, 0, true);
@@ -185,7 +185,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _largeImageList = CreateLayoutImageList(ScaleInt(LargeArtwork), ScaleInt(LargeArtwork));
         _extraImageList = CreateLayoutImageList(ScaleInt(ExtraArtwork), ScaleInt(ExtraArtwork));
         _normalFont = CreateUiFont(13, FW_NORMAL);
-        _mediumFont = CreateUiFont(13, FW_SEMIBOLD);
+        _mediumFont = CreateUiFont(13, NativeFontMedium);
         _smallFont = CreateUiFont(11.5, FW_NORMAL);
     }
 
