@@ -8,18 +8,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
 {
     private const int LVM_SCROLL_NATIVE = LVM_FIRST + 20;
     private const int SB_HORZ_NATIVE = 0;
-    private const int GWL_STYLE_NATIVE = -16;
-    private const long WS_HSCROLL_NATIVE = 0x00100000L;
 
     private bool _nativeRedrawFlushScheduled;
     private int _pendingNativeRedrawFirst = int.MaxValue;
     private int _pendingNativeRedrawLast = -1;
+    private readonly HashSet<int> _nativePaintedIndices = [];
+    private bool _nativePaintedFlushScheduled;
 
-    /// <summary>
-    /// Thumbnail hydration can update many slots within a few milliseconds. Redrawing immediately
-    /// for every notification made our PREPAINT owner-draw path repaint the viewport over and over.
-    /// Collapse those notifications into one invalidation per dispatcher turn.
-    /// </summary>
     private void QueueNativeItemRedraw(int index)
     {
         if (_disposed || index < 0)
@@ -45,21 +40,76 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_disposed || ListHandle == 0 || _viewModel is null || last < first)
             return;
 
-        var visible = GetVisibleIndexRange();
-        if (visible.First < 0 || visible.Last < visible.First)
-            return;
-
-        first = Math.Max(first, visible.First);
-        last = Math.Min(last, visible.Last);
-        if (last >= first)
-            InvalidateNativeItemRange(first, last);
+        // Do not filter this through our estimated viewport. SysListView32 clips the dirty rectangle
+        // itself; filtering here used to drop thumbnail redraws when icon-view origin math lagged a frame.
+        InvalidateNativeItemRange(first, last);
     }
 
-    /// <summary>
-    /// LVM_REDRAWITEMS invalidates the ListView's own icon/label bounds, not Hello1Drive's larger
-    /// custom card. That left stale hover/thumbnail pixels behind. Invalidate the exact custom card
-    /// rectangle instead, preserving the existing background because PREPAINT redraws it itself.
-    /// </summary>
+    private void ObserveNativePaintedItem(int index)
+    {
+        if (_disposed || _viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
+            return;
+        if (_viewModel.VirtualItems[index].Item is null)
+            return;
+
+        _nativePaintedIndices.Add(index);
+        if (_nativePaintedFlushScheduled)
+            return;
+
+        _nativePaintedFlushScheduled = true;
+        Dispatcher.UIThread.Post(FlushNativePaintedThumbnails, DispatcherPriority.Background);
+    }
+
+    private void FlushNativePaintedThumbnails()
+    {
+        _nativePaintedFlushScheduled = false;
+        if (_disposed || _viewModel is null || _nativePaintedIndices.Count == 0)
+        {
+            _nativePaintedIndices.Clear();
+            return;
+        }
+
+        var indices = _nativePaintedIndices
+            .Where(index => index >= 0 && index < _viewModel.VirtualItems.Count && _viewModel.VirtualItems[index].Item is not null)
+            .OrderBy(static index => index)
+            .ToList();
+        _nativePaintedIndices.Clear();
+        if (indices.Count == 0)
+            return;
+
+        // After scrolling stops, prefetch one row beyond what Windows has just painted. During an
+        // active fling only touch already-painted cards so network/decode work cannot fight scrolling.
+        if (!_scrolling && _viewModel.ViewMode != FileViewMode.Details)
+        {
+            var metrics = CalculateNativeGridMetrics();
+            var last = indices[^1];
+            for (var i = 1; i <= metrics.Columns; i++)
+            {
+                var next = last + i;
+                if (next >= _viewModel.VirtualItems.Count)
+                    break;
+                if (_viewModel.VirtualItems[next].Item is not null)
+                    indices.Add(next);
+            }
+        }
+
+        var items = new List<DriveItemModel>(indices.Count);
+        var actualIndices = new List<int>(indices.Count);
+        foreach (var index in indices.Distinct())
+        {
+            if (_viewModel.VirtualItems[index].Item is not { } item)
+                continue;
+            actualIndices.Add(index);
+            items.Add(item);
+        }
+
+        if (items.Count == 0)
+            return;
+
+        _viewModel.UpdateDesktopRealizedThumbnails(actualIndices, items, allowNetwork: !_scrolling);
+        _host.RaiseScrollStateChanged(actualIndices[0], actualIndices[^1]);
+    }
+
     private void InvalidateNativeItemRange(int first, int last)
     {
         if (_viewModel is null || ListHandle == 0 || _viewModel.VirtualItems.Count == 0)
@@ -116,11 +166,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    /// <summary>
-    /// SysListView32 can re-add a standard WS_HSCROLL bar after it recalculates icon extents. Merely
-    /// calling ShowScrollBar(FALSE) is temporary. Remove the window style as well, and keep the icon
-    /// view origin locked to X=0. This leaves the native vertical scrolling path untouched.
-    /// </summary>
     private void ResetNativeHorizontalScroll()
     {
         if (ListHandle == 0)
@@ -130,18 +175,17 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             var origin = GetNativeViewOrigin();
             if (origin.x != 0)
-                SendMessage(ListHandle, LVM_SCROLL_NATIVE, (nint)origin.x, 0);
+            {
+                // LVM_SCROLL takes a delta. To move the current origin back to zero the delta is
+                // -origin.X, not origin.X. The old sign doubled the horizontal displacement.
+                SendMessage(ListHandle, LVM_SCROLL_NATIVE, (nint)(-origin.x), 0);
+            }
         }
 
-        var style = GetWindowLongPtrCompat(ListHandle, GWL_STYLE_NATIVE);
-        var cleaned = (nint)((long)style & ~WS_HSCROLL_NATIVE);
-        if (cleaned != style)
-        {
-            SetWindowLongPtr(ListHandle, GWL_STYLE_NATIVE, cleaned);
-            SetWindowPos(ListHandle, 0, 0, 0, 0, 0,
-                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        }
-
+        // Do not mutate WS_HSCROLL or issue SWP_FRAMECHANGED from WM_PAINT/scroll callbacks. Those
+        // frame changes force both scrollbars to be recalculated and were the source of the flashing
+        // vertical bar. With empty native labels and a grid constrained to the client width, hiding
+        // the horizontal bar here is now only a final presentation guard.
         ShowScrollBar(ListHandle, SB_HORZ_NATIVE, false);
     }
 

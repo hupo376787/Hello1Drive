@@ -5,6 +5,10 @@ namespace Hello1Drive.Desktop.Services;
 
 internal sealed partial class WindowsNativeDesktopFileListController
 {
+    private const uint CDDS_ITEMPREPAINT_NATIVE = 0x00010001;
+    private const int CDRF_DODEFAULT_NATIVE = 0x00000000;
+    private const int CDRF_NOTIFYITEMDRAW_NATIVE = 0x00000020;
+
     private nint ParentWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
         if (_disposed)
@@ -104,18 +108,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
                 BeginNativeScroll();
-                ResetNativeHorizontalScroll();
-                // The wallpaper is fixed to the application window while items scroll over it.
+                // Never mutate window/frame styles here. The old ResetNativeHorizontalScroll path
+                // performed SWP_FRAMECHANGED during scrolling/painting and made the vertical bar
+                // repeatedly disappear/reappear.
                 InvalidateRect(ListHandle, 0, false);
-                break;
-            case WM_PAINT:
-                // Common Controls may recalculate standard scroll bars while painting icon view.
-                // Reassert the vertical-only native scrolling policy after that calculation.
-                ResetNativeHorizontalScroll();
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
+                {
                     EndNativeScroll();
+                    // Force one clean item draw after idle. CDDS_ITEMPREPAINT then tells us exactly
+                    // which native items are on screen and queues their network thumbnails.
+                    InvalidateRect(ListHandle, 0, false);
+                }
                 break;
         }
         return result;
@@ -124,14 +129,41 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private nint HandleCustomDraw(nint lParam)
     {
         var custom = Marshal.PtrToStructure<NMLVCUSTOMDRAW>(lParam);
-        if (custom.nmcd.dwDrawStage != CDDS_PREPAINT)
-            return (nint)CDRF_SKIPDEFAULT;
 
-        SyncBackdrop(force: false);
-        GetClientRect(ListHandle, out var client);
-        PaintNativeBackdrop(custom.nmcd.hdc, client);
-        DrawVisibleItems(custom.nmcd.hdc);
-        return (nint)CDRF_SKIPDEFAULT;
+        if (custom.nmcd.dwDrawStage == CDDS_PREPAINT)
+        {
+            // Microsoft documents CDRF_SKIPDEFAULT for CDDS_ITEMPREPAINT, not the control-level
+            // PREPAINT notification. Ask for item notifications and let ListView manage the viewport,
+            // clipping and native scrollbars normally.
+            SyncBackdrop(force: false);
+            return (nint)CDRF_NOTIFYITEMDRAW_NATIVE;
+        }
+
+        if (custom.nmcd.dwDrawStage == CDDS_ITEMPREPAINT_NATIVE)
+        {
+            if (_viewModel is null || custom.nmcd.dwItemSpec > int.MaxValue)
+                return (nint)CDRF_DODEFAULT_NATIVE;
+
+            var index = (int)custom.nmcd.dwItemSpec;
+            if (index < 0 || index >= _viewModel.VirtualItems.Count)
+                return (nint)CDRF_DODEFAULT_NATIVE;
+
+            RECT rect;
+            var hasRect = _viewModel.ViewMode == FileViewMode.Details
+                ? TryGetNativeItemRect(index, out rect)
+                : TryGetNativeGridCellRect(index, out rect);
+            if (!hasRect)
+                rect = custom.nmcd.rc;
+
+            DrawItem(custom.nmcd.hdc, rect, index, _viewModel.VirtualItems[index]);
+            ObserveNativePaintedItem(index);
+
+            // We drew this item completely. Suppress Explorer's own hot/selection/text rendering so
+            // it cannot leave the gray native hover rectangle over our transparent card.
+            return (nint)CDRF_SKIPDEFAULT;
+        }
+
+        return (nint)CDRF_DODEFAULT_NATIVE;
     }
 
     private void DrawVisibleItems(nint hdc)

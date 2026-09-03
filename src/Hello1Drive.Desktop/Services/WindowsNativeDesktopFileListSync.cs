@@ -110,13 +110,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
             return;
 
-        if (e.PropertyName is nameof(VirtualDriveItemSlot.Item) or nameof(VirtualDriveItemSlot.Name))
-        {
-            SetNativeItemText(index, slot.Item?.Name ?? string.Empty);
-            // Updating native label bounds can make SysListView32 recalculate and re-enable its
-            // standard horizontal bar. Strip it again after each metadata/name hydration.
-            ResetNativeHorizontalScroll();
-        }
+        // Native labels are deliberately kept empty. Hello1Drive draws the visible filename itself.
+        // Feeding real names to SysListView32 makes icon view include label widths in its native
+        // extent calculation, which is what kept recreating the horizontal scrollbar.
 
         if (e.PropertyName == nameof(VirtualDriveItemSlot.ThumbnailImage) && slot.Item is { } thumbnailItem &&
             thumbnailItem.ThumbnailImage is null)
@@ -145,11 +141,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var signature = BuildSignature(slots, mode);
         if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
         {
-            // Presentation-only refreshes are common while thumbnails hydrate. Do not repaint the
-            // whole client here: each changed slot is already coalesced into an exact card invalidation.
             SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
-            ResetNativeHorizontalScroll();
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
             return;
         }
@@ -167,7 +160,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             SendMessage(ListHandle, LVM_DELETEALLITEMS, 0, 0);
 
             for (var index = 0; index < slots.Count; index++)
-                InsertItem(index, slots[index].Item);
+                InsertItem(index);
 
             if (mode != FileViewMode.Details)
                 LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
@@ -247,50 +240,27 @@ internal sealed partial class WindowsNativeDesktopFileListController
         SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(spacingWidth, spacingHeight));
     }
 
-    private void InsertItem(int index, DriveItemModel? item)
+    private void InsertItem(int index)
     {
-        var namePtr = Marshal.StringToHGlobalUni(item?.Name ?? string.Empty);
+        var lvItem = new LVITEM
+        {
+            // We only need a native item/image slot for scrolling, selection and hit testing.
+            // The visual label is fully owner-drawn, so omit LVIF_TEXT entirely.
+            mask = LVIF_IMAGE,
+            iItem = index,
+            iSubItem = 0,
+            pszText = 0,
+            iImage = 0
+        };
+        var itemPtr = Marshal.AllocHGlobal(Marshal.SizeOf<LVITEM>());
         try
         {
-            var lvItem = new LVITEM
-            {
-                mask = LVIF_TEXT | LVIF_IMAGE,
-                iItem = index,
-                iSubItem = 0,
-                pszText = namePtr,
-                iImage = 0
-            };
-            var itemPtr = Marshal.AllocHGlobal(Marshal.SizeOf<LVITEM>());
-            try
-            {
-                Marshal.StructureToPtr(lvItem, itemPtr, false);
-                SendMessage(ListHandle, LVM_INSERTITEMW, 0, itemPtr);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(itemPtr);
-            }
+            Marshal.StructureToPtr(lvItem, itemPtr, false);
+            SendMessage(ListHandle, LVM_INSERTITEMW, 0, itemPtr);
         }
         finally
         {
-            Marshal.FreeHGlobal(namePtr);
-        }
-    }
-
-    private void SetNativeItemText(int index, string text)
-    {
-        var textPtr = Marshal.StringToHGlobalUni(text ?? string.Empty);
-        var lvItem = new LVITEM { iSubItem = 0, pszText = textPtr };
-        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<LVITEM>());
-        try
-        {
-            Marshal.StructureToPtr(lvItem, ptr, false);
-            SendMessage(ListHandle, LVM_SETITEMTEXTW, (nint)index, ptr);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(ptr);
-            Marshal.FreeHGlobal(textPtr);
+            Marshal.FreeHGlobal(itemPtr);
         }
     }
 }

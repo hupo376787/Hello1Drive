@@ -11,8 +11,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private int _lastIconLayoutCellHeight = -1;
     private int _lastIconLayoutGap = -1;
 
-    // Kept under the old method name because the controller constructor calls it before the
-    // first presentation. The implementation intentionally disables the old chroma-key mode.
     private void ApplyNativeTransparency() => DisableLegacyColorKeyLayering();
 
     private void PaintNativeTransparentBackground(nint hwnd, nint hdc)
@@ -43,12 +41,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var minWidth = extra ? 190d : 136d;
         var maxWidth = extra ? 276d : 184d;
         var heightDip = extra ? ExtraHeight : LargeHeight;
-        var usable = Math.Max(minWidth, clientWidthDip);
+
+        // LVM_SETICONSPACING describes the distance between icon origins. Leave one trailing gap
+        // inside the client so the final origin + spacing never extends beyond the viewport and
+        // causes SysListView32 to manufacture a horizontal extent.
+        var usable = Math.Max(1d, clientWidthDip - GridSpacing);
         var columns = Math.Max(1, (int)Math.Floor((usable + GridSpacing) / (preferred + GridSpacing)));
-        var cellWidthDip = Math.Clamp(
-            (usable - GridSpacing * (columns - 1)) / columns,
-            minWidth,
-            maxWidth);
+        var rawCellWidth = (usable - GridSpacing * (columns - 1)) / columns;
+        var cellWidthDip = columns == 1 && rawCellWidth < minWidth
+            ? Math.Max(1d, Math.Min(maxWidth, rawCellWidth))
+            : Math.Clamp(rawCellWidth, minWidth, maxWidth);
 
         var cellWidth = Math.Max(1, (int)Math.Round(cellWidthDip * scale));
         var cellHeight = Math.Max(1, (int)Math.Round(heightDip * scale));
@@ -59,10 +61,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void LayoutNativeIconItems(bool force, bool redrawAlreadySuspended = false)
     {
         if (_viewModel is null || _viewModel.ViewMode == FileViewMode.Details || ListHandle == 0)
-        {
-            ResetNativeHorizontalScroll();
             return;
-        }
 
         var metrics = CalculateNativeGridMetrics();
         var itemCount = _viewModel.VirtualItems.Count;
@@ -76,7 +75,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             itemCount == _lastIconLayoutItemCount &&
             mode == _lastIconLayoutMode)
         {
-            ResetNativeHorizontalScroll();
             return;
         }
 
@@ -89,10 +87,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             var pitchX = metrics.CellWidth + metrics.Gap;
             var pitchY = metrics.CellHeight + metrics.Gap;
-
-            // Keep the native item's actual hit-test/scroll cell identical to the custom-drawn
-            // Hello1Drive card. The old fixed spacing disagreed with the dynamically stretched
-            // desktop grid and produced visibly uneven columns.
             SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(pitchX, pitchY));
 
             for (var index = 0; index < itemCount; index++)

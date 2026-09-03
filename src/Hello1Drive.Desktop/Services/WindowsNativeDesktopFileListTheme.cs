@@ -6,6 +6,7 @@ namespace Hello1Drive.Desktop.Services;
 internal sealed partial class WindowsNativeDesktopFileListController
 {
     private const int NativeFontMedium = 500;
+    private const uint LVS_EX_TRANSPARENTBKGND_NATIVE = 0x00400000;
 
     private Palette BuildPalette()
     {
@@ -26,9 +27,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 Rgb(0, 0, 0));
         }
 
-        // Avalonia's original desktop surface used a partially opaque #1B1B1F foreground over
-        // the wallpaper. GDI text has no brush opacity, so use the visually equivalent softened
-        // dark tone instead of the previous fully opaque near-black text.
         return new Palette(
             background,
             Blend(background, Rgb(255, 255, 255), 0.72),
@@ -112,15 +110,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _palette = BuildPalette();
         var palette = _palette;
 
-        // The old implementation used WS_EX_LAYERED + a chroma key. That made antialiased text
-        // retain dark fringe pixels and let SysListView32 expose a black backbuffer after LVM_SETVIEW.
-        // Use a normal opaque HWND and paint the cached Avalonia wallpaper ourselves instead.
         DisableLegacyColorKeyLayering();
+        // Use the Common Controls v6 transparent-background contract instead of repainting the
+        // complete ListView in CDDS_PREPAINT. The parent already implements WM_PRINTCLIENT and paints
+        // Hello1Drive's cached wallpaper, so native scrolling can keep its own stable backing store.
         SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
-            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP));
+            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP | LVS_EX_TRANSPARENTBKGND_NATIVE));
         SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
-        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)(long)palette.Background);
-        SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)(long)CLR_NONE);
+        SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)CLR_NONE);
+        SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)CLR_NONE);
         SendMessage(ListHandle, LVM_SETTEXTCOLOR, 0, (nint)(long)palette.Text);
 
         SyncBackdrop(force: false);
@@ -203,9 +201,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private nint CreateUiFont(double logicalPixels, int weight)
     {
         var height = -Math.Max(9, ScaleInt(logicalPixels));
-        // Segoe UI has no CJK glyphs. GDI font linking therefore rendered Latin with Segoe UI and
-        // Chinese with a fallback face whose x-height/em metrics were visibly different. Use one
-        // Windows UI CJK family for both scripts so Chinese/Latin names have consistent visual size.
         return CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI");
     }
 
