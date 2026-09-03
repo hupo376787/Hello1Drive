@@ -146,7 +146,10 @@ public sealed class NativeDesktopFileListHost : NativeControlHost
             return;
 
         var viewport = window.Bounds.Size;
-        var origin = TranslatePoint(new Point(0, 0), window) ?? new Point(0, 0);
+        // TranslatePoint is an Avalonia Visual extension method, so it must be invoked with an
+        // explicit receiver. Calling it as a bare method name does not participate in extension
+        // method lookup and fails compilation.
+        var origin = this.TranslatePoint(new Point(0, 0), window) ?? new Point(0, 0);
         var changed = false;
 
         if (_backdropContentDirty)
