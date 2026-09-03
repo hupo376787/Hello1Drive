@@ -59,7 +59,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             or nameof(MainViewModel.BackgroundColorText))
         {
             ApplyPaletteToNativeWindow();
-            InvalidateRect(ListHandle, 0, true);
         }
     }
 
@@ -127,7 +126,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             or nameof(VirtualDriveItemSlot.Name)
             or nameof(VirtualDriveItemSlot.SizeDisplay))
         {
-            RedrawItem(index);
+            QueueNativeItemRedraw(index);
         }
     }
 
@@ -141,10 +140,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var signature = BuildSignature(slots, mode);
         if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
         {
-            ApplyPaletteToNativeWindow();
+            // Presentation-only refreshes are common while thumbnails hydrate. Do not rebuild the
+            // palette or erase/repaint the complete ListView if metadata/layout did not change.
+            SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
+            ResetNativeHorizontalScroll();
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
-            InvalidateRect(ListHandle, 0, true);
+            InvalidateRect(ListHandle, 0, false);
             return;
         }
 
@@ -174,10 +176,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
         finally
         {
             SendMessage(ListHandle, WM_SETREDRAW, 1, 0);
-            InvalidateRect(ListHandle, 0, true);
+            InvalidateRect(ListHandle, 0, false);
         }
 
         UpdateColumnWidth();
+        ResetNativeHorizontalScroll();
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: true);
     }

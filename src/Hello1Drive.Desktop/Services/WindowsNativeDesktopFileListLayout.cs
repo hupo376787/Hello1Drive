@@ -59,7 +59,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void LayoutNativeIconItems(bool force, bool redrawAlreadySuspended = false)
     {
         if (_viewModel is null || _viewModel.ViewMode == FileViewMode.Details || ListHandle == 0)
+        {
+            ResetNativeHorizontalScroll();
             return;
+        }
 
         var metrics = CalculateNativeGridMetrics();
         var itemCount = _viewModel.VirtualItems.Count;
@@ -73,6 +76,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             itemCount == _lastIconLayoutItemCount &&
             mode == _lastIconLayoutMode)
         {
+            ResetNativeHorizontalScroll();
             return;
         }
 
@@ -110,7 +114,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             if (ownsRedraw)
             {
                 SendMessage(ListHandle, WM_SETREDRAW, 1, 0);
-                InvalidateRect(ListHandle, 0, true);
+                InvalidateRect(ListHandle, 0, false);
             }
         }
 
@@ -120,6 +124,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutGap = metrics.Gap;
         _lastIconLayoutItemCount = itemCount;
         _lastIconLayoutMode = mode;
+        ResetNativeHorizontalScroll();
     }
 
     private bool TryGetNativeGridCellRect(int index, out RECT rect)

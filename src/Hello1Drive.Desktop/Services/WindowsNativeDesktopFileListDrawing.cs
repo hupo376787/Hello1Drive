@@ -17,7 +17,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return HandleCustomDraw(lParam);
         }
 
-        if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
+        // The owner-draw pass always paints the background before drawing cards. Suppress the
+        // default erase phase so Windows never exposes an intermediate background-only frame.
+        if (msg == WM_ERASEBKGND)
+            return 1;
+
+        if (msg == WM_PRINTCLIENT && wParam != 0)
         {
             GetClientRect(hwnd, out var client);
             PaintNativeBackdrop(wParam, client);
@@ -41,8 +46,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             ResizeListToHost();
             LayoutNativeIconItems(force: false);
-            InvalidateRect(hwnd, 0, true);
-            InvalidateRect(ListHandle, 0, true);
+            ResetNativeHorizontalScroll();
+            InvalidateRect(hwnd, 0, false);
+            InvalidateRect(ListHandle, 0, false);
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
         }
         return result;
@@ -50,10 +56,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private nint ListWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
-        if ((msg == WM_ERASEBKGND || msg == WM_PRINTCLIENT) && wParam != 0)
+        // Do not repaint just the wallpaper during WM_ERASEBKGND. Doing so creates a visible blank
+        // frame whenever thumbnail hydration invalidates an item. PREPAINT below paints background
+        // and items in one pass.
+        if (msg == WM_ERASEBKGND)
+            return 1;
+
+        if (msg == WM_PRINTCLIENT && wParam != 0)
         {
+            SyncBackdrop(force: false);
             GetClientRect(hwnd, out var client);
             PaintNativeBackdrop(wParam, client);
+            DrawVisibleItems(wParam);
             return 1;
         }
 
@@ -93,7 +107,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             case WM_VSCROLL:
                 BeginNativeScroll();
                 // The wallpaper is fixed to the application window while items scroll over it.
-                InvalidateRect(ListHandle, 0, true);
+                InvalidateRect(ListHandle, 0, false);
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)

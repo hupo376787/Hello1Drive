@@ -125,8 +125,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         SyncBackdrop(force: false);
         if (Handle != 0)
-            InvalidateRect(Handle, 0, true);
-        InvalidateRect(ListHandle, 0, true);
+            InvalidateRect(Handle, 0, false);
+        InvalidateRect(ListHandle, 0, false);
     }
 
     private void ConfigureColumns()
@@ -173,7 +173,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (Handle == 0 || ListHandle == 0)
             return;
         GetClientRect(Handle, out var client);
-        MoveWindow(ListHandle, 0, 0, Math.Max(1, client.Width), Math.Max(1, client.Height), true);
+        MoveWindow(ListHandle, 0, 0, Math.Max(1, client.Width), Math.Max(1, client.Height), false);
         UpdateColumnWidth();
     }
 
@@ -203,7 +203,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private nint CreateUiFont(double logicalPixels, int weight)
     {
         var height = -Math.Max(9, ScaleInt(logicalPixels));
-        return CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        // Segoe UI has no CJK glyphs. GDI font linking therefore rendered Latin with Segoe UI and
+        // Chinese with a fallback face whose x-height/em metrics were visibly different. Use one
+        // Windows UI CJK family for both scripts so Chinese/Latin names have consistent visual size.
+        return CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI");
     }
 
     private void DestroyNativeResources()
