@@ -115,7 +115,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int LVSIL_SMALL = 1;
     private const uint ILC_MASK = 0x0001;
     private const uint ILC_COLOR32 = 0x0020;
-    private const uint CLR_NONE = 0xFFFFFFFF;
+    // Win32 CLR_NONE is ((COLORREF)-1). Keep it signed so conversion to nint is valid for both
+    // 32-bit and 64-bit targets without a compile-time native-int overflow warning/error.
+    private const int CLR_NONE = -1;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
     private const uint CDDS_PREPAINT = 0x00000001;
