@@ -115,7 +115,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 0, _viewModel.VirtualItems.Count - 1);
         }
 
-        var range = GetVisibleIconIndexRange();
+        var visible = GetVisibleIconIndices();
+        if (visible.Count > 0)
+            return visible[0];
+
+        var range = GetEstimatedVisibleIconIndexRange();
         return range.First >= 0 ? range.First : 0;
     }
 
@@ -125,7 +129,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return (-1, -1);
 
         if (_viewModel.ViewMode != FileViewMode.Details)
-            return GetVisibleIconIndexRange();
+        {
+            var visible = GetVisibleIconIndices();
+            if (visible.Count > 0)
+                return (visible[0], visible[^1]);
+            return GetEstimatedVisibleIconIndexRange();
+        }
 
         var first = Math.Clamp((int)SendMessage(ListHandle, LVM_GETTOPINDEX, 0, 0),
             0, _viewModel.VirtualItems.Count - 1);
@@ -134,7 +143,30 @@ internal sealed partial class WindowsNativeDesktopFileListController
         return (first, Math.Min(_viewModel.VirtualItems.Count - 1, first + count - 1));
     }
 
-    private (int First, int Last) GetVisibleIconIndexRange()
+    private List<int> GetVisibleIconIndices()
+    {
+        var result = new List<int>();
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0 || ListHandle == 0)
+            return result;
+
+        // LVNI_VISIBLEONLY is the native Vista+ contract for asking SysListView32 which items are
+        // actually visible. It is deliberately used by itself because Microsoft documents it as
+        // mutually exclusive with the other LVM_GETNEXTITEM flags.
+        var current = -1;
+        while (true)
+        {
+            current = (int)SendMessage(ListHandle, LVM_GETNEXTITEM, (nint)current, (nint)LVNI_VISIBLEONLY);
+            if (current < 0)
+                break;
+            if (current < _viewModel.VirtualItems.Count)
+                result.Add(current);
+        }
+
+        result.Sort();
+        return result;
+    }
+
+    private (int First, int Last) GetEstimatedVisibleIconIndexRange()
     {
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0 || ListHandle == 0)
             return (-1, -1);
@@ -143,10 +175,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var metrics = CalculateNativeGridMetrics();
         var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
         var origin = GetNativeViewOrigin();
-
-        // LVM_GETORIGIN returns the client coordinate corresponding to view coordinate (0,0).
-        // After scrolling down that Y value is negative. Derive the visible rows from the native
-        // origin instead of LVM_GETTOPINDEX (which is documented to return 0 in icon view).
         var scrollY = Math.Max(0, -origin.y);
         var firstRow = Math.Max(0, scrollY / pitchY);
         var lastPixel = scrollY + Math.Max(1, client.Height) - 1;
@@ -179,29 +207,62 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
             return;
 
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var indices = GetVisibleIconIndices();
+            if (indices.Count == 0)
+            {
+                var estimated = GetEstimatedVisibleIconIndexRange();
+                if (estimated.First < 0 || estimated.Last < estimated.First)
+                    return;
+                for (var i = estimated.First; i <= estimated.Last; i++)
+                    indices.Add(i);
+            }
+
+            // Prefetch one complete row after the last native-visible item. The visible set itself
+            // comes from SysListView32, so thumbnail hydration can no longer drift away from the
+            // actual icon viewport after a long wheel fling.
+            var metrics = CalculateNativeGridMetrics();
+            var lastVisible = indices[^1];
+            for (var i = 1; i <= metrics.Columns; i++)
+            {
+                var next = lastVisible + i;
+                if (next >= _viewModel.VirtualItems.Count)
+                    break;
+                indices.Add(next);
+            }
+
+            var distinct = indices.Distinct().OrderBy(static x => x).ToList();
+            var items = new List<DriveItemModel>(distinct.Count);
+            var actual = new List<int>(distinct.Count);
+            foreach (var index in distinct)
+            {
+                if (_viewModel.VirtualItems[index].Item is not { } item)
+                    continue;
+                actual.Add(index);
+                items.Add(item);
+            }
+
+            if (items.Count > 0)
+                _viewModel.UpdateDesktopRealizedThumbnails(actual, items, allowNetwork);
+            return;
+        }
+
         var (first, last) = GetVisibleIndexRange();
         if (first < 0 || last < first)
             return;
 
-        // Prefetch one complete row below the viewport so a fast wheel gesture does not land on a
-        // row whose thumbnail work has not even been queued yet.
-        if (_viewModel.ViewMode != FileViewMode.Details)
-        {
-            var metrics = CalculateNativeGridMetrics();
-            last = Math.Min(_viewModel.VirtualItems.Count - 1, last + metrics.Columns);
-        }
-
-        var indices = new List<int>(last - first + 1);
-        var items = new List<DriveItemModel>(last - first + 1);
+        var detailIndices = new List<int>(last - first + 1);
+        var detailItems = new List<DriveItemModel>(last - first + 1);
         for (var i = first; i <= last; i++)
         {
             if (_viewModel.VirtualItems[i].Item is not { } item)
                 continue;
-            indices.Add(i);
-            items.Add(item);
+            detailIndices.Add(i);
+            detailItems.Add(item);
         }
 
-        _viewModel.UpdateDesktopRealizedThumbnails(indices, items, allowNetwork);
+        _viewModel.UpdateDesktopRealizedThumbnails(detailIndices, detailItems, allowNetwork);
     }
 
     private void BeginNativeScroll()
@@ -246,9 +307,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void UpdateHotItem(nint lParam)
     {
-        // A solid GDI hover fill cannot reproduce Avalonia's translucent hover over an arbitrary
-        // wallpaper. In transparent-item mode it looked like the item permanently turned gray.
-        // Keep the original clean wallpaper in that mode; selection still provides feedback.
         if (_viewModel?.TransparentFileItemBackground == true)
         {
             if (_hotIndex >= 0)

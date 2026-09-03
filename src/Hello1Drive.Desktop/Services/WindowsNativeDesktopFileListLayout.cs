@@ -5,6 +5,7 @@ namespace Hello1Drive.Desktop.Services;
 
 internal sealed partial class WindowsNativeDesktopFileListController
 {
+    private const int LVM_GETITEMPOSITION_NATIVE = LVM_FIRST + 16;
     private const int LVM_GETORIGIN_NATIVE = LVM_FIRST + 41;
 
     private int _lastIconLayoutCellWidth = -1;
@@ -42,9 +43,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var maxWidth = extra ? 276d : 184d;
         var heightDip = extra ? ExtraHeight : LargeHeight;
 
-        // LVM_SETICONSPACING describes the distance between icon origins. Leave one trailing gap
-        // inside the client so the final origin + spacing never extends beyond the viewport and
-        // causes SysListView32 to manufacture a horizontal extent.
+        // LVM_SETICONSPACING measures from one icon origin to the next. Keep the trailing spacing
+        // inside the client so SysListView32 has no reason to create a horizontal work area.
         var usable = Math.Max(1d, clientWidthDip - GridSpacing);
         var columns = Math.Max(1, (int)Math.Floor((usable + GridSpacing) / (preferred + GridSpacing)));
         var rawCellWidth = (usable - GridSpacing * (columns - 1)) / columns;
@@ -131,13 +131,40 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
 
         var metrics = CalculateNativeGridMetrics();
-        var row = index / metrics.Columns;
-        var column = index % metrics.Columns;
+        if (!TryGetNativeItemViewPosition(index, out var position))
+            return false;
+
+        // Microsoft documents LVM_GETITEMPOSITION in view coordinates and LVM_GETORIGIN as the
+        // client coordinate corresponding to view coordinate (0,0). Convert the actual native item
+        // position instead of reconstructing it from index/row math. SysListView32 may normalize its
+        // internal icon positions while scrolling, and painting an inferred rectangle then lands
+        // outside the item's paint clip and produces a blank viewport.
         var origin = GetNativeViewOrigin();
-        var left = origin.x + column * (metrics.CellWidth + metrics.Gap);
-        var top = origin.y + row * (metrics.CellHeight + metrics.Gap);
+        var left = origin.x + position.x;
+        var top = origin.y + position.y;
         rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
         return true;
+    }
+
+    private bool TryGetNativeItemViewPosition(int index, out POINT position)
+    {
+        position = default;
+        if (ListHandle == 0 || index < 0)
+            return false;
+
+        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
+        try
+        {
+            Marshal.StructureToPtr(position, ptr, false);
+            if (SendMessage(ListHandle, LVM_GETITEMPOSITION_NATIVE, (nint)index, ptr) == 0)
+                return false;
+            position = Marshal.PtrToStructure<POINT>(ptr);
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
     }
 
     private POINT GetNativeViewOrigin()

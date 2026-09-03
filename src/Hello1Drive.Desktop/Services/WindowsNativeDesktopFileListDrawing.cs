@@ -5,8 +5,10 @@ namespace Hello1Drive.Desktop.Services;
 
 internal sealed partial class WindowsNativeDesktopFileListController
 {
+    private const uint CDDS_POSTPAINT_NATIVE = 0x00000002;
     private const uint CDDS_ITEMPREPAINT_NATIVE = 0x00010001;
     private const int CDRF_DODEFAULT_NATIVE = 0x00000000;
+    private const int CDRF_NOTIFYPOSTPAINT_NATIVE = 0x00000010;
     private const int CDRF_NOTIFYITEMDRAW_NATIVE = 0x00000020;
 
     private nint ParentWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
@@ -108,17 +110,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
                 BeginNativeScroll();
-                // Never mutate window/frame styles here. The old ResetNativeHorizontalScroll path
-                // performed SWP_FRAMECHANGED during scrolling/painting and made the vertical bar
-                // repeatedly disappear/reappear.
                 InvalidateRect(ListHandle, 0, false);
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
                 {
                     EndNativeScroll();
-                    // Force one clean item draw after idle. CDDS_ITEMPREPAINT then tells us exactly
-                    // which native items are on screen and queues their network thumbnails.
                     InvalidateRect(ListHandle, 0, false);
                 }
                 break;
@@ -132,11 +129,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (custom.nmcd.dwDrawStage == CDDS_PREPAINT)
         {
-            // Microsoft documents CDRF_SKIPDEFAULT for CDDS_ITEMPREPAINT, not the control-level
-            // PREPAINT notification. Ask for item notifications and let ListView manage the viewport,
-            // clipping and native scrollbars normally.
             SyncBackdrop(force: false);
-            return (nint)CDRF_NOTIFYITEMDRAW_NATIVE;
+            // Ask for both item-prepaint and control-postpaint. Stock item drawing is suppressed in
+            // ITEMPREPAINT; large/extra-large Hello1Drive cards are then drawn at POSTPAINT, after the
+            // ListView has finished its own background pass, using an unclipped control-level HDC.
+            return (nint)(CDRF_NOTIFYITEMDRAW_NATIVE | CDRF_NOTIFYPOSTPAINT_NATIVE);
         }
 
         if (custom.nmcd.dwDrawStage == CDDS_ITEMPREPAINT_NATIVE)
@@ -148,19 +145,27 @@ internal sealed partial class WindowsNativeDesktopFileListController
             if (index < 0 || index >= _viewModel.VirtualItems.Count)
                 return (nint)CDRF_DODEFAULT_NATIVE;
 
-            RECT rect;
-            var hasRect = _viewModel.ViewMode == FileViewMode.Details
-                ? TryGetNativeItemRect(index, out rect)
-                : TryGetNativeGridCellRect(index, out rect);
-            if (!hasRect)
+            if (_viewModel.ViewMode != FileViewMode.Details)
+            {
+                // The full card is intentionally larger than the native icon/label rectangle. Do not
+                // draw it in this potentially item-clipped HDC; just suppress Explorer's default item.
+                ObserveNativePaintedItem(index);
+                return (nint)CDRF_SKIPDEFAULT;
+            }
+
+            if (!TryGetNativeItemRect(index, out var rect))
                 rect = custom.nmcd.rc;
 
             DrawItem(custom.nmcd.hdc, rect, index, _viewModel.VirtualItems[index]);
             ObserveNativePaintedItem(index);
-
-            // We drew this item completely. Suppress Explorer's own hot/selection/text rendering so
-            // it cannot leave the gray native hover rectangle over our transparent card.
             return (nint)CDRF_SKIPDEFAULT;
+        }
+
+        if (custom.nmcd.dwDrawStage == CDDS_POSTPAINT_NATIVE)
+        {
+            if (_viewModel?.ViewMode != FileViewMode.Details)
+                DrawVisibleItems(custom.nmcd.hdc);
+            return (nint)CDRF_DODEFAULT_NATIVE;
         }
 
         return (nint)CDRF_DODEFAULT_NATIVE;
@@ -171,31 +176,38 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
             return;
 
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var visible = GetVisibleIconIndices();
+            if (visible.Count == 0)
+            {
+                var estimated = GetEstimatedVisibleIconIndexRange();
+                if (estimated.First < 0 || estimated.Last < estimated.First)
+                    return;
+                for (var i = estimated.First; i <= estimated.Last; i++)
+                    visible.Add(i);
+            }
+
+            foreach (var index in visible)
+            {
+                if (index < 0 || index >= _viewModel.VirtualItems.Count)
+                    continue;
+                if (!TryGetNativeGridCellRect(index, out var rect))
+                    continue;
+                DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
+                ObserveNativePaintedItem(index);
+            }
+            return;
+        }
+
         var (first, last) = GetVisibleIndexRange();
         if (first < 0 || last < first)
             return;
 
-        if (_viewModel.ViewMode != FileViewMode.Details)
-        {
-            var metrics = CalculateNativeGridMetrics();
-            first = Math.Max(0, (first / metrics.Columns) * metrics.Columns);
-            last = Math.Min(_viewModel.VirtualItems.Count - 1,
-                (((last / metrics.Columns) + 1) * metrics.Columns) - 1);
-        }
-
         for (var index = first; index <= last; index++)
         {
-            RECT rect;
-            if (_viewModel.ViewMode == FileViewMode.Details)
-            {
-                if (!TryGetNativeItemRect(index, out rect))
-                    continue;
-            }
-            else if (!TryGetNativeGridCellRect(index, out rect))
-            {
+            if (!TryGetNativeItemRect(index, out var rect))
                 continue;
-            }
-
             DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
         }
     }
@@ -351,7 +363,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)
     {
-        if (item.ThumbnailImage is not null && TryDrawThumbnail(hdc, item, dest, radius))
+        if (item.SupportsThumbnail && TryDrawThumbnail(hdc, item, dest, radius))
         {
             if (item.IsVideo)
                 DrawVideoBadge(hdc, dest, palette);

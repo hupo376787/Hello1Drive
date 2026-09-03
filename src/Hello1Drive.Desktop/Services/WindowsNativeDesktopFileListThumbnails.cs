@@ -16,24 +16,64 @@ internal sealed partial class WindowsNativeDesktopFileListController
 {
     private bool TryDrawThumbnail(nint hdc, DriveItemModel item, RECT dest, int radius)
     {
-        if (item.ThumbnailImage is null || _gdiPlusToken == 0)
+        if (_gdiPlusToken == 0)
             return false;
 
-        if (!_thumbnailCache.TryGetValue(item.Id, out var cached) ||
-            !ReferenceEquals(cached.Source, item.ThumbnailImage) ||
-            !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
+        _thumbnailCache.TryGetValue(item.Id, out var cached);
+        var bitmap = item.ThumbnailImage;
+
+        // A decoded Avalonia bitmap can be temporarily replaced/re-associated while Graph metadata is
+        // reconciled. If the native copy is still for the same OneDrive version, keep drawing it. This
+        // is the desktop equivalent of stale-while-revalidate: an already visible thumbnail must never
+        // regress to the gray file badge merely because the managed Bitmap reference changed.
+        if (bitmap is null)
         {
-            if (_scrolling)
+            if (cached is null || !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
                 return false;
-            cached = CreateNativeThumbnail(item);
-            if (cached is null)
-                return false;
-            StoreThumbnail(item.Id, cached);
+            TouchThumbnail(cached);
         }
         else
         {
-            TouchThumbnail(cached);
+            var cacheMatches = cached is not null &&
+                               ReferenceEquals(cached.Source, bitmap) &&
+                               string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal);
+
+            if (!cacheMatches)
+            {
+                // During a wheel fling, re-encoding the same-version Bitmap on the UI thread is both
+                // unnecessary and visually harmful. Keep the previous native pixels until scroll idle.
+                if (_scrolling && cached is not null &&
+                    string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
+                {
+                    TouchThumbnail(cached);
+                }
+                else
+                {
+                    var replacement = CreateNativeThumbnail(item);
+                    if (replacement is not null)
+                    {
+                        StoreThumbnail(item.Id, replacement);
+                        cached = replacement;
+                    }
+                    else if (cached is null ||
+                             !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        TouchThumbnail(cached);
+                    }
+                }
+            }
+            else
+            {
+                TouchThumbnail(cached!);
+            }
         }
+
+        if (cached is null)
+            return false;
 
         FillRectColor(hdc, dest, _palette.ThumbnailBackground);
         if (GdipCreateFromHDC(hdc, out var graphics) != 0 || graphics == 0)
@@ -197,5 +237,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
             // Best-effort release; the stream is held for the complete GDI+ image lifetime.
         }
     }
-
 }
