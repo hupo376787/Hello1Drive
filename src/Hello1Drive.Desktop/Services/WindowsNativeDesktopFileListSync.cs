@@ -111,7 +111,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
 
         if (e.PropertyName is nameof(VirtualDriveItemSlot.Item) or nameof(VirtualDriveItemSlot.Name))
+        {
             SetNativeItemText(index, slot.Item?.Name ?? string.Empty);
+            // Updating native label bounds can make SysListView32 recalculate and re-enable its
+            // standard horizontal bar. Strip it again after each metadata/name hydration.
+            ResetNativeHorizontalScroll();
+        }
 
         if (e.PropertyName == nameof(VirtualDriveItemSlot.ThumbnailImage) && slot.Item is { } thumbnailItem &&
             thumbnailItem.ThumbnailImage is null)
@@ -140,13 +145,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var signature = BuildSignature(slots, mode);
         if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
         {
-            // Presentation-only refreshes are common while thumbnails hydrate. Do not rebuild the
-            // palette or erase/repaint the complete ListView if metadata/layout did not change.
+            // Presentation-only refreshes are common while thumbnails hydrate. Do not repaint the
+            // whole client here: each changed slot is already coalesced into an exact card invalidation.
             SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
             ResetNativeHorizontalScroll();
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
-            InvalidateRect(ListHandle, 0, false);
             return;
         }
 

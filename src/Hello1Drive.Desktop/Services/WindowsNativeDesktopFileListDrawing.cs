@@ -17,8 +17,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return HandleCustomDraw(lParam);
         }
 
-        // The owner-draw pass always paints the background before drawing cards. Suppress the
-        // default erase phase so Windows never exposes an intermediate background-only frame.
         if (msg == WM_ERASEBKGND)
             return 1;
 
@@ -56,9 +54,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private nint ListWindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
-        // Do not repaint just the wallpaper during WM_ERASEBKGND. Doing so creates a visible blank
-        // frame whenever thumbnail hydration invalidates an item. PREPAINT below paints background
-        // and items in one pass.
         if (msg == WM_ERASEBKGND)
             return 1;
 
@@ -88,11 +83,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 RaiseSelectionChanged();
                 ReportScrollPosition();
                 QueueVisibleThumbnails(allowNetwork: true);
+                InvalidateVisibleItems();
                 break;
             case WM_KEYUP:
                 RaiseSelectionChanged();
                 ReportScrollPosition();
                 QueueVisibleThumbnails(allowNetwork: true);
+                InvalidateVisibleItems();
                 break;
             case WM_LBUTTONDBLCLK:
                 if (HitTest(lParam) is { } doubleItem)
@@ -102,12 +99,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 if (HitTest(lParam) is { } contextItem)
                     _host.RaiseItemContextRequested(contextItem);
                 RaiseSelectionChanged();
+                InvalidateVisibleItems();
                 break;
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
                 BeginNativeScroll();
+                ResetNativeHorizontalScroll();
                 // The wallpaper is fixed to the application window while items scroll over it.
                 InvalidateRect(ListHandle, 0, false);
+                break;
+            case WM_PAINT:
+                // Common Controls may recalculate standard scroll bars while painting icon view.
+                // Reassert the vertical-only native scrolling policy after that calculation.
+                ResetNativeHorizontalScroll();
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
@@ -123,9 +127,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (custom.nmcd.dwDrawStage != CDDS_PREPAINT)
             return (nint)CDRF_SKIPDEFAULT;
 
-        // Paint the complete native client ourselves and skip SysListView32's client painting.
-        // The ListView still owns scrolling, selection, keyboard navigation and hit testing, but it
-        // can no longer replace the wallpaper with its internal black/white backbuffer on LVM_SETVIEW.
         SyncBackdrop(force: false);
         GetClientRect(ListHandle, out var client);
         PaintNativeBackdrop(custom.nmcd.hdc, client);
@@ -203,8 +204,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var savedDc = SaveDC(hdc);
         try
         {
-            // We draw from CDDS_PREPAINT, whose HDC is clipped only to the current invalid region.
-            // Intersect with this card without discarding that update clip.
             IntersectClipRect(hdc, drawRect.left, drawRect.top, drawRect.right, drawRect.bottom);
             SetBkMode(hdc, TRANSPARENT);
 

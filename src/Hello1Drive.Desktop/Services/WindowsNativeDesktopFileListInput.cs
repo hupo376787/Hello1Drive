@@ -109,14 +109,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
             return 0;
 
-        // LVM_GETTOPINDEX is documented for list/report views only. LVNI_VISIBLEONLY also works
-        // for icon views, so large/extra-large folders queue thumbnails for the actual native
-        // viewport instead of repeatedly treating the first row as visible.
-        var visible = (int)SendMessage(ListHandle, LVM_GETNEXTITEM, (nint)(-1), (nint)LVNI_VISIBLEONLY);
-        if (visible >= 0)
-            return Math.Clamp(visible, 0, _viewModel.VirtualItems.Count - 1);
+        if (_viewModel.ViewMode == FileViewMode.Details)
+        {
+            return Math.Clamp((int)SendMessage(ListHandle, LVM_GETTOPINDEX, 0, 0),
+                0, _viewModel.VirtualItems.Count - 1);
+        }
 
-        return Math.Clamp((int)SendMessage(ListHandle, LVM_GETTOPINDEX, 0, 0), 0, _viewModel.VirtualItems.Count - 1);
+        var range = GetVisibleIconIndexRange();
+        return range.First >= 0 ? range.First : 0;
     }
 
     private (int First, int Last) GetVisibleIndexRange()
@@ -124,23 +124,44 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
             return (-1, -1);
 
-        var first = GetFirstVisibleIndex();
+        if (_viewModel.ViewMode != FileViewMode.Details)
+            return GetVisibleIconIndexRange();
+
+        var first = Math.Clamp((int)SendMessage(ListHandle, LVM_GETTOPINDEX, 0, 0),
+            0, _viewModel.VirtualItems.Count - 1);
         GetClientRect(ListHandle, out var client);
-        var mode = _viewModel.ViewMode;
-        int count;
-        if (mode == FileViewMode.Details)
+        var count = Math.Max(1, client.Height / Math.Max(1, ScaleInt(DetailsRowHeight)) + 3);
+        return (first, Math.Min(_viewModel.VirtualItems.Count - 1, first + count - 1));
+    }
+
+    private (int First, int Last) GetVisibleIconIndexRange()
+    {
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0 || ListHandle == 0)
+            return (-1, -1);
+
+        GetClientRect(ListHandle, out var client);
+        var metrics = CalculateNativeGridMetrics();
+        var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
+        var origin = GetNativeViewOrigin();
+
+        // LVM_GETORIGIN returns the client coordinate corresponding to view coordinate (0,0).
+        // After scrolling down that Y value is negative. Derive the visible rows from the native
+        // origin instead of LVM_GETTOPINDEX (which is documented to return 0 in icon view).
+        var scrollY = Math.Max(0, -origin.y);
+        var firstRow = Math.Max(0, scrollY / pitchY);
+        var lastPixel = scrollY + Math.Max(1, client.Height) - 1;
+        var lastRow = Math.Max(firstRow, lastPixel / pitchY);
+        var first = firstRow * metrics.Columns;
+        var last = Math.Min(_viewModel.VirtualItems.Count - 1,
+            ((lastRow + 1) * metrics.Columns) - 1);
+
+        if (first >= _viewModel.VirtualItems.Count)
         {
-            count = Math.Max(1, client.Height / Math.Max(1, ScaleInt(DetailsRowHeight)) + 3);
-        }
-        else
-        {
-            var metrics = CalculateNativeGridMetrics();
-            var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
-            var rows = Math.Max(1, client.Height / pitchY + 2);
-            count = metrics.Columns * rows + metrics.Columns;
+            first = Math.Max(0, _viewModel.VirtualItems.Count - metrics.Columns);
+            last = _viewModel.VirtualItems.Count - 1;
         }
 
-        return (first, Math.Min(_viewModel.VirtualItems.Count - 1, first + count - 1));
+        return (first, Math.Max(first, last));
     }
 
     private void ReportScrollPosition()
@@ -161,6 +182,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var (first, last) = GetVisibleIndexRange();
         if (first < 0 || last < first)
             return;
+
+        // Prefetch one complete row below the viewport so a fast wheel gesture does not land on a
+        // row whose thumbnail work has not even been queued yet.
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var metrics = CalculateNativeGridMetrics();
+            last = Math.Min(_viewModel.VirtualItems.Count - 1, last + metrics.Columns);
+        }
 
         var indices = new List<int>(last - first + 1);
         var items = new List<DriveItemModel>(last - first + 1);
@@ -217,6 +246,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void UpdateHotItem(nint lParam)
     {
+        // A solid GDI hover fill cannot reproduce Avalonia's translucent hover over an arbitrary
+        // wallpaper. In transparent-item mode it looked like the item permanently turned gray.
+        // Keep the original clean wallpaper in that mode; selection still provides feedback.
+        if (_viewModel?.TransparentFileItemBackground == true)
+        {
+            if (_hotIndex >= 0)
+                ClearHotItem();
+            return;
+        }
+
         if (!_trackingMouseLeave)
         {
             var tracking = new TRACKMOUSEEVENT
@@ -255,7 +294,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if (index < 0)
             return;
-        SendMessage(ListHandle, LVM_REDRAWITEMS, (nint)index, (nint)index);
+        InvalidateNativeItemRange(index, index);
     }
 
     private void InvalidateVisibleItems()
@@ -263,7 +302,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var (first, last) = GetVisibleIndexRange();
         if (first < 0)
             return;
-        SendMessage(ListHandle, LVM_REDRAWITEMS, (nint)first, (nint)last);
+        InvalidateNativeItemRange(first, last);
     }
-
 }
