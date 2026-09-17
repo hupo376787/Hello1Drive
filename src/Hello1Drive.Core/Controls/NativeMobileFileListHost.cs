@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Hello1Drive.Models;
 using Hello1Drive.Services;
 using Hello1Drive.ViewModels;
@@ -16,6 +17,8 @@ public sealed class NativeMobileFileListHost : NativeControlHost
     private MainViewModel? _viewModel;
     private string[] _selectedIds = [];
     private bool _selectionMode;
+    private readonly Dictionary<string, NativeFolderViewportAnchor> _folderViewportAnchors = new(StringComparer.Ordinal);
+    private long _folderViewportRestoreVersion;
 
     public event EventHandler<NativeMobileFileItemEventArgs>? ItemTapped;
     public event EventHandler<NativeMobileFileItemEventArgs>? ItemLongPressed;
@@ -41,9 +44,79 @@ public sealed class NativeMobileFileListHost : NativeControlHost
         if (ReferenceEquals(_viewModel, vm))
             return;
 
+        if (_viewModel is not null)
+        {
+            _viewModel.FolderNavigating -= ViewModel_FolderNavigating;
+            _viewModel.FolderLoaded -= ViewModel_FolderLoaded;
+        }
+
         _viewModel = vm;
+        if (_viewModel is not null)
+        {
+            _viewModel.FolderNavigating += ViewModel_FolderNavigating;
+            _viewModel.FolderLoaded += ViewModel_FolderLoaded;
+        }
+
         HostStateChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    private void ViewModel_FolderNavigating(object? sender, FolderNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _viewModel) || _viewModel is null || _viewModel.MobileItems.Count == 0)
+            return;
+
+        _folderViewportAnchors[e.FolderKey] = NativeFolderViewportAnchorResolver.Capture(
+            _viewModel.MobileItems,
+            LastFirstVisibleIndex);
+    }
+
+    private void ViewModel_FolderLoaded(object? sender, FolderNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _viewModel) || _viewModel is null || _viewModel.MobileItems.Count == 0)
+            return;
+
+        // Same-folder cloud refresh deliberately keeps the existing native list alive until its
+        // incremental diff arrives. Re-scrolling here would manufacture a navigation jump.
+        if (e.Reason == FolderNavigationReason.Refresh)
+            return;
+
+        var target = 0;
+        if (e.ShouldRestoreScroll && _folderViewportAnchors.TryGetValue(e.FolderKey, out var anchor))
+            target = NativeFolderViewportAnchorResolver.Resolve(_viewModel.MobileItems, anchor);
+
+        RestoreFolderViewport(e.FolderKey, target);
+    }
+
+    private void RestoreFolderViewport(string folderKey, int position)
+    {
+        if (_viewModel is null || _viewModel.MobileItems.Count == 0)
+            return;
+
+        var target = Math.Clamp(position, 0, _viewModel.MobileItems.Count - 1);
+        var version = unchecked(++_folderViewportRestoreVersion);
+
+        // Correct the position before the next frame. Older MainView compatibility handlers may
+        // also request a position; the two deferred passes below intentionally run after them and
+        // make this stable identity+slot-delta result authoritative.
+        ScrollToPosition(target);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!CanApplyFolderViewportRestore(version, folderKey))
+                return;
+
+            ScrollToPosition(target);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (CanApplyFolderViewportRestore(version, folderKey))
+                    ScrollToPosition(target);
+            }, DispatcherPriority.Background);
+        }, DispatcherPriority.Loaded);
+    }
+
+    private bool CanApplyFolderViewportRestore(long version, string folderKey) =>
+        version == _folderViewportRestoreVersion &&
+        _viewModel is not null &&
+        string.Equals(NativeFolderViewportAnchorResolver.FolderKey(_viewModel), folderKey, StringComparison.Ordinal);
 
     public void UpdateSelectionState(IEnumerable<string> selectedIds, bool selectionMode)
     {

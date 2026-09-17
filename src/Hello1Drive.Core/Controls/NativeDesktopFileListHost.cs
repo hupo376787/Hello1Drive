@@ -25,6 +25,9 @@ public sealed class NativeDesktopFileListHost : NativeControlHost
     private byte[]? _backdropImageBytes;
     private long _backdropContentVersion;
     private long _backdropGeometryVersion;
+    private readonly Dictionary<string, NativeFolderViewportAnchor> _folderViewportAnchors = new(StringComparer.Ordinal);
+    private long _folderViewportRestoreVersion;
+    private long _scrollRequestVersion;
 
     public NativeDesktopFileListHost()
     {
@@ -41,6 +44,8 @@ public sealed class NativeDesktopFileListHost : NativeControlHost
 
     public MainViewModel? ViewModel => _viewModel;
     public int LastFirstVisibleIndex { get; private set; }
+    public int RequestedScrollPosition { get; private set; }
+    public long ScrollRequestVersion => _scrollRequestVersion;
 
     // Native HWND children cannot alpha-compose Avalonia visuals beneath them. Instead the host
     // supplies a rendered snapshot of the window's background-only layers. The Win32 list paints
@@ -58,11 +63,87 @@ public sealed class NativeDesktopFileListHost : NativeControlHost
         var vm = DataContext as MainViewModel;
         if (ReferenceEquals(_viewModel, vm))
             return;
+
+        if (_viewModel is not null)
+        {
+            _viewModel.FolderNavigating -= ViewModel_FolderNavigating;
+            _viewModel.FolderLoaded -= ViewModel_FolderLoaded;
+        }
+
         _viewModel = vm;
+        if (_viewModel is not null)
+        {
+            _viewModel.FolderNavigating += ViewModel_FolderNavigating;
+            _viewModel.FolderLoaded += ViewModel_FolderLoaded;
+        }
+
         HostStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private void ViewModel_FolderNavigating(object? sender, FolderNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _viewModel) || _viewModel is null || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        _folderViewportAnchors[e.FolderKey] = NativeFolderViewportAnchorResolver.Capture(
+            _viewModel.VirtualItems,
+            LastFirstVisibleIndex);
+    }
+
+    private void ViewModel_FolderLoaded(object? sender, FolderNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _viewModel) || _viewModel is null || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        // The current Windows list remains on screen during same-folder cloud validation. There is
+        // nothing to restore until the incremental diff arrives, and moving it here would create a
+        // false jump during Refresh.
+        if (e.Reason == FolderNavigationReason.Refresh)
+            return;
+
+        var target = 0;
+        if (e.ShouldRestoreScroll && _folderViewportAnchors.TryGetValue(e.FolderKey, out var anchor))
+            target = NativeFolderViewportAnchorResolver.Resolve(_viewModel.VirtualItems, anchor);
+
+        RestoreFolderViewport(e.FolderKey, target);
+    }
+
+    private void RestoreFolderViewport(string folderKey, int position)
+    {
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        var target = Math.Clamp(position, 0, _viewModel.VirtualItems.Count - 1);
+        var version = unchecked(++_folderViewportRestoreVersion);
+
+        ScrollToPosition(target);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!CanApplyFolderViewportRestore(version, folderKey))
+                return;
+
+            ScrollToPosition(target);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (CanApplyFolderViewportRestore(version, folderKey))
+                    ScrollToPosition(target);
+            }, DispatcherPriority.Background);
+        }, DispatcherPriority.Loaded);
+    }
+
+    private bool CanApplyFolderViewportRestore(long version, string folderKey) =>
+        version == _folderViewportRestoreVersion &&
+        _viewModel is not null &&
+        string.Equals(NativeFolderViewportAnchorResolver.FolderKey(_viewModel), folderKey, StringComparison.Ordinal);
+
     public void RefreshNativePresentation() => HostStateChanged?.Invoke(this, EventArgs.Empty);
+
+    public void ScrollToPosition(int position)
+    {
+        RequestedScrollPosition = Math.Max(0, position);
+        unchecked { _scrollRequestVersion++; }
+        HostStateChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     public void RaiseSelectionChanged(IReadOnlyList<string> itemIds) =>
         SelectionChanged?.Invoke(this, new NativeDesktopSelectionChangedEventArgs(itemIds));

@@ -236,6 +236,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         _host.PropertyChanged += Host_PropertyChanged;
         AttachViewModel(_host.ViewModel);
         SyncPresentation(force: true);
+        ApplyPendingHostScrollRequest();
         ShowWindow(Handle, _host.IsVisible ? SW_SHOW : SW_HIDE);
     }
 
@@ -249,6 +250,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
 
         AttachViewModel(_host.ViewModel);
         SyncPresentation(force: false);
+        ApplyPendingHostScrollRequest();
     }
 
     private void Host_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
