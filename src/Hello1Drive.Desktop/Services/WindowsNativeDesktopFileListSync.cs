@@ -27,7 +27,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DetachAllSlots();
 
         _viewModel = vm;
-        _lastSignature = string.Empty;
+        unchecked { _collectionVersion++; }
+        _lastSyncedCollectionVersion = -1;
+        _lastSyncedViewMode = -1;
         ResetNativeIconLayout();
         if (_viewModel is not null)
         {
@@ -47,7 +49,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (e.PropertyName == nameof(MainViewModel.ViewMode))
         {
-            _lastSignature = string.Empty;
+            _lastSyncedViewMode = -1;
             ResetNativeIconLayout();
             SyncPresentation(force: false);
             return;
@@ -64,6 +66,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void VirtualItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        unchecked { _collectionVersion++; }
+
         if (e.OldItems is not null)
         {
             foreach (var value in e.OldItems)
@@ -72,7 +76,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
 
         if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
             DetachAllSlots();
+            if (_viewModel is not null)
+            {
+                foreach (var slot in _viewModel.VirtualItems)
+                    AttachSlot(slot);
+            }
+        }
 
         if (e.NewItems is not null)
         {
@@ -138,8 +149,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         var slots = _viewModel.VirtualItems;
         var mode = _viewModel.ViewMode;
-        var signature = BuildSignature(slots, mode);
-        if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
+        var modeValue = (int)mode;
+        var structureChanged =
+            force ||
+            _lastSyncedCollectionVersion != _collectionVersion ||
+            _lastSyncedViewMode != modeValue;
+        if (!structureChanged)
         {
             SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
@@ -152,7 +167,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ? slots[firstVisible].Item?.Id
             : null;
 
-        _lastSignature = signature;
+        _lastSyncedCollectionVersion = _collectionVersion;
+        _lastSyncedViewMode = modeValue;
         SendMessage(ListHandle, WM_SETREDRAW, 0, 0);
         try
         {
@@ -180,28 +196,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         ResetNativeHorizontalScroll();
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: true);
-    }
-
-    private static string BuildSignature(IReadOnlyList<VirtualDriveItemSlot> slots, FileViewMode mode)
-    {
-        var hash = new HashCode();
-        hash.Add((int)mode);
-        hash.Add(slots.Count);
-        for (var i = 0; i < slots.Count; i++)
-        {
-            var item = slots[i].Item;
-            if (item is null)
-            {
-                hash.Add(i);
-                continue;
-            }
-
-            hash.Add(item.Id, StringComparer.Ordinal);
-            hash.Add(item.Name, StringComparer.Ordinal);
-            hash.Add(item.Size);
-            hash.Add(item.LastModifiedDateTime);
-        }
-        return hash.ToHashCode().ToString("X8");
     }
 
     private nint HandleVirtualGetDispInfo(nint lParam)
