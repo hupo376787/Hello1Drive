@@ -4149,10 +4149,19 @@
 
             <Grid
               Background="Transparent"
-              IsHitTestVisible="True"
+              IsHitTestVisible="{OnFormFactor Desktop=True,
+                                              Mobile=False}"
               IsVisible="{Binding IsPreviewLoading}"
               ZIndex="20">
-              <controls:LoadingIndicator HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <!--
+                Mobile loading is visual-only: the Carousel underneath must keep receiving
+                horizontal swipe input so a new page can cancel/supersede the current preview load.
+                Desktop retains the modal loading shield.
+              -->
+              <controls:LoadingIndicator
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsHitTestVisible="False" />
             </Grid>
           </Grid>
 

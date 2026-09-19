@@ -457,6 +457,22 @@ public partial class MainView : UserControl
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.IsPreviewLoading) && IsMobilePlatform)
+        {
+            // Loading must never turn the phone gallery into a modal surface. In particular a GIF
+            // normally uses the zoom canvas, but while its bytes/frames are still loading we keep
+            // the Carousel active so a horizontal swipe can supersede that request immediately.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (DataContext is MainViewModel currentVm && currentVm.IsImagePreview)
+                {
+                    ApplyMobileImagePreviewMode(currentVm);
+                    UpdatePreviewTouchGestureMode(currentVm);
+                }
+            }, DispatcherPriority.Loaded);
+            return;
+        }
+
         if (e.PropertyName == nameof(MainViewModel.PreviewKind))
         {
             CancelPreviewZoomAnimation();
@@ -4589,7 +4605,8 @@ if (visibleItems.Count > 0)
             return;
 
         var fitted = !vm.IsImagePreview || IsPreviewImageFitted(vm);
-        var useCarousel = vm.IsImagePreview && !_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm);
+        var useCarousel = vm.IsImagePreview &&
+            (vm.IsPreviewLoading || (!_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm)));
 
         // Carousel pages render their images with Stretch=Uniform, so the page is always
         // viewport-fitted regardless of the hidden zoom canvas' PreviewImageWidth/Height.
@@ -4641,7 +4658,8 @@ if (visibleItems.Count > 0)
         if (!IsMobilePlatform)
             return;
 
-        var showCarousel = vm.IsImagePreview && !_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm);
+        var showCarousel = vm.IsImagePreview &&
+            (vm.IsPreviewLoading || (!_mobilePreviewZoomMode && !IsCurrentPreviewGif(vm)));
         MobileImageCarousel.IsVisible = showCarousel;
         PreviewZoomCanvas.IsVisible = vm.IsImagePreview && !showCarousel;
         UpdatePreviewTouchGestureMode(vm);

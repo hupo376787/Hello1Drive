@@ -1697,7 +1697,10 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task LoadPreviewAsync(DriveItemModel item, bool preserveSlideshow = false)
     {
-        var keepMobileImageSurface = IsMobilePlatform && IsPreviewVisible && PreviewItem?.IsImage == true && item.IsImage;
+        // Phone image navigation is intentionally non-modal. Publish the image preview surface before
+        // network/cache/decode work starts so the Carousel is swipeable even while the first image is
+        // still showing only a thumbnail + spinner. A later LoadPreviewAsync call cancels this one.
+        var showMobileImageSurfaceImmediately = IsMobilePlatform && item.IsImage;
 
         CancelPreviewLoad();
         ReleasePreviewImageBeforeNavigation();
@@ -1705,12 +1708,14 @@ public partial class MainViewModel : ViewModelBase
         PreviewMediaUrl = string.Empty;
         PreviewCachedFilePath = string.Empty;
         PreviewStatus = string.Empty;
-        if (!keepMobileImageSurface)
+        if (!showMobileImageSurfaceImmediately)
             PreviewKind = PreviewKind.Generic;
         PreviewItem = item;
         IsPreviewDetailsVisible = false;
         IsPreviewVisible = true;
         IsPreviewLoading = true;
+        if (showMobileImageSurfaceImmediately)
+            PreviewKind = PreviewKind.Image;
         if (!preserveSlideshow)
             StopSlideshow();
 
@@ -1944,8 +1949,21 @@ public partial class MainViewModel : ViewModelBase
             {
                 var scale = mobileMaxPreviewEdge / (double)Math.Max(info.Width, info.Height);
                 var targetWidth = Math.Max(1, (int)Math.Round(info.Width * scale));
-                await using var scaledStream = File.OpenRead(cachedPath);
-                return Bitmap.DecodeToWidth(scaledStream, targetWidth, BitmapInterpolationMode.HighQuality);
+                return await Task.Run(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var scaledStream = File.OpenRead(cachedPath);
+                    var bitmap = Bitmap.DecodeToWidth(
+                        scaledStream,
+                        targetWidth,
+                        BitmapInterpolationMode.HighQuality);
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        bitmap.Dispose();
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    return bitmap;
+                }, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -1957,8 +1975,18 @@ public partial class MainViewModel : ViewModelBase
             // If metadata identification fails, Avalonia still gets a chance to decode normally.
         }
 
-        await using var stream = File.OpenRead(cachedPath);
-        return new Bitmap(stream);
+        return await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var stream = File.OpenRead(cachedPath);
+            var bitmap = new Bitmap(stream);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                bitmap.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            return bitmap;
+        }, cancellationToken);
     }
 
     private void StartAdjacentImagePrefetch(DriveItemModel current)
