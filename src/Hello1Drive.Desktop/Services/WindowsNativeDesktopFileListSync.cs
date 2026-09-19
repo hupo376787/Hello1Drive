@@ -204,6 +204,61 @@ internal sealed partial class WindowsNativeDesktopFileListController
         return hash.ToHashCode().ToString("X8");
     }
 
+    private nint HandleVirtualGetDispInfo(nint lParam)
+    {
+        if (lParam == 0)
+            return 0;
+
+        var info = Marshal.PtrToStructure<NMLVDISPINFO>(lParam);
+
+        // The native control owns layout/selection only; Hello1Drive paints labels and artwork.
+        // Supplying one shared image slot plus an empty label avoids per-item native allocations.
+        if ((info.item.mask & LVIF_IMAGE) != 0)
+            info.item.iImage = 0;
+
+        if ((info.item.mask & LVIF_TEXT) != 0 &&
+            info.item.pszText != 0 &&
+            info.item.cchTextMax > 0)
+        {
+            Marshal.WriteInt16(info.item.pszText, 0);
+        }
+
+        Marshal.StructureToPtr(info, lParam, false);
+        return 0;
+    }
+
+    private void HandleVirtualCacheHint(nint lParam)
+    {
+        if (_viewModel is null || lParam == 0 || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        var hint = Marshal.PtrToStructure<NMLVCACHEHINT>(lParam);
+        var count = _viewModel.VirtualItems.Count;
+        var first = Math.Clamp(Math.Min(hint.iFrom, hint.iTo), 0, count - 1);
+        var last = Math.Clamp(Math.Max(hint.iFrom, hint.iTo), first, count - 1);
+
+        // Expand the native hint slightly so fast wheel/trackpad scrolling usually lands on
+        // already-hydrated thumbnails. Keep network fetches paused while the user is flinging.
+        var padding = _viewModel.ViewMode == FileViewMode.Details
+            ? 12
+            : Math.Max(4, CalculateNativeGridMetrics().Columns * 2);
+        first = Math.Max(0, first - padding);
+        last = Math.Min(count - 1, last + padding);
+
+        var indices = new List<int>(last - first + 1);
+        var items = new List<DriveItemModel>(last - first + 1);
+        for (var index = first; index <= last; index++)
+        {
+            if (_viewModel.VirtualItems[index].Item is not { } item)
+                continue;
+            indices.Add(index);
+            items.Add(item);
+        }
+
+        if (items.Count > 0)
+            _viewModel.UpdateDesktopRealizedThumbnails(indices, items, allowNetwork: !_scrolling);
+    }
+
     private int FindItemIndex(string? itemId, int fallback)
     {
         if (_viewModel is null || string.IsNullOrWhiteSpace(itemId))
