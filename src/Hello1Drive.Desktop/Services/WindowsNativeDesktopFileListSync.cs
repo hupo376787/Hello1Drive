@@ -157,10 +157,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
         try
         {
             ApplyNativeView(mode);
-            SendMessage(ListHandle, LVM_DELETEALLITEMS, 0, 0);
 
-            for (var index = 0; index < slots.Count; index++)
-                InsertItem(index);
+            // LVS_OWNERDATA keeps only selection/focus state inside SysListView32. One message
+            // replaces the previous O(n) DELETE/INSERT loop, regardless of folder size.
+            SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
 
             if (mode != FileViewMode.Details)
                 LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
@@ -240,27 +240,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
         SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(spacingWidth, spacingHeight));
     }
 
-    private void InsertItem(int index)
-    {
-        var lvItem = new LVITEM
-        {
-            // We only need a native item/image slot for scrolling, selection and hit testing.
-            // The visual label is fully owner-drawn, so omit LVIF_TEXT entirely.
-            mask = LVIF_IMAGE,
-            iItem = index,
-            iSubItem = 0,
-            pszText = 0,
-            iImage = 0
-        };
-        var itemPtr = Marshal.AllocHGlobal(Marshal.SizeOf<LVITEM>());
-        try
-        {
-            Marshal.StructureToPtr(lvItem, itemPtr, false);
-            SendMessage(ListHandle, LVM_INSERTITEMW, 0, itemPtr);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(itemPtr);
-        }
-    }
 }
