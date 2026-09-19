@@ -18,10 +18,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _synchronizingSelection = true;
         try
         {
+            // -1 applies the state change to all items. This avoids one SendMessage per file in
+            // large virtual folders, then restores only the handful of actually selected items.
+            SetItemSelected(-1, selected: false);
+
+            if (selectedIds.Count == 0)
+                return;
+
             for (var i = 0; i < _viewModel.VirtualItems.Count; i++)
             {
                 var item = _viewModel.VirtualItems[i].Item;
-                SetItemSelected(i, item is not null && selectedIds.Contains(item.Id));
+                if (item is not null && selectedIds.Contains(item.Id))
+                    SetItemSelected(i, selected: true);
             }
         }
         finally

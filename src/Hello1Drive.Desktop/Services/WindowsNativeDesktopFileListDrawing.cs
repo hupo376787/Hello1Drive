@@ -19,8 +19,20 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (msg == WM_NOTIFY && lParam != 0)
         {
             var hdr = Marshal.PtrToStructure<NMHDR>(lParam);
-            if (hdr.hwndFrom == ListHandle && hdr.code == NM_CUSTOMDRAW)
-                return HandleCustomDraw(lParam);
+            if (hdr.hwndFrom == ListHandle)
+            {
+                if (hdr.code == NM_CUSTOMDRAW)
+                    return HandleCustomDraw(lParam);
+
+                if (hdr.code == LVN_GETDISPINFOA || hdr.code == LVN_GETDISPINFOW)
+                    return HandleVirtualGetDispInfo(lParam);
+
+                if (hdr.code == LVN_ODCACHEHINT)
+                {
+                    HandleVirtualCacheHint(lParam);
+                    return 0;
+                }
+            }
         }
 
         if (msg == WM_ERASEBKGND)

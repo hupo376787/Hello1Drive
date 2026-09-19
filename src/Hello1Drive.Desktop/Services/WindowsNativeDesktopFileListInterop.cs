@@ -83,6 +83,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
         public uint code;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NMLVDISPINFO
+    {
+        public NMHDR hdr;
+        public LVITEM item;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NMLVCACHEHINT
+    {
+        public NMHDR hdr;
+        public int iFrom;
+        public int iTo;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NMCUSTOMDRAW
     {

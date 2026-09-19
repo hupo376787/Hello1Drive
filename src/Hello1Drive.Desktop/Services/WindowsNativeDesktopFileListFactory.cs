@@ -14,8 +14,8 @@ using Microsoft.Win32;
 namespace Hello1Drive.Desktop.Services;
 
 /// <summary>
-/// Windows desktop file surface. The scroll/selection/hit-testing engine remains the native
-/// SysListView32 control, while Hello1Drive paints the visible file cards itself.
+/// Windows desktop file surface. SysListView32 runs as an LVS_OWNERDATA virtual list so item
+/// count/layout/scrolling stay native and O(visible-items), while Hello1Drive paints visible cards.
 /// </summary>
 internal sealed class WindowsNativeDesktopFileListFactory : INativeDesktopFileListFactory
 {
@@ -46,6 +46,8 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint WS_EX_TRANSPARENT = 0x00000020;
     private const uint WS_EX_LAYERED = 0x00080000;
     private const uint LVS_REPORT = 0x0001;
+    private const uint LVS_AUTOARRANGE = 0x0100;
+    private const uint LVS_OWNERDATA = 0x1000;
     private const uint LVS_SHOWSELALWAYS = 0x0008;
     private const uint LVS_SHAREIMAGELISTS = 0x0040;
     private const uint LVS_NOLABELWRAP = 0x0080;
@@ -75,23 +77,22 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint TME_LEAVE = 0x00000002;
 
     private const int LVM_FIRST = 0x1000;
-    private const int LVM_DELETEALLITEMS = LVM_FIRST + 9;
     private const int LVM_GETNEXTITEM = LVM_FIRST + 12;
     private const int LVM_GETITEMRECT = LVM_FIRST + 14;
     private const int LVM_ENSUREVISIBLE = LVM_FIRST + 19;
     private const int LVM_REDRAWITEMS = LVM_FIRST + 21;
+    private const int LVM_ARRANGE = LVM_FIRST + 22;
     private const int LVM_DELETECOLUMN = LVM_FIRST + 28;
     private const int LVM_SETCOLUMNWIDTH = LVM_FIRST + 30;
     private const int LVM_GETTOPINDEX = LVM_FIRST + 39;
     private const int LVM_SETITEMSTATE = LVM_FIRST + 43;
     private const int LVM_GETITEMSTATE = LVM_FIRST + 44;
-    private const int LVM_SETITEMPOSITION32 = LVM_FIRST + 49;
+    private const int LVM_SETITEMCOUNT = LVM_FIRST + 47;
     private const int LVM_SETEXTENDEDLISTVIEWSTYLE = LVM_FIRST + 54;
     private const int LVM_SETBKCOLOR = LVM_FIRST + 1;
     private const int LVM_SETTEXTCOLOR = LVM_FIRST + 36;
     private const int LVM_SETTEXTBKCOLOR = LVM_FIRST + 38;
     private const int LVM_SETIMAGELIST = LVM_FIRST + 3;
-    private const int LVM_INSERTITEMW = LVM_FIRST + 77;
     private const int LVM_INSERTCOLUMNW = LVM_FIRST + 97;
     private const int LVM_SETITEMTEXTW = LVM_FIRST + 116;
     private const int LVM_SETVIEW = LVM_FIRST + 142;
@@ -120,6 +121,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int CLR_NONE = -1;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
+    private const uint LVN_ODCACHEHINT = unchecked((uint)-113);
+    private const uint LVN_GETDISPINFOA = unchecked((uint)-150);
+    private const uint LVN_GETDISPINFOW = unchecked((uint)-177);
     private const uint CDDS_PREPAINT = 0x00000001;
     private const int CDRF_SKIPDEFAULT = 0x00000004;
 
@@ -161,7 +165,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private readonly LinkedList<string> _thumbnailLru = [];
 
     private MainViewModel? _viewModel;
-    private string _lastSignature = string.Empty;
+    private long _collectionVersion;
+    private long _lastSyncedCollectionVersion = -1;
+    private int _lastSyncedViewMode = -1;
     private bool _disposed;
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
@@ -208,8 +214,8 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
             0,
             "SysListView32",
             string.Empty,
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS |
-            LVS_SHAREIMAGELISTS | LVS_NOLABELWRAP | LVS_NOCOLUMNHEADER,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_OWNERDATA | LVS_AUTOARRANGE |
+            LVS_SHOWSELALWAYS | LVS_SHAREIMAGELISTS | LVS_NOLABELWRAP | LVS_NOCOLUMNHEADER,
             0, 0, 100, 100,
             Handle,
             0,

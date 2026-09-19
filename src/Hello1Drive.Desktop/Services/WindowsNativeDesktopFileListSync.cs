@@ -27,7 +27,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DetachAllSlots();
 
         _viewModel = vm;
-        _lastSignature = string.Empty;
+        unchecked { _collectionVersion++; }
+        _lastSyncedCollectionVersion = -1;
+        _lastSyncedViewMode = -1;
         ResetNativeIconLayout();
         if (_viewModel is not null)
         {
@@ -47,7 +49,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (e.PropertyName == nameof(MainViewModel.ViewMode))
         {
-            _lastSignature = string.Empty;
+            _lastSyncedViewMode = -1;
             ResetNativeIconLayout();
             SyncPresentation(force: false);
             return;
@@ -64,6 +66,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void VirtualItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        unchecked { _collectionVersion++; }
+
         if (e.OldItems is not null)
         {
             foreach (var value in e.OldItems)
@@ -72,7 +76,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
 
         if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
             DetachAllSlots();
+            if (_viewModel is not null)
+            {
+                foreach (var slot in _viewModel.VirtualItems)
+                    AttachSlot(slot);
+            }
+        }
 
         if (e.NewItems is not null)
         {
@@ -138,8 +149,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         var slots = _viewModel.VirtualItems;
         var mode = _viewModel.ViewMode;
-        var signature = BuildSignature(slots, mode);
-        if (!force && string.Equals(signature, _lastSignature, StringComparison.Ordinal))
+        var modeValue = (int)mode;
+        var structureChanged =
+            force ||
+            _lastSyncedCollectionVersion != _collectionVersion ||
+            _lastSyncedViewMode != modeValue;
+        if (!structureChanged)
         {
             SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
@@ -152,15 +167,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ? slots[firstVisible].Item?.Id
             : null;
 
-        _lastSignature = signature;
+        _lastSyncedCollectionVersion = _collectionVersion;
+        _lastSyncedViewMode = modeValue;
         SendMessage(ListHandle, WM_SETREDRAW, 0, 0);
         try
         {
             ApplyNativeView(mode);
-            SendMessage(ListHandle, LVM_DELETEALLITEMS, 0, 0);
 
-            for (var index = 0; index < slots.Count; index++)
-                InsertItem(index);
+            // LVS_OWNERDATA keeps only selection/focus state inside SysListView32. One message
+            // replaces the previous O(n) DELETE/INSERT loop, regardless of folder size.
+            SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
 
             if (mode != FileViewMode.Details)
                 LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
@@ -182,26 +198,59 @@ internal sealed partial class WindowsNativeDesktopFileListController
         QueueVisibleThumbnails(allowNetwork: true);
     }
 
-    private static string BuildSignature(IReadOnlyList<VirtualDriveItemSlot> slots, FileViewMode mode)
+    private nint HandleVirtualGetDispInfo(nint lParam)
     {
-        var hash = new HashCode();
-        hash.Add((int)mode);
-        hash.Add(slots.Count);
-        for (var i = 0; i < slots.Count; i++)
-        {
-            var item = slots[i].Item;
-            if (item is null)
-            {
-                hash.Add(i);
-                continue;
-            }
+        if (lParam == 0)
+            return 0;
 
-            hash.Add(item.Id, StringComparer.Ordinal);
-            hash.Add(item.Name, StringComparer.Ordinal);
-            hash.Add(item.Size);
-            hash.Add(item.LastModifiedDateTime);
+        var info = Marshal.PtrToStructure<NMLVDISPINFO>(lParam);
+
+        // The native control owns layout/selection only; Hello1Drive paints labels and artwork.
+        // Supplying one shared image slot plus an empty label avoids per-item native allocations.
+        if ((info.item.mask & LVIF_IMAGE) != 0)
+            info.item.iImage = 0;
+
+        if ((info.item.mask & LVIF_TEXT) != 0 &&
+            info.item.pszText != 0 &&
+            info.item.cchTextMax > 0)
+        {
+            Marshal.WriteInt16(info.item.pszText, 0);
         }
-        return hash.ToHashCode().ToString("X8");
+
+        Marshal.StructureToPtr(info, lParam, false);
+        return 0;
+    }
+
+    private void HandleVirtualCacheHint(nint lParam)
+    {
+        if (_viewModel is null || lParam == 0 || _viewModel.VirtualItems.Count == 0)
+            return;
+
+        var hint = Marshal.PtrToStructure<NMLVCACHEHINT>(lParam);
+        var count = _viewModel.VirtualItems.Count;
+        var first = Math.Clamp(Math.Min(hint.iFrom, hint.iTo), 0, count - 1);
+        var last = Math.Clamp(Math.Max(hint.iFrom, hint.iTo), first, count - 1);
+
+        // Expand the native hint slightly so fast wheel/trackpad scrolling usually lands on
+        // already-hydrated thumbnails. Keep network fetches paused while the user is flinging.
+        var padding = _viewModel.ViewMode == FileViewMode.Details
+            ? 12
+            : Math.Max(4, CalculateNativeGridMetrics().Columns * 2);
+        first = Math.Max(0, first - padding);
+        last = Math.Min(count - 1, last + padding);
+
+        var indices = new List<int>(last - first + 1);
+        var items = new List<DriveItemModel>(last - first + 1);
+        for (var index = first; index <= last; index++)
+        {
+            if (_viewModel.VirtualItems[index].Item is not { } item)
+                continue;
+            indices.Add(index);
+            items.Add(item);
+        }
+
+        if (items.Count > 0)
+            _viewModel.UpdateDesktopRealizedThumbnails(indices, items, allowNetwork: !_scrolling);
     }
 
     private int FindItemIndex(string? itemId, int fallback)
@@ -240,27 +289,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
         SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(spacingWidth, spacingHeight));
     }
 
-    private void InsertItem(int index)
-    {
-        var lvItem = new LVITEM
-        {
-            // We only need a native item/image slot for scrolling, selection and hit testing.
-            // The visual label is fully owner-drawn, so omit LVIF_TEXT entirely.
-            mask = LVIF_IMAGE,
-            iItem = index,
-            iSubItem = 0,
-            pszText = 0,
-            iImage = 0
-        };
-        var itemPtr = Marshal.AllocHGlobal(Marshal.SizeOf<LVITEM>());
-        try
-        {
-            Marshal.StructureToPtr(lvItem, itemPtr, false);
-            SendMessage(ListHandle, LVM_INSERTITEMW, 0, itemPtr);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(itemPtr);
-        }
-    }
 }
