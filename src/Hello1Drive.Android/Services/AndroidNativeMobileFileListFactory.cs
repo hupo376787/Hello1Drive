@@ -110,8 +110,22 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
     {
         if (_disposed)
             return;
+
         _recycler.StopScroll();
-        _recycler.ScrollToPosition(e.Position);
+        if (_recycler.GetLayoutManager() is LinearLayoutManager linear)
+        {
+            // RecyclerView.ScrollToPosition only makes the row visible; Android explicitly documents
+            // that it may use the minimum scroll amount. Restore the row and its exact top offset
+            // instead, which is the setSelectionFromTop-style behavior folder navigation needs.
+            linear.ScrollToPositionWithOffset(
+                e.Position,
+                (int)Math.Round(e.FirstVisibleOffset, MidpointRounding.AwayFromZero));
+        }
+        else
+        {
+            _recycler.ScrollToPosition(e.Position);
+        }
+
         _recycler.Post(() => ReportScrollState(false));
     }
 
@@ -231,6 +245,7 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
     private void ApplyLayoutManager(FileViewMode mode, bool preservePosition)
     {
         var first = preservePosition ? GetFirstVisiblePosition() : 0;
+        var firstOffset = preservePosition ? GetFirstVisibleOffset() : 0;
         var currentMode = _adapter.Mode;
         if (currentMode == mode && _recycler.GetLayoutManager() is not null)
         {
@@ -254,8 +269,8 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 
         _recycler.SetLayoutManager(manager);
         _adapter.NotifyDataSetChanged();
-        if (preservePosition && first > 0)
-            _recycler.ScrollToPosition(first);
+        if (preservePosition && first > 0 && manager is LinearLayoutManager linear)
+            linear.ScrollToPositionWithOffset(first, firstOffset);
     }
 
     private int CalculateSpanCount(FileViewMode mode)
@@ -334,7 +349,20 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         var first = GetFirstVisiblePosition();
         var last = GetLastVisiblePosition();
         _adapter.UpdateVisibleRange(first, last);
-        _host.RaiseScrollStateChanged(scrolling, first, last);
+        _host.RaiseScrollStateChanged(scrolling, first, last, GetFirstVisibleOffset());
+    }
+
+    private int GetFirstVisibleOffset()
+    {
+        if (_recycler.GetLayoutManager() is not LinearLayoutManager linear)
+            return 0;
+
+        var first = linear.FindFirstVisibleItemPosition();
+        if (first < 0)
+            return 0;
+
+        var firstView = linear.FindViewByPosition(first);
+        return firstView is null ? 0 : firstView.Top - _recycler.PaddingTop;
     }
 
     private int GetFirstVisiblePosition()

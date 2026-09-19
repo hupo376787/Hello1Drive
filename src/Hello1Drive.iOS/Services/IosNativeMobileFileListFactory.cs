@@ -112,7 +112,33 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
 
         var position = Math.Clamp(e.Position, 0, _source.ItemCount - 1);
         var indexPath = NSIndexPath.FromItemSection(position, 0);
-        _collection.ScrollToItem(indexPath, UICollectionViewScrollPosition.Top, animated: false);
+        _collection.LayoutIfNeeded();
+
+        var attributes = _collection.GetLayoutAttributesForItem(indexPath);
+        if (attributes is null)
+        {
+            _collection.ScrollToItem(indexPath, UICollectionViewScrollPosition.Top, animated: false);
+        }
+        else
+        {
+            // Keep the same sub-row pixel/point offset instead of snapping the first partially
+            // visible row to the top after every folder reload.
+            var inset = _collection.AdjustedContentInset;
+            var targetY =
+                (double)attributes.Frame.Y -
+                e.FirstVisibleOffset -
+                (double)inset.Top;
+            var minY = -(double)inset.Top;
+            var maxY = Math.Max(
+                minY,
+                (double)_collection.ContentSize.Height -
+                (double)_collection.Bounds.Height +
+                (double)inset.Bottom);
+            _collection.SetContentOffset(
+                new CGPoint(_collection.ContentOffset.X, (nfloat)Math.Clamp(targetY, minY, maxY)),
+                animated: false);
+        }
+
         _source.ReportScrollState(false);
     }
 
@@ -680,7 +706,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     public void ReportScrollState(bool scrolling)
     {
         var (first, last) = GetVisibleRange();
-        _host.RaiseScrollStateChanged(scrolling, first, last);
+        _host.RaiseScrollStateChanged(scrolling, first, last, GetFirstVisibleOffset(first));
     }
 
     private void FinishScrolling()
@@ -710,6 +736,20 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         _scrolling = scrolling;
         if (scrolling)
             CancelThumbnailGeneration();
+    }
+
+    private double GetFirstVisibleOffset(int first)
+    {
+        if (first < 0 || first >= ItemCount)
+            return 0;
+
+        var indexPath = NSIndexPath.FromItemSection(first, 0);
+        var attributes = _collection.GetLayoutAttributesForItem(indexPath);
+        if (attributes is null)
+            return 0;
+
+        var visibleTop = (double)_collection.ContentOffset.Y + (double)_collection.AdjustedContentInset.Top;
+        return (double)attributes.Frame.Y - visibleTop;
     }
 
     private (int first, int last) GetVisibleRange()

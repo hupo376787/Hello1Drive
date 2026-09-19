@@ -134,14 +134,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (!TryGetNativeItemViewPosition(index, out var position))
             return false;
 
-        // Microsoft documents LVM_GETITEMPOSITION in view coordinates and LVM_GETORIGIN as the
-        // client coordinate corresponding to view coordinate (0,0). Convert the actual native item
-        // position instead of reconstructing it from index/row math. SysListView32 may normalize its
-        // internal icon positions while scrolling, and painting an inferred rectangle then lands
-        // outside the item's paint clip and produces a blank viewport.
+        // LVM_GETITEMPOSITION returns view coordinates. LVM_GETORIGIN is the current positive view
+        // scroll origin exposed by the control, so client coordinates are view - origin. Adding the
+        // origin makes owner-drawn cards move downward while the native control scrolls downward,
+        // which is exactly the reversed-wheel/blank-space symptom.
         var origin = GetNativeViewOrigin();
-        var left = origin.x + position.x;
-        var top = origin.y + position.y;
+        var left = position.x - origin.x;
+        var top = position.y - origin.y;
         rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
         return true;
     }

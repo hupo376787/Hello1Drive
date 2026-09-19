@@ -33,6 +33,7 @@ public sealed class NativeMobileFileListHost : NativeControlHost
     public IReadOnlyList<string> SelectedIds => _selectedIds;
     public bool SelectionMode => _selectionMode;
     public int LastFirstVisibleIndex { get; private set; }
+    public double LastFirstVisibleOffset { get; private set; }
     public bool FloatingUploadVisible => _viewModel?.ShowFloatingUploadButton == true;
     public double FloatingUploadX => Math.Clamp(_viewModel?.Settings.FloatingUploadX ?? 0.94, 0, 1);
     public double FloatingUploadY => Math.Clamp(_viewModel?.Settings.FloatingUploadY ?? 0.90, 0, 1);
@@ -67,7 +68,8 @@ public sealed class NativeMobileFileListHost : NativeControlHost
 
         _folderViewportAnchors[e.FolderKey] = NativeFolderViewportAnchorResolver.Capture(
             _viewModel.MobileItems,
-            LastFirstVisibleIndex);
+            LastFirstVisibleIndex,
+            LastFirstVisibleOffset);
     }
 
     private void ViewModel_FolderLoaded(object? sender, FolderNavigationEventArgs e)
@@ -80,14 +82,14 @@ public sealed class NativeMobileFileListHost : NativeControlHost
         if (e.Reason == FolderNavigationReason.Refresh)
             return;
 
-        var target = 0;
+        var target = new NativeFolderViewportTarget(0, 0);
         if (e.ShouldRestoreScroll && _folderViewportAnchors.TryGetValue(e.FolderKey, out var anchor))
-            target = NativeFolderViewportAnchorResolver.Resolve(_viewModel.MobileItems, anchor);
+            target = NativeFolderViewportAnchorResolver.ResolveTarget(_viewModel.MobileItems, anchor);
 
-        RestoreFolderViewport(e.FolderKey, target);
+        RestoreFolderViewport(e.FolderKey, target.Position, target.FirstVisibleOffset);
     }
 
-    private void RestoreFolderViewport(string folderKey, int position)
+    private void RestoreFolderViewport(string folderKey, int position, double firstVisibleOffset)
     {
         if (_viewModel is null || _viewModel.MobileItems.Count == 0)
             return;
@@ -98,17 +100,17 @@ public sealed class NativeMobileFileListHost : NativeControlHost
         // Correct the position before the next frame. Older MainView compatibility handlers may
         // also request a position; the two deferred passes below intentionally run after them and
         // make this stable identity+slot-delta result authoritative.
-        ScrollToPosition(target);
+        ScrollToPosition(target, firstVisibleOffset);
         Dispatcher.UIThread.Post(() =>
         {
             if (!CanApplyFolderViewportRestore(version, folderKey))
                 return;
 
-            ScrollToPosition(target);
+            ScrollToPosition(target, firstVisibleOffset);
             Dispatcher.UIThread.Post(() =>
             {
                 if (CanApplyFolderViewportRestore(version, folderKey))
-                    ScrollToPosition(target);
+                    ScrollToPosition(target, firstVisibleOffset);
             }, DispatcherPriority.Background);
         }, DispatcherPriority.Loaded);
     }
@@ -136,16 +138,27 @@ public sealed class NativeMobileFileListHost : NativeControlHost
     public void RaiseItemLongPressed(DriveItemModel item) =>
         ItemLongPressed?.Invoke(this, new NativeMobileFileItemEventArgs(item));
 
-    public void RaiseScrollStateChanged(bool isScrolling, int firstVisibleIndex, int lastVisibleIndex)
+    public void RaiseScrollStateChanged(
+        bool isScrolling,
+        int firstVisibleIndex,
+        int lastVisibleIndex,
+        double firstVisibleOffset = 0)
     {
         LastFirstVisibleIndex = Math.Max(0, firstVisibleIndex);
-        ScrollStateChanged?.Invoke(this, new NativeMobileFileScrollEventArgs(isScrolling, firstVisibleIndex, lastVisibleIndex));
+        LastFirstVisibleOffset = double.IsFinite(firstVisibleOffset) ? firstVisibleOffset : 0;
+        ScrollStateChanged?.Invoke(this, new NativeMobileFileScrollEventArgs(
+            isScrolling,
+            firstVisibleIndex,
+            lastVisibleIndex,
+            LastFirstVisibleOffset));
     }
 
     public Task RaiseRefreshRequestedAsync() => RefreshRequestedAsync?.Invoke() ?? Task.CompletedTask;
 
-    public void ScrollToPosition(int position) =>
-        ScrollToPositionRequested?.Invoke(this, new NativeMobileFileScrollToEventArgs(Math.Max(0, position)));
+    public void ScrollToPosition(int position, double firstVisibleOffset = 0) =>
+        ScrollToPositionRequested?.Invoke(this, new NativeMobileFileScrollToEventArgs(
+            Math.Max(0, position),
+            double.IsFinite(firstVisibleOffset) ? firstVisibleOffset : 0));
 
     public void RaiseFloatingUploadRequested() => FloatingUploadRequested?.Invoke(this, EventArgs.Empty);
 
@@ -191,14 +204,20 @@ public sealed class NativeMobileFileItemEventArgs(DriveItemModel item) : EventAr
     public DriveItemModel Item { get; } = item;
 }
 
-public sealed class NativeMobileFileScrollEventArgs(bool isScrolling, int firstVisibleIndex, int lastVisibleIndex) : EventArgs
+public sealed class NativeMobileFileScrollEventArgs(
+    bool isScrolling,
+    int firstVisibleIndex,
+    int lastVisibleIndex,
+    double firstVisibleOffset) : EventArgs
 {
     public bool IsScrolling { get; } = isScrolling;
     public int FirstVisibleIndex { get; } = firstVisibleIndex;
     public int LastVisibleIndex { get; } = lastVisibleIndex;
+    public double FirstVisibleOffset { get; } = firstVisibleOffset;
 }
 
-public sealed class NativeMobileFileScrollToEventArgs(int position) : EventArgs
+public sealed class NativeMobileFileScrollToEventArgs(int position, double firstVisibleOffset) : EventArgs
 {
     public int Position { get; } = position;
+    public double FirstVisibleOffset { get; } = firstVisibleOffset;
 }

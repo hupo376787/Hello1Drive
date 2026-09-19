@@ -175,7 +175,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var metrics = CalculateNativeGridMetrics();
         var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
         var origin = GetNativeViewOrigin();
-        var scrollY = Math.Max(0, -origin.y);
+        var scrollY = Math.Max(0, origin.y);
         var firstRow = Math.Max(0, scrollY / pitchY);
         var lastPixel = scrollY + Math.Max(1, client.Height) - 1;
         var lastRow = Math.Max(firstRow, lastPixel / pitchY);
