@@ -168,7 +168,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private readonly LinkedList<string> _thumbnailLru = [];
 
     private MainViewModel? _viewModel;
-    private string _lastSignature = string.Empty;
+    private long _collectionVersion;
+    private long _lastSyncedCollectionVersion = -1;
+    private int _lastSyncedViewMode = -1;
     private bool _disposed;
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
