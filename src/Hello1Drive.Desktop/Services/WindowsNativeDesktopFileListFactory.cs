@@ -77,7 +77,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint TME_LEAVE = 0x00000002;
 
     private const int LVM_FIRST = 0x1000;
-    private const int LVM_DELETEALLITEMS = LVM_FIRST + 9;
     private const int LVM_GETNEXTITEM = LVM_FIRST + 12;
     private const int LVM_GETITEMRECT = LVM_FIRST + 14;
     private const int LVM_ENSUREVISIBLE = LVM_FIRST + 19;
@@ -89,13 +88,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int LVM_SETITEMSTATE = LVM_FIRST + 43;
     private const int LVM_GETITEMSTATE = LVM_FIRST + 44;
     private const int LVM_SETITEMCOUNT = LVM_FIRST + 47;
-    private const int LVM_SETITEMPOSITION32 = LVM_FIRST + 49;
     private const int LVM_SETEXTENDEDLISTVIEWSTYLE = LVM_FIRST + 54;
     private const int LVM_SETBKCOLOR = LVM_FIRST + 1;
     private const int LVM_SETTEXTCOLOR = LVM_FIRST + 36;
     private const int LVM_SETTEXTBKCOLOR = LVM_FIRST + 38;
     private const int LVM_SETIMAGELIST = LVM_FIRST + 3;
-    private const int LVM_INSERTITEMW = LVM_FIRST + 77;
     private const int LVM_INSERTCOLUMNW = LVM_FIRST + 97;
     private const int LVM_SETITEMTEXTW = LVM_FIRST + 116;
     private const int LVM_SETVIEW = LVM_FIRST + 142;
