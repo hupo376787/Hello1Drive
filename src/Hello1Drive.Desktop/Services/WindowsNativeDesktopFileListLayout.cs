@@ -129,7 +129,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // origin makes owner-drawn cards move downward while the native control scrolls downward,
         // which is exactly the reversed-wheel/blank-space symptom.
         var origin = GetNativeViewOrigin();
-        var left = position.x - origin.x;
+        var iconWidth = ScaleInt(_viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+
+        // In auto-arranged icon view the native item position is the icon's upper-left corner.
+        // Hello1Drive's painted card is wider than that layout image, so recover the grid-cell
+        // origin by removing the native centering offset before converting view -> client coords.
+        var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+        var left = position.x - horizontalInset - origin.x;
         var top = position.y - origin.y;
         rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
         return true;
