@@ -82,29 +82,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (ownsRedraw)
             SendMessage(ListHandle, WM_SETREDRAW, 0, 0);
 
-        var pointPtr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
         try
         {
             var pitchX = metrics.CellWidth + metrics.Gap;
             var pitchY = metrics.CellHeight + metrics.Gap;
-            SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(pitchX, pitchY));
 
-            for (var index = 0; index < itemCount; index++)
-            {
-                var row = index / metrics.Columns;
-                var column = index % metrics.Columns;
-                var point = new POINT
-                {
-                    x = column * pitchX,
-                    y = row * pitchY
-                };
-                Marshal.StructureToPtr(point, pointPtr, false);
-                SendMessage(ListHandle, LVM_SETITEMPOSITION32, (nint)index, pointPtr);
-            }
+            // LVS_OWNERDATA virtual lists default to auto-arrange. Set the native icon grid once
+            // and let SysListView32 calculate positions internally instead of issuing one
+            // LVM_SETITEMPOSITION32 call per file.
+            SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(pitchX, pitchY));
+            SendMessage(ListHandle, LVM_ARRANGE, 0, 0);
         }
         finally
         {
-            Marshal.FreeHGlobal(pointPtr);
             if (ownsRedraw)
             {
                 SendMessage(ListHandle, WM_SETREDRAW, 1, 0);
