@@ -58,7 +58,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
 
         _nativePaintedIndices.Add(index);
-        if (_nativePaintedFlushScheduled)
+        if (_scrolling)
+            return;
+
+        ScheduleNativePaintedThumbnailFlush();
+    }
+
+    private void ScheduleNativePaintedThumbnailFlush()
+    {
+        if (_nativePaintedFlushScheduled || _nativePaintedIndices.Count == 0 || _disposed)
             return;
 
         _nativePaintedFlushScheduled = true;
