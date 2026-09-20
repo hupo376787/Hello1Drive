@@ -221,36 +221,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (ListHandle == 0 || index < 0)
             return false;
 
-        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
-        try
-        {
-            Marshal.StructureToPtr(position, ptr, false);
-            if (SendMessage(ListHandle, LVM_GETITEMPOSITION_NATIVE, (nint)index, ptr) == 0)
-                return false;
-            position = Marshal.PtrToStructure<POINT>(ptr);
-            return true;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(ptr);
-        }
+        return SendMessagePoint(
+            ListHandle,
+            LVM_GETITEMPOSITION_NATIVE,
+            (nint)index,
+            ref position) != 0;
     }
 
     private POINT GetNativeViewOrigin()
     {
         var origin = new POINT();
-        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
-        try
-        {
-            Marshal.StructureToPtr(origin, ptr, false);
-            if (SendMessage(ListHandle, LVM_GETORIGIN_NATIVE, 0, ptr) != 0)
-                origin = Marshal.PtrToStructure<POINT>(ptr);
-            return origin;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(ptr);
-        }
+        if (ListHandle != 0)
+            SendMessagePoint(ListHandle, LVM_GETORIGIN_NATIVE, 0, ref origin);
+        return origin;
     }
 
     private readonly record struct NativeGridMetrics(
