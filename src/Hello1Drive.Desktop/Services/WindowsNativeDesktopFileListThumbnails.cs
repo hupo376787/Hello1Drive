@@ -283,14 +283,48 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
+    private void UpdateVisibleNativeThumbnailPins(IEnumerable<DriveItemModel> items)
+    {
+        var visible = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            if (item is null || string.IsNullOrWhiteSpace(item.Id) || !item.SupportsThumbnail)
+                continue;
+
+            visible.Add(item.Id);
+
+            // If the managed thumbnail is already decoded but its scaled native copy was evicted
+            // earlier, rebuild it before hover/selection invalidates the card.
+            if (item.ThumbnailImage is not null &&
+                (!_thumbnailCache.TryGetValue(item.Id, out var cached) ||
+                 !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal)))
+            {
+                QueueNativeThumbnailPreparation(item);
+            }
+        }
+
+        _visibleNativeThumbnailIds = visible;
+    }
+
     private void StoreThumbnail(string itemId, NativeThumbnail thumbnail)
     {
         RemoveThumbnail(itemId);
         thumbnail.LruNode = _thumbnailLru.AddFirst(itemId);
         _thumbnailCache[itemId] = thumbnail;
 
-        while (_thumbnailCache.Count > MaxNativeThumbnailCache && _thumbnailLru.Last is { } last)
-            RemoveThumbnail(last.Value);
+        while (_thumbnailCache.Count > MaxNativeThumbnailCache)
+        {
+            var victim = _thumbnailLru.Last;
+            while (victim is not null && _visibleNativeThumbnailIds.Contains(victim.Value))
+                victim = victim.Previous;
+
+            // A very dense viewport may temporarily pin more than the nominal cache size. Keep
+            // visible pixels stable and let the cache trim again after the viewport changes.
+            if (victim is null)
+                break;
+
+            RemoveThumbnail(victim.Value);
+        }
     }
 
     private void TouchThumbnail(NativeThumbnail thumbnail)
