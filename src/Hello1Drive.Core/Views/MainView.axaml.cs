@@ -238,6 +238,7 @@ public partial class MainView : UserControl
         }
 
         ConfigureMobileSafeAreaAndSystemBars();
+        UpdateMobilePageOverlayChrome();
 
         if (DataContext is MainViewModel vm)
         {
@@ -302,6 +303,13 @@ public partial class MainView : UserControl
     {
         if (DataContext is not MainViewModel vm)
             return;
+
+        if (IsMobilePlatform &&
+            e.PropertyName is nameof(MainViewModel.IsSettingsPanelVisible) or
+                nameof(MainViewModel.IsTransferPanelVisible))
+        {
+            UpdateMobilePageOverlayChrome();
+        }
 
         if (UsesNativeMobileFileList &&
             e.PropertyName is nameof(MainViewModel.IsAuthenticated) or
@@ -2009,8 +2017,33 @@ if (visibleItems.Count > 0)
         _nativeMobileFileListHost = null;
     }
 
+    private void UpdateMobilePageOverlayChrome()
+    {
+        if (!IsMobilePlatform)
+            return;
+
+        var vm = DataContext as MainViewModel;
+        var pageOverlayVisible =
+            MobileProfileOverlay.IsVisible ||
+            vm?.IsSettingsPanelVisible == true ||
+            vm?.IsTransferPanelVisible == true;
+
+        // Mobile full-page overlays intentionally have transparent content backgrounds now so the
+        // one global edge-to-edge wallpaper remains continuous. Hide the underlying file-manager
+        // chrome instead of painting a second wallpaper copy behind the page.
+        MainFileManagerRoot.Opacity = pageOverlayVisible ? 0 : 1;
+        MainFileManagerRoot.IsHitTestVisible = !pageOverlayVisible;
+
+        // Selection actions sit outside MainFileManagerRoot in the visual tree, so suppress them
+        // separately while a full mobile page owns the screen.
+        MobileSelectionActionBar.Opacity = pageOverlayVisible ? 0 : 1;
+        MobileSelectionActionBar.IsHitTestVisible = !pageOverlayVisible;
+    }
+
     private void UpdateNativeMobileFileListVisibility()
     {
+        UpdateMobilePageOverlayChrome();
+
         if (!UsesNativeMobileFileList)
             return;
 
@@ -2288,6 +2321,8 @@ if (visibleItems.Count > 0)
         if (IsMobilePlatform)
         {
             vm.IsSettingsPanelVisible = true;
+            UpdateMobilePageOverlayChrome();
+            UpdateNativeMobileFileListVisibility();
             if (SettingsPanelHost.RenderTransform is TranslateTransform mobileTransform)
                 mobileTransform.X = 0;
             return;
@@ -2325,6 +2360,8 @@ if (visibleItems.Count > 0)
         if (IsMobilePlatform)
         {
             vm.IsSettingsPanelVisible = false;
+            UpdateMobilePageOverlayChrome();
+            UpdateNativeMobileFileListVisibility();
             return;
         }
 
