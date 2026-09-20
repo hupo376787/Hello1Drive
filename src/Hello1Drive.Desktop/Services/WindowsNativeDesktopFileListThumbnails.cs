@@ -45,7 +45,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         nint region = 0;
         try
         {
-            GdipSetInterpolationMode(graphics, InterpolationModeHighQualityBilinear);
+            GdipSetInterpolationMode(
+                graphics,
+                _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
             region = CreateRoundRectRgn(dest.left, dest.top, dest.right + 1, dest.bottom + 1, radius * 2, radius * 2);
             if (region != 0)
                 GdipSetClipHrgn(graphics, region, CombineModeReplace);
