@@ -2026,7 +2026,10 @@
     </Grid>
 
     <!--  Main file manager  -->
-    <Grid IsVisible="{Binding IsAuthenticated}" RowDefinitions="Auto,Auto,*,Auto">
+    <Grid
+      x:Name="MainFileManagerRoot"
+      IsVisible="{Binding IsAuthenticated}"
+      RowDefinitions="Auto,Auto,*,Auto">
       <!--  Desktop first-row toolbar is hosted by MainWindow inside the custom title bar.  -->
 
       <!--  Mobile toolbar  -->
