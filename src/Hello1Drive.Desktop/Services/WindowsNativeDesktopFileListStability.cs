@@ -133,12 +133,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         var hasDirty = false;
         var dirty = default(RECT);
+        var iconOrigin = _viewModel.ViewMode == FileViewMode.Details
+            ? default
+            : GetNativeViewOrigin();
         for (var index = first; index <= last; index++)
         {
             RECT rect;
             var ok = _viewModel.ViewMode == FileViewMode.Details
                 ? TryGetNativeItemRect(index, out rect)
-                : TryGetNativeGridCellRect(index, out rect);
+                : TryGetNativeGridCellRect(index, iconOrigin, out rect);
             if (!ok)
                 continue;
 
