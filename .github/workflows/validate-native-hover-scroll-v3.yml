@@ -1,5 +1,5 @@
 name: Validate native hover thumbnail scroll v3
-# final branch validation 2
+# final branch validation 3
 
 on:
   push:
