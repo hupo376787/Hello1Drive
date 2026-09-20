@@ -38,7 +38,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             SendMessage(ListHandle, LVM_SCROLL_NAVIGATION, 0, (nint)deltaY);
         }
 
-        ClampNativeIconScrollToContent();
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: !_scrolling);
         InvalidateVisibleItems();

@@ -22,6 +22,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EndPaint(nint hwnd, ref PAINTSTRUCT paintStruct);
 
+    [DllImport("gdi32.dll")]
+    private static extern int GetClipBox(nint hdc, out RECT rect);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(nint hwnd, int command);

@@ -145,13 +145,13 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint GMEM_MOVEABLE = 0x0002;
     private const int UnitPixel = 2;
     private const int CombineModeReplace = 0;
+    private const int InterpolationModeBilinear = 3;
     private const int InterpolationModeHighQualityBilinear = 6;
     private const int MaxNativeThumbnailCache = 96;
 
     private const double DetailsRowHeight = 46;
     private const double GridSpacing = 4;
     private const double GridOuterMargin = 10;
-    private const double GridBottomMargin = 10;
     private const double LargeWidth = 152;
     private const double LargeHeight = 162;
     private const double ExtraWidth = 220;
@@ -176,15 +176,14 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private long _lastSyncedCollectionVersion = -1;
     private int _lastSyncedViewMode = -1;
     private bool _collectionSyncScheduled;
+    private bool _collectionNeedsFullSync = true;
     private bool _disposed;
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
     private bool _scrolling;
-    private bool _clampingNativeIconScroll;
     private int _hotIndex = -1;
     private int _lastNativeItemCount = -1;
     private int _lastIconLayoutColumns = -1;
-    private int _lastIconLayoutItemCount = -1;
     private int _lastIconLayoutMode = -1;
     private uint _dpi = 96;
     private nint _detailsImageList;

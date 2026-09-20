@@ -78,22 +78,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (msg == WM_ERASEBKGND)
             return 1;
 
-        if (msg == WM_PAINT && _viewModel?.ViewMode != FileViewMode.Details)
-        {
-            // Icon view is visually owned by Hello1Drive, but only repaint Windows' dirty region.
-            // BeginPaint already gives the HDC the exact update-region clip; honoring rcPaint here
-            // avoids re-running GDI+/thumbnail work for every visible card after a one-item change.
-            var hdc = BeginPaint(hwnd, out var paint);
-            if (hdc != 0 && paint.rcPaint.Width > 0 && paint.rcPaint.Height > 0)
-            {
-                SyncBackdrop(force: false);
-                PaintNativeBackdrop(hdc, paint.rcPaint);
-                DrawVisibleItems(hdc, paint.rcPaint);
-            }
-            EndPaint(hwnd, ref paint);
-            return 0;
-        }
-
         if (msg == WM_PRINTCLIENT && wParam != 0)
         {
             SyncBackdrop(force: false);
@@ -102,6 +86,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
             DrawVisibleItems(wParam, client);
             return 1;
         }
+
+        // Mark scrolling before Common Controls processes the wheel/scrollbar message. The
+        // default procedure can synchronously paint while handling the message; setting the flag
+        // first prevents those intermediate paints from scheduling thumbnail/decode work.
+        if (msg == WM_MOUSEWHEEL || msg == WM_VSCROLL)
+            BeginNativeScroll();
 
         var result = CallWindowProcW(_oldListWndProc, hwnd, msg, wParam, lParam);
         if (_disposed)
@@ -135,17 +125,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
                     _host.RaiseItemContextRequested(contextItem);
                 RaiseSelectionChanged();
                 break;
-            case WM_MOUSEWHEEL:
-            case WM_VSCROLL:
-                ClampNativeIconScrollToContent();
-                BeginNativeScroll();
-                break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
-                {
-                    ClampNativeIconScrollToContent();
                     EndNativeScroll();
-                }
                 break;
         }
         return result;
@@ -223,12 +205,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             if (_viewModel?.ViewMode != FileViewMode.Details)
             {
-                // Custom grid cards extend beyond the native icon rectangle. A selection/hover
-                // transition therefore dirties less area than we paint. Repaint the clipped
-                // backdrop first so deselected cards cannot leave blue/hover fragments behind.
-                GetClientRect(ListHandle, out var client);
-                PaintNativeBackdrop(custom.nmcd.hdc, client);
-                DrawVisibleItems(custom.nmcd.hdc, client);
+                // Keep SysListView32's own LVS_EX_DOUBLEBUFFER paint pipeline intact. The control
+                // has already painted/captured the transparent background into this HDC. We only
+                // add Hello1Drive cards, clipped to the actual update region, so scrolling can use
+                // Common Controls' buffered scroll path without a second background pass.
+                if (GetClipBox(custom.nmcd.hdc, out var dirty) != 0 &&
+                    dirty.Width > 0 && dirty.Height > 0)
+                {
+                    DrawVisibleItems(custom.nmcd.hdc, dirty);
+                }
             }
             return (nint)CDRF_DODEFAULT_NATIVE;
         }
