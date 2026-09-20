@@ -213,7 +213,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void QueueVisibleThumbnails(bool allowNetwork)
     {
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
+        {
+            _visibleNativeThumbnailIds.Clear();
             return;
+        }
 
         if (_viewModel.ViewMode != FileViewMode.Details)
         {
@@ -226,6 +229,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 for (var i = estimated.First; i <= estimated.Last; i++)
                     indices.Add(i);
             }
+
+            var visibleNativeItems = new List<DriveItemModel>(indices.Count);
+            foreach (var visibleIndex in indices)
+            {
+                if (_viewModel.VirtualItems[visibleIndex].Item is { } visibleItem)
+                    visibleNativeItems.Add(visibleItem);
+            }
+            UpdateVisibleNativeThumbnailPins(visibleNativeItems);
 
             // Prefetch one complete row after the last native-visible item. The visible set itself
             // comes from SysListView32, so thumbnail hydration can no longer drift away from the
@@ -270,6 +281,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             detailItems.Add(item);
         }
 
+        UpdateVisibleNativeThumbnailPins(detailItems);
         _viewModel.UpdateDesktopRealizedThumbnails(detailIndices, detailItems, allowNetwork);
     }
 
@@ -287,7 +299,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             {
                 var old = _hotIndex;
                 _hotIndex = -1;
-                RedrawItem(old);
+                RedrawHoverItem(old);
             }
         }
 
@@ -345,9 +357,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var old = _hotIndex;
         _hotIndex = next;
         if (old >= 0)
-            RedrawItem(old);
+            RedrawHoverItem(old);
         if (next >= 0)
-            RedrawItem(next);
+            RedrawHoverItem(next);
     }
 
     private void ClearHotItem()
@@ -357,7 +369,32 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
         var old = _hotIndex;
         _hotIndex = -1;
-        RedrawItem(old);
+        RedrawHoverItem(old);
+    }
+
+    private void RedrawHoverItem(int index)
+    {
+        if (_viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
+            return;
+
+        if (_viewModel.VirtualItems[index].Item is { } item && item.SupportsThumbnail)
+        {
+            if (_thumbnailCache.TryGetValue(item.Id, out var cached) &&
+                string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
+            {
+                TouchThumbnail(cached);
+            }
+            else if (item.ThumbnailImage is not null)
+            {
+                // Preserve the currently displayed pixels until the scaled native copy is ready.
+                // Invalidating now would clear the old thumbnail first and briefly replace it with
+                // a generic file badge, which looked like the thumbnail vanished on hover.
+                QueueNativeThumbnailPreparation(item);
+                return;
+            }
+        }
+
+        RedrawItem(index);
     }
 
     private void RedrawItem(int index)
