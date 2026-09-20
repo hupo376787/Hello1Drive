@@ -25,7 +25,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void ResetNativeIconLayout()
     {
         _lastIconLayoutColumns = -1;
-        _lastIconLayoutItemCount = -1;
         _lastIconLayoutMode = -1;
         _lastIconLayoutCellWidth = -1;
         _lastIconLayoutCellHeight = -1;
@@ -83,7 +82,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             metrics.CellWidth == _lastIconLayoutCellWidth &&
             metrics.CellHeight == _lastIconLayoutCellHeight &&
             metrics.Gap == _lastIconLayoutGap &&
-            itemCount == _lastIconLayoutItemCount &&
             mode == _lastIconLayoutMode)
         {
             return;
@@ -117,7 +115,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutCellWidth = metrics.CellWidth;
         _lastIconLayoutCellHeight = metrics.CellHeight;
         _lastIconLayoutGap = metrics.Gap;
-        _lastIconLayoutItemCount = itemCount;
         _lastIconLayoutMode = mode;
         ResetNativeHorizontalScroll();
     }
