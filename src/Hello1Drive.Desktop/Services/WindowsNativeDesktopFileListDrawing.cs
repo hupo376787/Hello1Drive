@@ -130,7 +130,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void HandleNativeSelectionStateNotification(nint lParam, uint code)
     {
-        if (_viewModel is null || lParam == 0)
+        if (_viewModel is null || lParam == 0 || _synchronizingSelection)
             return;
 
         if (code == LVN_ITEMCHANGED)
