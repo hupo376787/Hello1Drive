@@ -3881,7 +3881,10 @@ public partial class MainViewModel : ViewModelBase
 
                     if (streamIntoPlaceholders)
                     {
-                        ReconcileMobileSlotCount(finalCount);
+                        // Mobile keeps the fixed logical childCount extent. Desktop owner-data
+                        // ListView should expose only materialized rows so it never leaves a long
+                        // blank scroll tail while background metadata is still arriving.
+                        ReconcileMobileSlotCount(IsMobilePlatform ? finalCount : _allItems.Count);
                         if (_folderCache.TryGetValue(cacheKey, out var entry))
                         {
                             entry.NextLink = null;
@@ -4137,7 +4140,7 @@ public partial class MainViewModel : ViewModelBase
             ? merged.ToArray()
             : merged.Where(item => item.Name.Contains(keyword, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var slotCount = string.IsNullOrWhiteSpace(keyword)
-            ? Math.Max(finalCount, visible.Length)
+            ? (IsMobilePlatform ? Math.Max(finalCount, visible.Length) : visible.Length)
             : visible.Length;
 
         // Preserve the stable VirtualDriveItemSlot collection. Only positions whose item identity
@@ -4335,7 +4338,7 @@ public partial class MainViewModel : ViewModelBase
                     return 0;
 
                 SetCurrentFolderTotalItemCount(total);
-                if (string.IsNullOrWhiteSpace(SearchText))
+                if (IsMobilePlatform && string.IsNullOrWhiteSpace(SearchText))
                     ReconcileMobileSlotCount(Math.Max(total, _allItems.Count));
                 if (_folderCache.TryGetValue(cacheKey, out var entry))
                     entry.TotalItemCount = total;
@@ -5227,12 +5230,15 @@ public partial class MainViewModel : ViewModelBase
         ResetDesktopThumbnailViewport();
 
         var slotCount = string.IsNullOrWhiteSpace(keyword)
-            ? Math.Max(_currentFolderTotalItemCount ?? visible.Length, visible.Length)
+            ? (IsMobilePlatform
+                ? Math.Max(_currentFolderTotalItemCount ?? visible.Length, visible.Length)
+                : visible.Length)
             : visible.Length;
         RebuildMobileSlots(slotCount, visible);
 
-        // Items is retained as a compatibility/read-only shadow for older integrations. Desktop UI
-        // no longer binds to it, so Graph pages cannot grow the desktop scroll extent in chunks.
+        // Mobile keeps a stable logical childCount extent. Desktop intentionally grows with
+        // materialized metadata pages instead: the owner-data ListView is cheap to resize, and
+        // showing thousands of not-yet-loaded empty slots creates a misleading blank scroll tail.
         if (!IsMobilePlatform)
         {
             Items.Clear();
