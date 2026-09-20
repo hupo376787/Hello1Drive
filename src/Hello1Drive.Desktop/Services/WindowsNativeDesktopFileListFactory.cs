@@ -56,6 +56,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint LVS_EX_DOUBLEBUFFER = 0x00010000;
     private const uint LVS_EX_LABELTIP = 0x00004000;
     private const uint LVS_EX_HIDELABELS = 0x00020000;
+    private const uint LVS_EX_JUSTIFYCOLUMNS = 0x00200000;
 
     private const int GWLP_WNDPROC = -4;
     private const int WM_SETREDRAW = 0x000B;
@@ -236,7 +237,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
         RecreateNativeResources();
         SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
             (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP |
-                   LVS_EX_HIDELABELS));
+                   LVS_EX_HIDELABELS | LVS_EX_JUSTIFYCOLUMNS));
         SetWindowTheme(ListHandle, "Explorer", null);
         ConfigureColumns();
         ApplyPaletteToNativeWindow();
