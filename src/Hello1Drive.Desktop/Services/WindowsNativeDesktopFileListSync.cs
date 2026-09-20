@@ -222,7 +222,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         UpdateColumnWidth();
         ResetNativeHorizontalScroll();
-        ClampNativeIconScrollToContent();
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: true);
     }
