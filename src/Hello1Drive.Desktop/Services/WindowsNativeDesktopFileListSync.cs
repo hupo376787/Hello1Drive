@@ -202,9 +202,20 @@ internal sealed partial class WindowsNativeDesktopFileListController
             _lastNativeItemCount >= 0 &&
             slots.Count >= _lastNativeItemCount)
         {
+            var oldCount = _lastNativeItemCount;
             SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
             _lastNativeItemCount = slots.Count;
             _lastSyncedCollectionVersion = _collectionVersion;
+
+            // If the first partial row becomes a full row, JUSTIFYCOLUMNS can move its column
+            // origins. Refresh that tiny (one-row) geometry cache once; normal later appends stay
+            // O(1) and never rearrange the complete list.
+            if (mode != FileViewMode.Details)
+            {
+                var metrics = CalculateNativeGridMetrics();
+                if (oldCount < metrics.Columns && slots.Count > oldCount)
+                    RefreshNativeIconGeometry(metrics);
+            }
 
             // Common Controls invalidates newly visible owner-data items itself. Do not walk every
             // appended index just to build a giant dirty rectangle; large OneDrive page arrivals
