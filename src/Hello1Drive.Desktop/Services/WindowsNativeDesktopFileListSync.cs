@@ -32,6 +32,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastSyncedCollectionVersion = -1;
         _lastSyncedViewMode = -1;
         _lastNativeItemCount = -1;
+        _collectionNeedsFullSync = true;
         ResetNativeIconLayout();
         if (_viewModel is not null)
         {
@@ -69,6 +70,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void VirtualItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         unchecked { _collectionVersion++; }
+
+        // Appending materialized metadata to the end of an owner-data list does not require a view
+        // reset or LVM_ARRANGE. Any remove/reset/replace/move can change existing index semantics,
+        // so those operations keep the full synchronization path.
+        var currentCount = _viewModel?.VirtualItems.Count ?? 0;
+        var appendOnly =
+            e.Action == NotifyCollectionChangedAction.Add &&
+            e.NewItems is { Count: > 0 } &&
+            e.NewStartingIndex >= 0 &&
+            e.NewStartingIndex + e.NewItems.Count == currentCount;
+        if (!appendOnly)
+            _collectionNeedsFullSync = true;
 
         if (e.OldItems is not null)
         {
@@ -168,14 +181,35 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var slots = _viewModel.VirtualItems;
         var mode = _viewModel.ViewMode;
         var modeValue = (int)mode;
-        var structureChanged =
-            force ||
-            _lastSyncedCollectionVersion != _collectionVersion ||
-            _lastSyncedViewMode != modeValue;
-        if (!structureChanged)
+        var collectionChanged = _lastSyncedCollectionVersion != _collectionVersion;
+        var modeChanged = _lastSyncedViewMode != modeValue;
+
+        if (!force && !collectionChanged && !modeChanged)
         {
             SyncBackdrop(force: false);
             LayoutNativeIconItems(force: false);
+            QueueVisibleThumbnails(allowNetwork: !_scrolling);
+            return;
+        }
+
+        // Fast path for the common OneDrive paging case: metadata is appended at the end while the
+        // current view/spacing remains unchanged. Updating only the OWNERDATA count lets
+        // SysListView32 keep its current scroll buffer and selection without a full rearrange.
+        if (!force &&
+            collectionChanged &&
+            !modeChanged &&
+            !_collectionNeedsFullSync &&
+            _lastNativeItemCount >= 0 &&
+            slots.Count >= _lastNativeItemCount)
+        {
+            var oldCount = _lastNativeItemCount;
+            SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
+            _lastNativeItemCount = slots.Count;
+            _lastSyncedCollectionVersion = _collectionVersion;
+
+            if (slots.Count > oldCount)
+                InvalidateNativeItemRange(oldCount, slots.Count - 1);
+
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
             return;
         }
@@ -187,31 +221,28 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         _lastSyncedCollectionVersion = _collectionVersion;
         _lastSyncedViewMode = modeValue;
+        _collectionNeedsFullSync = false;
+
         SendMessage(ListHandle, WM_SETREDRAW, 0, 0);
         try
         {
-            ApplyNativeView(mode);
+            if (force || modeChanged || _lastNativeItemCount < 0)
+                ApplyNativeView(mode);
 
-            // LVS_OWNERDATA keeps only selection/focus state inside SysListView32. When an
-            // icon-view collection shrinks, clear the virtual count once before applying the new
-            // count. This forces Common Controls to discard its old icon work extent/scroll range;
-            // selection is restored immediately below while redraw is suspended.
-            if (mode != FileViewMode.Details &&
-                _lastNativeItemCount >= 0 &&
-                slots.Count < _lastNativeItemCount)
-            {
-                SendMessage(ListHandle, LVM_SETITEMCOUNT, 0, 0);
-            }
-
+            // Apply the new virtual count directly. The previous temporary count=0 reset caused
+            // Common Controls to throw away its scroll state and was visible as bottom-edge jumps.
             SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
             _lastNativeItemCount = slots.Count;
 
             if (mode != FileViewMode.Details)
-                LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
+                LayoutNativeIconItems(
+                    force: force || modeChanged,
+                    redrawAlreadySuspended: true);
 
             RestoreSelection();
+
             var restoreIndex = FindItemIndex(anchorId, firstVisible);
-            if (restoreIndex > 0)
+            if (restoreIndex > 0 && restoreIndex < slots.Count)
                 SendMessage(ListHandle, LVM_ENSUREVISIBLE, (nint)restoreIndex, 0);
         }
         finally
