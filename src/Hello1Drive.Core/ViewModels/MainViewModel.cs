@@ -4867,6 +4867,7 @@ public partial class MainViewModel : ViewModelBase
                 }
 
                 item.ThumbnailImage?.Dispose();
+                item.ThumbnailCachePath = cachedPath;
                 item.ThumbnailImage = bitmap;
                 TouchMobileThumbnail(item);
                 bitmap = null;
