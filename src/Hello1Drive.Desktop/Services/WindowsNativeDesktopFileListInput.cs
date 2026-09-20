@@ -83,13 +83,68 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null)
             return -1;
 
+        var x = unchecked((short)((long)lParam & 0xFFFF));
+        var y = unchecked((short)(((long)lParam >> 16) & 0xFFFF));
+
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var metrics = CalculateNativeGridMetrics();
+            if (!_cachedIconGeometryValid || _cachedIconColumnLefts.Length != metrics.Columns)
+                RefreshNativeIconGeometry(metrics);
+            if (!_cachedIconGeometryValid)
+                return -1;
+
+            var origin = GetNativeViewOrigin();
+            var viewY = y + origin.y;
+            var relativeY = viewY - _cachedIconFirstTop;
+            if (relativeY < 0)
+                return -1;
+
+            var rowPitch = Math.Max(1, _cachedIconRowPitch);
+            var row = relativeY / rowPitch;
+            var rowOffset = relativeY % rowPitch;
+            if (rowOffset >= metrics.CellHeight)
+                return -1;
+
+            var edgeMargin = ScaleInt(GridOuterMargin);
+            for (var column = 0; column < metrics.Columns; column++)
+            {
+                if (_cachedIconColumnLefts[column] == int.MinValue)
+                {
+                    var columnItem = column;
+                    if (columnItem >= _viewModel.VirtualItems.Count ||
+                        !TryGetNativeItemViewPosition(columnItem, out var position))
+                    {
+                        continue;
+                    }
+
+                    var iconWidth = ScaleInt(
+                        _viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+                    var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+                    _cachedIconColumnLefts[column] =
+                        (position.x - horizontalInset) - _cachedIconFirstBaseLeft;
+                }
+
+                var left = _cachedIconColumnLefts[column] - origin.x;
+                var right = left + metrics.CellWidth;
+                if (column == 0)
+                    left += edgeMargin;
+                if (column == metrics.Columns - 1)
+                    right -= edgeMargin;
+
+                if (x < left || x >= right)
+                    continue;
+
+                var index = row * metrics.Columns + column;
+                return index >= 0 && index < _viewModel.VirtualItems.Count ? index : -1;
+            }
+
+            return -1;
+        }
+
         var point = new LVHITTESTINFO
         {
-            pt = new POINT
-            {
-                x = unchecked((short)((long)lParam & 0xFFFF)),
-                y = unchecked((short)(((long)lParam >> 16) & 0xFFFF))
-            }
+            pt = new POINT { x = x, y = y }
         };
         var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<LVHITTESTINFO>());
         try
