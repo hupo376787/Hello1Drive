@@ -175,6 +175,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private long _lastSyncedCollectionVersion = -1;
     private int _lastSyncedViewMode = -1;
     private bool _collectionSyncScheduled;
+    private bool _collectionNeedsFullSync = true;
     private bool _disposed;
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
