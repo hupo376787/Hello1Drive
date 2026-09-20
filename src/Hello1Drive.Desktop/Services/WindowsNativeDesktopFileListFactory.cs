@@ -183,7 +183,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private int _hotIndex = -1;
     private int _lastNativeItemCount = -1;
     private int _lastIconLayoutColumns = -1;
-    private int _lastIconLayoutItemCount = -1;
     private int _lastIconLayoutMode = -1;
     private uint _dpi = 96;
     private nint _detailsImageList;
