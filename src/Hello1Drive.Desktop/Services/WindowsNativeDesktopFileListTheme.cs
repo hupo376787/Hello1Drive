@@ -14,11 +14,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var background = ResolveBackgroundColor(dark);
         if (dark)
         {
+            // Match App.axaml exactly:
+            //   HelloFileItemBrush          #26000000
+            //   HelloExplorerHoverBrush     #65405263
+            //   HelloExplorerSelectionBrush #8A416B8D
             return new Palette(
                 background,
-                Blend(background, Rgb(42, 44, 50), 0.72),
-                Blend(background, Rgb(255, 255, 255), 0.09),
-                Blend(background, Rgb(47, 128, 237), 0.34),
+                Blend(background, Rgb(0, 0, 0), 0x26 / 255d),
+                Blend(background, Rgb(64, 82, 99), 0x65 / 255d),
+                Blend(background, Rgb(65, 107, 141), 0x8A / 255d),
                 Rgb(244, 244, 246),
                 Rgb(179, 181, 188),
                 Rgb(54, 56, 63),
@@ -27,11 +31,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 Rgb(0, 0, 0));
         }
 
+        // Match App.axaml / MainView.ApplyFileItemBackground:
+        //   HelloFileItemBrush          #38FFFFFF
+        //   HelloExplorerHoverBrush     #8AEAF4FB
+        //   HelloExplorerSelectionBrush #BFD7EBFA
         return new Palette(
             background,
-            Blend(background, Rgb(255, 255, 255), 0.72),
-            Blend(background, Rgb(225, 232, 242), 0.58),
-            Blend(background, Rgb(47, 128, 237), 0.20),
+            Blend(background, Rgb(255, 255, 255), 0x38 / 255d),
+            Blend(background, Rgb(234, 244, 251), 0x8A / 255d),
+            Blend(background, Rgb(215, 235, 250), 0xBF / 255d),
             Rgb(43, 43, 47),
             Rgb(104, 106, 113),
             Rgb(232, 234, 238),
