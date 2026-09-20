@@ -189,8 +189,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DestroyNativeResources();
 
         _detailsImageList = CreateLayoutImageList(1, ScaleInt(DetailsRowHeight));
-        _largeImageList = CreateLayoutImageList(ScaleInt(LargeArtwork), ScaleInt(LargeArtwork));
-        _extraImageList = CreateLayoutImageList(ScaleInt(ExtraArtwork), ScaleInt(ExtraArtwork));
+
+        // Icon view's native scroll extent is based on the assigned large-image-list item bounds,
+        // not on Hello1Drive's larger custom card. Give the invisible layout image the full custom
+        // card height so the last row can be scrolled completely into view without manual clamping.
+        // Width remains the artwork width so the proven horizontal column geometry stays unchanged.
+        _largeImageList = CreateLayoutImageList(ScaleInt(LargeArtwork), ScaleInt(LargeHeight));
+        _extraImageList = CreateLayoutImageList(ScaleInt(ExtraArtwork), ScaleInt(ExtraHeight));
         _normalFont = CreateUiFont(13, FW_NORMAL);
         _mediumFont = CreateUiFont(13, NativeFontMedium);
         _smallFont = CreateUiFont(11.5, FW_NORMAL);
