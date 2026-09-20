@@ -46,8 +46,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (msg == WM_PRINTCLIENT && wParam != 0)
         {
-            GetClientRect(hwnd, out var client);
-            PaintNativeBackdrop(wParam, client);
+            // LVS_EX_TRANSPARENTBKGND asks the parent to provide the background. Respect the HDC
+            // clip created by Common Controls instead of resampling the entire wallpaper on every
+            // exposed scroll strip.
+            if (GetClipBox(wParam, out var dirty) == 0 || dirty.Width <= 0 || dirty.Height <= 0)
+                GetClientRect(hwnd, out dirty);
+            PaintNativeBackdrop(wParam, dirty);
             return 1;
         }
 
