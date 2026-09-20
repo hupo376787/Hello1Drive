@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Platform;
 using Avalonia.Input;
 using Avalonia.Input.GestureRecognizers;
 using Avalonia.Interactivity;
@@ -234,6 +235,8 @@ public partial class MainView : UserControl
             _topLevel.AddHandler(InputElement.PointerPressedEvent, TopLevel_PointerPressed,
                 RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
         }
+
+        ConfigureAndroidSystemBars();
 
         if (DataContext is MainViewModel vm)
         {
@@ -5123,6 +5126,110 @@ if (visibleItems.Count > 0)
             AppThemeMode.Dark => ThemeVariant.Dark,
             _ => ThemeVariant.Default
         };
+
+        UpdateAndroidSystemBarTheme();
+    }
+
+    private void ConfigureAndroidSystemBars()
+    {
+        if (!OperatingSystem.IsAndroid() || _topLevel?.InsetsManager is not { } insets)
+            return;
+
+        // Android 15+ forces edge-to-edge for targetSdk 35+, but setting the preference keeps
+        // Android 14 and older consistent too. Avalonia's automatic safe-area padding remains
+        // enabled, so controls stay below the status bar while MainView.Background can paint
+        // through that padding and underneath the transparent system bars.
+        insets.DisplayEdgeToEdgePreference = true;
+        insets.IsSystemBarVisible = true;
+        insets.SystemBarColor = Colors.Transparent;
+        UpdateAndroidSystemBarTheme();
+    }
+
+    private void UpdateAndroidSystemBarTheme(Color? backgroundColor = null)
+    {
+        if (!OperatingSystem.IsAndroid() || _topLevel?.InsetsManager is not { } insets)
+            return;
+
+        if (backgroundColor is { } color)
+        {
+            insets.SystemBarTheme = IsLightBackgroundColor(color)
+                ? SystemBarTheme.Light
+                : SystemBarTheme.Dark;
+            return;
+        }
+
+        if (Background is SolidColorBrush solid)
+        {
+            insets.SystemBarTheme = IsLightBackgroundColor(solid.Color)
+                ? SystemBarTheme.Light
+                : SystemBarTheme.Dark;
+            return;
+        }
+
+        var app = Application.Current;
+        var darkTheme = app?.RequestedThemeVariant == ThemeVariant.Dark ||
+                        (app?.RequestedThemeVariant == ThemeVariant.Default &&
+                         app.ActualThemeVariant == ThemeVariant.Dark);
+        insets.SystemBarTheme = darkTheme ? SystemBarTheme.Dark : SystemBarTheme.Light;
+    }
+
+    private static bool IsLightBackgroundColor(Color color)
+    {
+        static double Linearize(byte channel)
+        {
+            var value = channel / 255d;
+            return value <= 0.04045
+                ? value / 12.92
+                : Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        var luminance =
+            0.2126 * Linearize(color.R) +
+            0.7152 * Linearize(color.G) +
+            0.0722 * Linearize(color.B);
+        return luminance >= 0.42;
+    }
+
+    private void SyncAndroidOuterBackground(IBrush brush)
+    {
+        if (!OperatingSystem.IsAndroid())
+            return;
+
+        // TopLevel auto-safe-area padding is applied to this UserControl. Painting the UserControl
+        // itself therefore fills the status-bar inset while the child RootGrid remains safely inset.
+        Background = brush;
+
+        if (_topLevel?.InsetsManager is { } insets)
+            insets.SystemBarColor = Colors.Transparent;
+
+        UpdateAndroidSystemBarTheme(brush is SolidColorBrush solid ? solid.Color : null);
+    }
+
+    private void SyncAndroidOuterBackground(Bitmap? bitmap)
+    {
+        if (!OperatingSystem.IsAndroid())
+            return;
+
+        if (bitmap is not null)
+        {
+            Background = new ImageBrush(bitmap)
+            {
+                Stretch = Stretch.UniformToFill
+            };
+        }
+        else
+        {
+            var app = Application.Current;
+            var darkTheme = app?.RequestedThemeVariant == ThemeVariant.Dark ||
+                            (app?.RequestedThemeVariant == ThemeVariant.Default &&
+                             app.ActualThemeVariant == ThemeVariant.Dark);
+            Background = new SolidColorBrush(Color.Parse(darkTheme ? "#202124" : "#F7F7F8"));
+        }
+
+        if (_topLevel?.InsetsManager is { } insets)
+            insets.SystemBarColor = Colors.Transparent;
+
+        UpdateAndroidSystemBarTheme();
     }
 
     private static void ApplyFileItemBackground(MainViewModel vm)
@@ -5290,6 +5397,7 @@ if (visibleItems.Count > 0)
 
     private void SetBackgroundColor(IBrush brush, bool preserveSolidColorAcrossTheme = false)
     {
+        SyncAndroidOuterBackground(brush);
         SettingsAcrylicBase.Background = brush;
         MobileProfileBackgroundColor.Background = brush;
         MobileTransferBackgroundColor.Background = brush;
@@ -5457,6 +5565,7 @@ if (visibleItems.Count > 0)
     {
         var previous = _backgroundBitmap;
         _backgroundBitmap = bitmap;
+        SyncAndroidOuterBackground(bitmap);
 
         SettingsAcrylicBackgroundImage.Source = bitmap;
         SettingsAcrylicBackgroundImage.IsVisible = bitmap is not null;
