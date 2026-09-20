@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Hello1Drive.Controls;
 using Hello1Drive.Models;
 using Hello1Drive.Services;
@@ -14,66 +15,28 @@ namespace Hello1Drive.Desktop.Services;
 
 internal sealed partial class WindowsNativeDesktopFileListController
 {
+    private readonly object _nativeThumbnailPreparationLock = new();
+    private readonly HashSet<string> _nativeThumbnailPreparations = [];
+    private readonly SemaphoreSlim _nativeThumbnailPreparationGate = new(2, 2);
     private bool TryDrawThumbnail(nint hdc, DriveItemModel item, RECT dest, int radius)
     {
         if (_gdiPlusToken == 0)
             return false;
 
         _thumbnailCache.TryGetValue(item.Id, out var cached);
-        var bitmap = item.ThumbnailImage;
+        var version = item.VersionToken;
 
-        // A decoded Avalonia bitmap can be temporarily replaced/re-associated while Graph metadata is
-        // reconciled. If the native copy is still for the same OneDrive version, keep drawing it. This
-        // is the desktop equivalent of stale-while-revalidate: an already visible thumbnail must never
-        // regress to the gray file badge merely because the managed Bitmap reference changed.
-        if (bitmap is null)
+        if (cached is null || !string.Equals(cached.VersionToken, version, StringComparison.Ordinal))
         {
-            if (cached is null || !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
-                return false;
-            TouchThumbnail(cached);
-        }
-        else
-        {
-            var cacheMatches = cached is not null &&
-                               ReferenceEquals(cached.Source, bitmap) &&
-                               string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal);
-
-            if (!cacheMatches)
-            {
-                // During a wheel fling, re-encoding the same-version Bitmap on the UI thread is both
-                // unnecessary and visually harmful. Keep the previous native pixels until scroll idle.
-                if (_scrolling && cached is not null &&
-                    string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
-                {
-                    TouchThumbnail(cached);
-                }
-                else
-                {
-                    var replacement = CreateNativeThumbnail(item);
-                    if (replacement is not null)
-                    {
-                        StoreThumbnail(item.Id, replacement);
-                        cached = replacement;
-                    }
-                    else if (cached is null ||
-                             !string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
-                    {
-                        return false;
-                    }
-                    else
-                    {
-                        TouchThumbnail(cached);
-                    }
-                }
-            }
-            else
-            {
-                TouchThumbnail(cached!);
-            }
-        }
-
-        if (cached is null)
+            // Never encode/decode an Avalonia bitmap synchronously from WM_PAINT. Native thumbnail
+            // preparation is disk/cache work and runs on two background workers. Until it is ready,
+            // draw the lightweight file badge and repaint only this item when preparation completes.
+            if (item.ThumbnailImage is not null)
+                QueueNativeThumbnailPreparation(item);
             return false;
+        }
+
+        TouchThumbnail(cached);
 
         FillRectColor(hdc, dest, _palette.ThumbnailBackground);
         if (GdipCreateFromHDC(hdc, out var graphics) != 0 || graphics == 0)
@@ -133,60 +96,188 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private NativeThumbnail? CreateNativeThumbnail(DriveItemModel item)
+    private void QueueNativeThumbnailPreparation(DriveItemModel item)
     {
+        if (_disposed || _gdiPlusToken == 0 || item.ThumbnailImage is null ||
+            string.IsNullOrWhiteSpace(item.Id))
+        {
+            return;
+        }
+
+        if (_thumbnailCache.TryGetValue(item.Id, out var existing) &&
+            string.Equals(existing.VersionToken, item.VersionToken, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var itemId = item.Id;
+        var version = item.VersionToken;
+        var cachePath = item.ThumbnailCachePath;
         var bitmap = item.ThumbnailImage;
-        if (bitmap is null)
-            return null;
+        var targetMaxDimension = Math.Max(64, ScaleInt(ExtraArtwork));
+
+        lock (_nativeThumbnailPreparationLock)
+        {
+            if (!_nativeThumbnailPreparations.Add(itemId))
+                return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            NativeThumbnail? prepared = null;
+            try
+            {
+                await _nativeThumbnailPreparationGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    prepared = CreateNativeThumbnail(
+                        cachePath,
+                        bitmap,
+                        version,
+                        targetMaxDimension);
+                }
+                finally
+                {
+                    _nativeThumbnailPreparationGate.Release();
+                }
+            }
+            catch
+            {
+                prepared?.Dispose();
+                prepared = null;
+            }
+            finally
+            {
+                lock (_nativeThumbnailPreparationLock)
+                    _nativeThumbnailPreparations.Remove(itemId);
+            }
+
+            if (prepared is null)
+                return;
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_disposed || _viewModel is null)
+                {
+                    prepared.Dispose();
+                    return;
+                }
+
+                var index = -1;
+                for (var i = 0; i < _viewModel.VirtualItems.Count; i++)
+                {
+                    var current = _viewModel.VirtualItems[i].Item;
+                    if (current is not null &&
+                        string.Equals(current.Id, itemId, StringComparison.Ordinal) &&
+                        string.Equals(current.VersionToken, version, StringComparison.Ordinal))
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+
+                if (index < 0)
+                {
+                    prepared.Dispose();
+                    return;
+                }
+
+                StoreThumbnail(itemId, prepared);
+                QueueNativeItemRedraw(index);
+            }, DispatcherPriority.Background);
+        });
+    }
+
+    private NativeThumbnail? CreateNativeThumbnail(
+        string? cachePath,
+        Bitmap bitmap,
+        string versionToken,
+        int targetMaxDimension)
+    {
+        nint sourceImage = 0;
+        IStream? sourceStream = null;
 
         try
         {
-            using var encoded = new MemoryStream();
+            if (!string.IsNullOrWhiteSpace(cachePath) &&
+                File.Exists(cachePath) &&
+                GdipLoadImageFromFile(cachePath, out sourceImage) == 0 &&
+                sourceImage != 0)
+            {
+                // Fast path: the persistent thumbnail file is already encoded. Avoid the previous
+                // Bitmap.Save -> byte[] -> HGLOBAL -> GDI+ decode round-trip on the UI thread.
+            }
+            else
+            {
+                using var encoded = new MemoryStream();
 #pragma warning disable CS0618
-            bitmap.Save(encoded);
+                bitmap.Save(encoded);
 #pragma warning restore CS0618
-            var bytes = encoded.ToArray();
-            if (bytes.Length == 0)
-                return null;
+                var bytes = encoded.ToArray();
+                if (bytes.Length == 0)
+                    return null;
 
-            var hGlobal = GlobalAlloc(GMEM_MOVEABLE, (nuint)bytes.Length);
-            if (hGlobal == 0)
-                return null;
+                var hGlobal = GlobalAlloc(GMEM_MOVEABLE, (nuint)bytes.Length);
+                if (hGlobal == 0)
+                    return null;
 
-            var memory = GlobalLock(hGlobal);
-            if (memory == 0)
+                var memory = GlobalLock(hGlobal);
+                if (memory == 0)
+                {
+                    GlobalFree(hGlobal);
+                    return null;
+                }
+
+                Marshal.Copy(bytes, 0, memory, bytes.Length);
+                GlobalUnlock(hGlobal);
+
+                if (CreateStreamOnHGlobal(hGlobal, true, out sourceStream) != 0 || sourceStream is null)
+                {
+                    GlobalFree(hGlobal);
+                    return null;
+                }
+
+                if (GdipLoadImageFromStream(sourceStream, out sourceImage) != 0 || sourceImage == 0)
+                    return null;
+            }
+
+            if (GdipGetImageWidth(sourceImage, out var sourceWidth) != 0 ||
+                GdipGetImageHeight(sourceImage, out var sourceHeight) != 0 ||
+                sourceWidth == 0 ||
+                sourceHeight == 0)
             {
-                GlobalFree(hGlobal);
                 return null;
             }
 
-            Marshal.Copy(bytes, 0, memory, bytes.Length);
-            GlobalUnlock(hGlobal);
+            var scale = Math.Min(1d,
+                targetMaxDimension / (double)Math.Max(sourceWidth, sourceHeight));
+            var width = Math.Max(1u, (uint)Math.Round(sourceWidth * scale));
+            var height = Math.Max(1u, (uint)Math.Round(sourceHeight * scale));
 
-            if (CreateStreamOnHGlobal(hGlobal, true, out var stream) != 0 || stream is null)
+            if (GdipGetImageThumbnail(
+                    sourceImage,
+                    width,
+                    height,
+                    out var thumbnailImage,
+                    0,
+                    0) != 0 ||
+                thumbnailImage == 0)
             {
-                GlobalFree(hGlobal);
                 return null;
             }
 
-            if (GdipLoadImageFromStream(stream, out var image) != 0 || image == 0)
-            {
-                ReleaseComStream(stream);
-                return null;
-            }
-
-            if (GdipGetImageWidth(image, out var width) != 0 || GdipGetImageHeight(image, out var height) != 0)
-            {
-                GdipDisposeImage(image);
-                ReleaseComStream(stream);
-                return null;
-            }
-
-            return new NativeThumbnail(bitmap, item.VersionToken, image, width, height, stream);
+            return new NativeThumbnail(versionToken, thumbnailImage, width, height);
         }
         catch
         {
             return null;
+        }
+        finally
+        {
+            if (sourceImage != 0)
+                GdipDisposeImage(sourceImage);
+            if (sourceStream is not null)
+                ReleaseComStream(sourceStream);
         }
     }
 
