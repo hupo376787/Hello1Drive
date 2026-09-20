@@ -87,6 +87,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return 1;
         }
 
+        // Mark scrolling before Common Controls processes the wheel/scrollbar message. The
+        // default procedure can synchronously paint while handling the message; setting the flag
+        // first prevents those intermediate paints from scheduling thumbnail/decode work.
+        if (msg == WM_MOUSEWHEEL || msg == WM_VSCROLL)
+            BeginNativeScroll();
+
         var result = CallWindowProcW(_oldListWndProc, hwnd, msg, wParam, lParam);
         if (_disposed)
             return result;
@@ -118,10 +124,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 if (HitTest(lParam) is { } contextItem)
                     _host.RaiseItemContextRequested(contextItem);
                 RaiseSelectionChanged();
-                break;
-            case WM_MOUSEWHEEL:
-            case WM_VSCROLL:
-                BeginNativeScroll();
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
