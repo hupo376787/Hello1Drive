@@ -74,7 +74,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
 
         var metrics = CalculateNativeGridMetrics();
-        var itemCount = _viewModel.VirtualItems.Count;
         var mode = (int)_viewModel.ViewMode;
 
         if (!force &&
