@@ -115,7 +115,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // complete ListView in CDDS_PREPAINT. The parent already implements WM_PRINTCLIENT and paints
         // Hello1Drive's cached wallpaper, so native scrolling can keep its own stable backing store.
         SendMessage(ListHandle, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
-            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP | LVS_EX_TRANSPARENTBKGND_NATIVE));
+            (nint)(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP |
+                   LVS_EX_HIDELABELS | LVS_EX_JUSTIFYCOLUMNS | LVS_EX_TRANSPARENTBKGND_NATIVE));
         SetWindowTheme(ListHandle, IsDarkTheme() ? "DarkMode_Explorer" : "Explorer", null);
         SendMessage(ListHandle, LVM_SETBKCOLOR, 0, (nint)CLR_NONE);
         SendMessage(ListHandle, LVM_SETTEXTBKCOLOR, 0, (nint)CLR_NONE);
