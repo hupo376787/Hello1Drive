@@ -123,7 +123,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int CLR_NONE = -1;
 
     private const uint NM_CUSTOMDRAW = unchecked((uint)-12);
+    private const uint LVN_ITEMCHANGED = unchecked((uint)-101);
     private const uint LVN_ODCACHEHINT = unchecked((uint)-113);
+    private const uint LVN_ODSTATECHANGED = unchecked((uint)-115);
     private const uint LVN_GETDISPINFOA = unchecked((uint)-150);
     private const uint LVN_GETDISPINFOW = unchecked((uint)-177);
     private const uint CDDS_PREPAINT = 0x00000001;
@@ -147,6 +149,8 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
 
     private const double DetailsRowHeight = 46;
     private const double GridSpacing = 4;
+    private const double GridOuterMargin = 10;
+    private const double GridBottomMargin = 10;
     private const double LargeWidth = 152;
     private const double LargeHeight = 162;
     private const double ExtraWidth = 220;
@@ -175,7 +179,9 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
     private bool _scrolling;
+    private bool _clampingNativeIconScroll;
     private int _hotIndex = -1;
+    private int _lastNativeItemCount = -1;
     private int _lastIconLayoutColumns = -1;
     private int _lastIconLayoutItemCount = -1;
     private int _lastIconLayoutMode = -1;
