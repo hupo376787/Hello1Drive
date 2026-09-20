@@ -205,6 +205,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
     [DllImport("user32.dll", EntryPoint = "SendMessageW")]
     private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
 
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessagePoint(nint hwnd, int msg, nint wParam, ref POINT lParam);
+
     [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
     private static extern nint CallWindowProcW(nint previous, nint hwnd, uint msg, nint wParam, nint lParam);
 

@@ -18,6 +18,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _synchronizingSelection = true;
         try
         {
+            _nativeSelectedIndices.Clear();
+
             // -1 applies the state change to all items. This avoids one SendMessage per file in
             // large virtual folders, then restores only the handful of actually selected items.
             SetItemSelected(-1, selected: false);
@@ -50,6 +52,20 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             Marshal.StructureToPtr(state, ptr, false);
             SendMessage(ListHandle, LVM_SETITEMSTATE, (nint)index, ptr);
+
+            if (index < 0)
+            {
+                if (!selected)
+                    _nativeSelectedIndices.Clear();
+            }
+            else if (selected)
+            {
+                _nativeSelectedIndices.Add(index);
+            }
+            else
+            {
+                _nativeSelectedIndices.Remove(index);
+            }
         }
         finally
         {
@@ -57,24 +73,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private bool IsItemSelected(int index) =>
-        (((long)SendMessage(ListHandle, LVM_GETITEMSTATE, (nint)index, (nint)LVIS_SELECTED)) & (long)LVIS_SELECTED) != 0;
+    private bool IsItemSelected(int index) => _nativeSelectedIndices.Contains(index);
 
     private void RaiseSelectionChanged()
     {
         if (_synchronizingSelection || _viewModel is null)
             return;
 
-        var ids = new List<string>();
-        var current = -1;
-        while (true)
-        {
-            current = (int)SendMessage(ListHandle, LVM_GETNEXTITEM, (nint)current, (nint)LVNI_SELECTED);
-            if (current < 0)
-                break;
-            if (current < _viewModel.VirtualItems.Count && _viewModel.VirtualItems[current].Item is { Id.Length: > 0 } item)
-                ids.Add(item.Id);
-        }
+        var ids = _nativeSelectedIndices
+            .Where(index => index >= 0 && index < _viewModel.VirtualItems.Count)
+            .OrderBy(static index => index)
+            .Select(index => _viewModel.VirtualItems[index].Item?.Id)
+            .Where(static id => !string.IsNullOrWhiteSpace(id))
+            .Cast<string>()
+            .ToArray();
+
         _host.RaiseSelectionChanged(ids);
     }
 
@@ -83,13 +96,68 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_viewModel is null)
             return -1;
 
+        var x = unchecked((short)((long)lParam & 0xFFFF));
+        var y = unchecked((short)(((long)lParam >> 16) & 0xFFFF));
+
+        if (_viewModel.ViewMode != FileViewMode.Details)
+        {
+            var metrics = CalculateNativeGridMetrics();
+            if (!_cachedIconGeometryValid || _cachedIconColumnLefts.Length != metrics.Columns)
+                RefreshNativeIconGeometry(metrics);
+            if (!_cachedIconGeometryValid)
+                return -1;
+
+            var origin = GetNativeViewOrigin();
+            var viewY = y + origin.y;
+            var relativeY = viewY - _cachedIconFirstTop;
+            if (relativeY < 0)
+                return -1;
+
+            var rowPitch = Math.Max(1, _cachedIconRowPitch);
+            var row = relativeY / rowPitch;
+            var rowOffset = relativeY % rowPitch;
+            if (rowOffset >= metrics.CellHeight)
+                return -1;
+
+            var edgeMargin = ScaleInt(GridOuterMargin);
+            for (var column = 0; column < metrics.Columns; column++)
+            {
+                if (_cachedIconColumnLefts[column] == int.MinValue)
+                {
+                    var columnItem = column;
+                    if (columnItem >= _viewModel.VirtualItems.Count ||
+                        !TryGetNativeItemViewPosition(columnItem, out var position))
+                    {
+                        continue;
+                    }
+
+                    var iconWidth = ScaleInt(
+                        _viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+                    var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+                    _cachedIconColumnLefts[column] =
+                        (position.x - horizontalInset) - _cachedIconFirstBaseLeft;
+                }
+
+                var left = _cachedIconColumnLefts[column] - origin.x;
+                var right = left + metrics.CellWidth;
+                if (column == 0)
+                    left += edgeMargin;
+                if (column == metrics.Columns - 1)
+                    right -= edgeMargin;
+
+                if (x < left || x >= right)
+                    continue;
+
+                var index = row * metrics.Columns + column;
+                return index >= 0 && index < _viewModel.VirtualItems.Count ? index : -1;
+            }
+
+            return -1;
+        }
+
         var point = new LVHITTESTINFO
         {
-            pt = new POINT
-            {
-                x = unchecked((short)((long)lParam & 0xFFFF)),
-                y = unchecked((short)(((long)lParam >> 16) & 0xFFFF))
-            }
+            pt = new POINT { x = x, y = y }
         };
         var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<LVHITTESTINFO>());
         try
@@ -213,7 +281,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void QueueVisibleThumbnails(bool allowNetwork)
     {
         if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
+        {
+            _visibleNativeThumbnailIds.Clear();
             return;
+        }
 
         if (_viewModel.ViewMode != FileViewMode.Details)
         {
@@ -226,6 +297,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 for (var i = estimated.First; i <= estimated.Last; i++)
                     indices.Add(i);
             }
+
+            var visibleNativeItems = new List<DriveItemModel>(indices.Count);
+            foreach (var visibleIndex in indices)
+            {
+                if (_viewModel.VirtualItems[visibleIndex].Item is { } visibleItem)
+                    visibleNativeItems.Add(visibleItem);
+            }
+            UpdateVisibleNativeThumbnailPins(visibleNativeItems);
 
             // Prefetch one complete row after the last native-visible item. The visible set itself
             // comes from SysListView32, so thumbnail hydration can no longer drift away from the
@@ -270,6 +349,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             detailItems.Add(item);
         }
 
+        UpdateVisibleNativeThumbnailPins(detailItems);
         _viewModel.UpdateDesktopRealizedThumbnails(detailIndices, detailItems, allowNetwork);
     }
 
@@ -287,7 +367,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             {
                 var old = _hotIndex;
                 _hotIndex = -1;
-                RedrawItem(old);
+                RedrawHoverItem(old);
             }
         }
 
@@ -345,9 +425,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var old = _hotIndex;
         _hotIndex = next;
         if (old >= 0)
-            RedrawItem(old);
+            RedrawHoverItem(old);
         if (next >= 0)
-            RedrawItem(next);
+            RedrawHoverItem(next);
     }
 
     private void ClearHotItem()
@@ -357,7 +437,32 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
         var old = _hotIndex;
         _hotIndex = -1;
-        RedrawItem(old);
+        RedrawHoverItem(old);
+    }
+
+    private void RedrawHoverItem(int index)
+    {
+        if (_viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
+            return;
+
+        if (_viewModel.VirtualItems[index].Item is { } item && item.SupportsThumbnail)
+        {
+            if (_thumbnailCache.TryGetValue(item.Id, out var cached) &&
+                string.Equals(cached.VersionToken, item.VersionToken, StringComparison.Ordinal))
+            {
+                TouchThumbnail(cached);
+            }
+            else if (item.ThumbnailImage is not null)
+            {
+                // Preserve the currently displayed pixels until the scaled native copy is ready.
+                // Invalidating now would clear the old thumbnail first and briefly replace it with
+                // a generic file badge, which looked like the thumbnail vanished on hover.
+                QueueNativeThumbnailPreparation(item);
+                return;
+            }
+        }
+
+        RedrawItem(index);
     }
 
     private void RedrawItem(int index)

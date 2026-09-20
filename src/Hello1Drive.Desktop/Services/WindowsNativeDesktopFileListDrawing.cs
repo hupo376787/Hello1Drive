@@ -46,8 +46,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (msg == WM_PRINTCLIENT && wParam != 0)
         {
-            GetClientRect(hwnd, out var client);
-            PaintNativeBackdrop(wParam, client);
+            // LVS_EX_TRANSPARENTBKGND asks the parent to provide the background. Respect the HDC
+            // clip created by Common Controls instead of resampling the entire wallpaper on every
+            // exposed scroll strip.
+            if (GetClipBox(wParam, out var dirty) == 0 || dirty.Width <= 0 || dirty.Height <= 0)
+                GetClientRect(hwnd, out dirty);
+            PaintNativeBackdrop(wParam, dirty);
             return 1;
         }
 
@@ -77,15 +81,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if (msg == WM_ERASEBKGND)
             return 1;
-
-        if (msg == WM_PRINTCLIENT && wParam != 0)
-        {
-            SyncBackdrop(force: false);
-            GetClientRect(hwnd, out var client);
-            PaintNativeBackdrop(wParam, client);
-            DrawVisibleItems(wParam, client);
-            return 1;
-        }
 
         // Mark scrolling before Common Controls processes the wheel/scrollbar message. The
         // default procedure can synchronously paint while handling the message; setting the flag
@@ -135,7 +130,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void HandleNativeSelectionStateNotification(nint lParam, uint code)
     {
-        if (_viewModel?.ViewMode == FileViewMode.Details || lParam == 0)
+        if (_viewModel is null || lParam == 0 || _synchronizingSelection)
             return;
 
         if (code == LVN_ITEMCHANGED)
@@ -148,6 +143,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return;
             }
 
+            if ((change.uNewState & LVIS_SELECTED) != 0)
+                _nativeSelectedIndices.Add(change.iItem);
+            else
+                _nativeSelectedIndices.Remove(change.iItem);
+
             InvalidateNativeItemRange(change.iItem, change.iItem);
             return;
         }
@@ -157,10 +157,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
 
         var first = Math.Max(0, Math.Min(range.iFrom, range.iTo));
-        var last = Math.Min((_viewModel?.VirtualItems.Count ?? 0) - 1,
+        var last = Math.Min(_viewModel.VirtualItems.Count - 1,
             Math.Max(range.iFrom, range.iTo));
-        if (last >= first)
-            InvalidateNativeItemRange(first, last);
+        if (last < first)
+            return;
+
+        var selected = (range.uNewState & LVIS_SELECTED) != 0;
+        for (var index = first; index <= last; index++)
+        {
+            if (selected)
+                _nativeSelectedIndices.Add(index);
+            else
+                _nativeSelectedIndices.Remove(index);
+        }
+
+        InvalidateNativeItemRange(first, last);
     }
 
     private nint HandleCustomDraw(nint lParam)
@@ -235,8 +246,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
             var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
             var origin = GetNativeViewOrigin();
 
-            // Restrict candidate rows to the dirty vertical band, with one-row guard for native
-            // icon-origin offsets. RectVisible below then tests the real complex update region.
+            // Restrict candidate rows to the dirty vertical band. Grid positions are cached by
+            // column/row, so this loop no longer sends LVM_GETITEMPOSITION for every card.
             var firstRow = Math.Max(0, (Math.Max(0, origin.y + dirtyRect.top) / pitchY) - 1);
             var lastRow = Math.Max(firstRow,
                 ((Math.Max(0, origin.y + dirtyRect.bottom) / pitchY) + 1));
@@ -246,7 +257,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
             for (var index = first; index <= last; index++)
             {
-                if (!TryGetNativeGridCellRect(index, out var rect))
+                if (!TryGetNativeGridCellRect(index, origin, out var rect))
                     continue;
                 if (!RectsIntersect(rect, dirtyRect))
                     continue;

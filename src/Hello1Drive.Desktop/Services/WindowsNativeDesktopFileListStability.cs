@@ -52,16 +52,17 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void ObserveNativePaintedItem(int index)
     {
-        if (_disposed || _viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
+        if (!_scrolling || _disposed || _viewModel is null ||
+            index < 0 || index >= _viewModel.VirtualItems.Count ||
+            _viewModel.VirtualItems[index].Item is null)
+        {
             return;
-        if (_viewModel.VirtualItems[index].Item is null)
-            return;
+        }
 
+        // Painted-item tracking only exists to recover the final viewport after a wheel/trackpad
+        // fling. Scheduling it for ordinary hover/selection repaints made every mouse transition
+        // enqueue another thumbnail/scroll-state pass.
         _nativePaintedIndices.Add(index);
-        if (_scrolling)
-            return;
-
-        ScheduleNativePaintedThumbnailFlush();
     }
 
     private void ScheduleNativePaintedThumbnailFlush()
@@ -133,12 +134,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         var hasDirty = false;
         var dirty = default(RECT);
+        var iconOrigin = _viewModel.ViewMode == FileViewMode.Details
+            ? default
+            : GetNativeViewOrigin();
         for (var index = first; index <= last; index++)
         {
             RECT rect;
             var ok = _viewModel.ViewMode == FileViewMode.Details
                 ? TryGetNativeItemRect(index, out rect)
-                : TryGetNativeGridCellRect(index, out rect);
+                : TryGetNativeGridCellRect(index, iconOrigin, out rect);
             if (!ok)
                 continue;
 

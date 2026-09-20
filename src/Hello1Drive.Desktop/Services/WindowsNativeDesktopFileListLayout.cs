@@ -29,6 +29,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutCellWidth = -1;
         _lastIconLayoutCellHeight = -1;
         _lastIconLayoutGap = -1;
+        InvalidateNativeIconGeometry();
     }
 
     private NativeGridMetrics CalculateNativeGridMetrics()
@@ -100,6 +101,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             // LVM_SETITEMPOSITION32 call per file.
             SendMessage(ListHandle, LVM_SETICONSPACING, 0, MakeLParam(pitchX, pitchY));
             SendMessage(ListHandle, LVM_ARRANGE, 0, 0);
+            RefreshNativeIconGeometry(metrics);
         }
         finally
         {
@@ -118,7 +120,57 @@ internal sealed partial class WindowsNativeDesktopFileListController
         ResetNativeHorizontalScroll();
     }
 
-    private bool TryGetNativeGridCellRect(int index, out RECT rect)
+    private void InvalidateNativeIconGeometry()
+    {
+        _cachedIconColumnLefts = [];
+        _cachedIconFirstBaseLeft = 0;
+        _cachedIconFirstTop = 0;
+        _cachedIconRowPitch = 0;
+        _cachedIconGeometryValid = false;
+    }
+
+    private void RefreshNativeIconGeometry(NativeGridMetrics metrics)
+    {
+        InvalidateNativeIconGeometry();
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0 || metrics.Columns <= 0)
+            return;
+
+        var iconWidth = ScaleInt(
+            _viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+        var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+
+        if (!TryGetNativeItemViewPosition(0, out var firstPosition))
+            return;
+
+        _cachedIconFirstBaseLeft = firstPosition.x - horizontalInset;
+        _cachedIconFirstTop = firstPosition.y;
+        _cachedIconRowPitch = Math.Max(1, metrics.CellHeight + metrics.Gap);
+        _cachedIconColumnLefts = Enumerable.Repeat(int.MinValue, metrics.Columns).ToArray();
+
+        var columnsWithItems = Math.Min(metrics.Columns, _viewModel.VirtualItems.Count);
+        for (var column = 0; column < columnsWithItems; column++)
+        {
+            if (!TryGetNativeItemViewPosition(column, out var position))
+                continue;
+            _cachedIconColumnLefts[column] =
+                (position.x - horizontalInset) - _cachedIconFirstBaseLeft;
+        }
+
+        if (_viewModel.VirtualItems.Count > metrics.Columns &&
+            TryGetNativeItemViewPosition(metrics.Columns, out var nextRow))
+        {
+            var measuredPitch = nextRow.y - firstPosition.y;
+            if (measuredPitch > 0)
+                _cachedIconRowPitch = measuredPitch;
+        }
+
+        _cachedIconGeometryValid = true;
+    }
+
+    private bool TryGetNativeGridCellRect(int index, out RECT rect) =>
+        TryGetNativeGridCellRect(index, GetNativeViewOrigin(), out rect);
+
+    private bool TryGetNativeGridCellRect(int index, POINT origin, out RECT rect)
     {
         rect = default;
         if (_viewModel is null || _viewModel.ViewMode == FileViewMode.Details ||
@@ -128,38 +180,32 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
 
         var metrics = CalculateNativeGridMetrics();
-        if (!TryGetNativeItemViewPosition(index, out var position))
+        if (!_cachedIconGeometryValid || _cachedIconColumnLefts.Length != metrics.Columns)
+            RefreshNativeIconGeometry(metrics);
+        if (!_cachedIconGeometryValid)
             return false;
 
-        // LVM_GETITEMPOSITION returns view coordinates. LVM_GETORIGIN is the current positive view
-        // scroll origin exposed by the control, so client coordinates are view - origin. Adding the
-        // origin makes owner-drawn cards move downward while the native control scrolls downward,
-        // which is exactly the reversed-wheel/blank-space symptom.
-        var origin = GetNativeViewOrigin();
-        var iconWidth = ScaleInt(_viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+        var column = index % metrics.Columns;
+        var row = index / metrics.Columns;
 
-        // In auto-arranged icon view the native item position is the icon's upper-left corner.
-        // Hello1Drive's painted card is wider than that layout image, so recover the grid-cell
-        // origin by removing the native centering offset before converting view -> client coords.
-        var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+        if (_cachedIconColumnLefts[column] == int.MinValue)
+        {
+            var iconWidth = ScaleInt(
+                _viewModel.ViewMode == FileViewMode.ExtraLargeIcons ? ExtraArtwork : LargeArtwork);
+            var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
+            if (!TryGetNativeItemViewPosition(column, out var position))
+                return false;
+            _cachedIconColumnLefts[column] =
+                (position.x - horizontalInset) - _cachedIconFirstBaseLeft;
+        }
 
-        // Normalize against item 0 before applying our centered outer margin. Common Controls may
-        // give the first icon a theme/image-list dependent x offset; carrying that offset into the
-        // custom card is what made the first column appear glued to (or slightly outside) the edge.
-        var firstBaseLeft = 0;
-        if (TryGetNativeItemViewPosition(0, out var firstPosition))
-            firstBaseLeft = firstPosition.x - horizontalInset;
-
-        var relativeLeft = (position.x - horizontalInset) - firstBaseLeft;
-        var left = relativeLeft - origin.x;
+        var left = _cachedIconColumnLefts[column] - origin.x;
         var right = left + metrics.CellWidth;
-        var top = position.y - origin.y;
+        var top = _cachedIconFirstTop + row * _cachedIconRowPitch - origin.y;
 
-        // LVS_EX_JUSTIFYCOLUMNS deliberately uses the whole native view. Preserve that native
-        // geometry (it gives us the correct column count), but inset only the visual outer edges
-        // so the Hello1Drive grid has symmetric breathing room without changing wrap behavior.
+        // Keep the correct native column distribution but add symmetric visual breathing room to
+        // the outer cards only. Internal column pitch remains owned by SysListView32.
         var edgeMargin = ScaleInt(GridOuterMargin);
-        var column = metrics.Columns > 0 ? index % metrics.Columns : 0;
         if (column == 0)
             left += edgeMargin;
         if (column == metrics.Columns - 1)
@@ -175,36 +221,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (ListHandle == 0 || index < 0)
             return false;
 
-        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
-        try
-        {
-            Marshal.StructureToPtr(position, ptr, false);
-            if (SendMessage(ListHandle, LVM_GETITEMPOSITION_NATIVE, (nint)index, ptr) == 0)
-                return false;
-            position = Marshal.PtrToStructure<POINT>(ptr);
-            return true;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(ptr);
-        }
+        return SendMessagePoint(
+            ListHandle,
+            LVM_GETITEMPOSITION_NATIVE,
+            (nint)index,
+            ref position) != 0;
     }
 
     private POINT GetNativeViewOrigin()
     {
         var origin = new POINT();
-        var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<POINT>());
-        try
-        {
-            Marshal.StructureToPtr(origin, ptr, false);
-            if (SendMessage(ListHandle, LVM_GETORIGIN_NATIVE, 0, ptr) != 0)
-                origin = Marshal.PtrToStructure<POINT>(ptr);
-            return origin;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(ptr);
-        }
+        if (ListHandle != 0)
+            SendMessagePoint(ListHandle, LVM_GETORIGIN_NATIVE, 0, ref origin);
+        return origin;
     }
 
     private readonly record struct NativeGridMetrics(
