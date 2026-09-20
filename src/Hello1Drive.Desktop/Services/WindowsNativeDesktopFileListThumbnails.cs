@@ -18,12 +18,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private readonly object _nativeThumbnailPreparationLock = new();
     private readonly HashSet<string> _nativeThumbnailPreparations = [];
     private readonly SemaphoreSlim _nativeThumbnailPreparationGate = new(2, 2);
-    private bool TryDrawThumbnail(
-        nint hdc,
-        nint sharedGraphics,
-        DriveItemModel item,
-        RECT dest,
-        int radius)
+    private bool TryDrawThumbnail(nint hdc, DriveItemModel item, RECT dest, int radius)
     {
         if (_gdiPlusToken == 0)
             return false;
@@ -33,9 +28,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (cached is null || !string.Equals(cached.VersionToken, version, StringComparison.Ordinal))
         {
-            // Never encode/decode an Avalonia bitmap synchronously from WM_PAINT. Native thumbnail
-            // preparation is disk/cache work and runs on two background workers. Until it is ready,
-            // draw the lightweight file badge and repaint only this item when preparation completes.
+            // Keep native conversion off WM_PAINT. Visible items are pinned in the scaled native
+            // cache; a missing entry is rebuilt asynchronously from the persistent thumbnail cache.
             if (item.ThumbnailImage is not null)
                 QueueNativeThumbnailPreparation(item);
             return false;
@@ -43,28 +37,23 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         TouchThumbnail(cached);
 
-        var graphics = sharedGraphics;
-        var ownsGraphics = false;
-        if (graphics == 0)
-        {
-            if (GdipCreateFromHDC(hdc, out graphics) != 0 || graphics == 0)
-                return false;
-            ownsGraphics = true;
-            GdipSetInterpolationMode(
-                graphics,
-                _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
-        }
-
-        uint graphicsState = 0;
-        var savedGraphics = GdipSaveGraphics(graphics, out graphicsState) == 0;
-        if (!savedGraphics && !ownsGraphics)
+        if (GdipCreateFromHDC(hdc, out var graphics) != 0 || graphics == 0)
             return false;
 
         FillRectColor(hdc, dest, _palette.ThumbnailBackground);
         nint region = 0;
         try
         {
-            region = CreateRoundRectRgn(dest.left, dest.top, dest.right + 1, dest.bottom + 1, radius * 2, radius * 2);
+            GdipSetInterpolationMode(
+                graphics,
+                _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
+            region = CreateRoundRectRgn(
+                dest.left,
+                dest.top,
+                dest.right + 1,
+                dest.bottom + 1,
+                radius * 2,
+                radius * 2);
             if (region != 0)
                 GdipSetClipHrgn(graphics, region, CombineModeReplace);
 
@@ -110,10 +99,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             if (region != 0)
                 DeleteObject(region);
-            if (savedGraphics)
-                GdipRestoreGraphics(graphics, graphicsState);
-            if (ownsGraphics)
-                GdipDeleteGraphics(graphics);
+            GdipDeleteGraphics(graphics);
         }
     }
 
