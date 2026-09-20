@@ -37,24 +37,33 @@ internal sealed partial class WindowsNativeDesktopFileListController
         GetClientRect(ListHandle, out var client);
         var extra = _viewModel?.ViewMode == FileViewMode.ExtraLargeIcons;
         var scale = Math.Max(0.01, _dpi / 96d);
-        var clientWidthDip = Math.Max(1d, client.Width / scale);
-        var preferred = extra ? ExtraWidth : LargeWidth;
-        var minWidth = extra ? 190d : 136d;
-        var maxWidth = extra ? 276d : 184d;
-        var heightDip = extra ? ExtraHeight : LargeHeight;
 
-        // LVM_SETICONSPACING measures from one icon origin to the next. Keep the trailing spacing
-        // inside the client so SysListView32 has no reason to create a horizontal work area.
-        var usable = Math.Max(1d, clientWidthDip - GridSpacing);
-        var columns = Math.Max(1, (int)Math.Floor((usable + GridSpacing) / (preferred + GridSpacing)));
-        var rawCellWidth = (usable - GridSpacing * (columns - 1)) / columns;
-        var cellWidthDip = columns == 1 && rawCellWidth < minWidth
-            ? Math.Max(1d, Math.Min(maxWidth, rawCellWidth))
+        // Do all column fitting in physical pixels. Converting the viewport to DIPs and then
+        // rounding every cell back to pixels accumulates enough error at 125/150% DPI to make
+        // SysListView32 drop a column that visibly still fits.
+        var preferredWidth = ScaleInt(extra ? ExtraWidth : LargeWidth);
+        var minWidth = ScaleInt(extra ? 190d : 136d);
+        var maxWidth = ScaleInt(extra ? 276d : 184d);
+        var cellHeight = ScaleInt(extra ? ExtraHeight : LargeHeight);
+        var gap = ScaleInt(GridSpacing);
+        var edgePadding = Math.Max(gap, (int)Math.Round(6d * scale));
+        var usableWidth = Math.Max(1, client.Width - edgePadding * 2);
+
+        var columns = Math.Max(1, (usableWidth + gap) / Math.Max(1, preferredWidth + gap));
+
+        // If exactly one additional column still leaves every card at or above the designed
+        // minimum width, use it. This avoids the large dead strip visible on medium-width windows
+        // without making the grid suddenly jump several density levels.
+        var nextColumns = columns + 1;
+        var nextWidth = (usableWidth - gap * (nextColumns - 1)) / Math.Max(1, nextColumns);
+        if (nextWidth >= minWidth)
+            columns = nextColumns;
+
+        var rawCellWidth = (usableWidth - gap * (columns - 1)) / Math.Max(1, columns);
+        var cellWidth = columns == 1 && rawCellWidth < minWidth
+            ? Math.Max(1, Math.Min(maxWidth, rawCellWidth))
             : Math.Clamp(rawCellWidth, minWidth, maxWidth);
 
-        var cellWidth = Math.Max(1, (int)Math.Round(cellWidthDip * scale));
-        var cellHeight = Math.Max(1, (int)Math.Round(heightDip * scale));
-        var gap = Math.Max(1, (int)Math.Round(GridSpacing * scale));
         return new NativeGridMetrics(columns, cellWidth, cellHeight, gap);
     }
 
