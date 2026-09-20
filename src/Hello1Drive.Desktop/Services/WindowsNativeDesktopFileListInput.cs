@@ -18,6 +18,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _synchronizingSelection = true;
         try
         {
+            _nativeSelectedIndices.Clear();
+
             // -1 applies the state change to all items. This avoids one SendMessage per file in
             // large virtual folders, then restores only the handful of actually selected items.
             SetItemSelected(-1, selected: false);
@@ -50,6 +52,20 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             Marshal.StructureToPtr(state, ptr, false);
             SendMessage(ListHandle, LVM_SETITEMSTATE, (nint)index, ptr);
+
+            if (index < 0)
+            {
+                if (!selected)
+                    _nativeSelectedIndices.Clear();
+            }
+            else if (selected)
+            {
+                _nativeSelectedIndices.Add(index);
+            }
+            else
+            {
+                _nativeSelectedIndices.Remove(index);
+            }
         }
         finally
         {
@@ -57,24 +73,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private bool IsItemSelected(int index) =>
-        (((long)SendMessage(ListHandle, LVM_GETITEMSTATE, (nint)index, (nint)LVIS_SELECTED)) & (long)LVIS_SELECTED) != 0;
+    private bool IsItemSelected(int index) => _nativeSelectedIndices.Contains(index);
 
     private void RaiseSelectionChanged()
     {
         if (_synchronizingSelection || _viewModel is null)
             return;
 
-        var ids = new List<string>();
-        var current = -1;
-        while (true)
-        {
-            current = (int)SendMessage(ListHandle, LVM_GETNEXTITEM, (nint)current, (nint)LVNI_SELECTED);
-            if (current < 0)
-                break;
-            if (current < _viewModel.VirtualItems.Count && _viewModel.VirtualItems[current].Item is { Id.Length: > 0 } item)
-                ids.Add(item.Id);
-        }
+        var ids = _nativeSelectedIndices
+            .Where(index => index >= 0 && index < _viewModel.VirtualItems.Count)
+            .OrderBy(static index => index)
+            .Select(index => _viewModel.VirtualItems[index].Item?.Id)
+            .Where(static id => !string.IsNullOrWhiteSpace(id))
+            .Cast<string>()
+            .ToArray();
+
         _host.RaiseSelectionChanged(ids);
     }
 
