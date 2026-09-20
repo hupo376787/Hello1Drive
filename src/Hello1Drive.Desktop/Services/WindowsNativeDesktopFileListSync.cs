@@ -91,6 +91,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 if (value is VirtualDriveItemSlot slot)
                     AttachSlot(slot);
         }
+
+        // Owner-data ListView does not observe Avalonia collection changes by itself. Keep its
+        // logical item count and icon extent synchronized immediately when desktop metadata grows
+        // or shrinks; otherwise an old larger count leaves a long blank scroll tail.
+        SyncPresentation(force: false);
     }
 
     private void AttachSlot(VirtualDriveItemSlot slot)
