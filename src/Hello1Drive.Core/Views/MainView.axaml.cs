@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Platform;
 using Avalonia.Input;
 using Avalonia.Input.GestureRecognizers;
 using Avalonia.Interactivity;
@@ -5126,8 +5125,6 @@ if (visibleItems.Count > 0)
             AppThemeMode.Dark => ThemeVariant.Dark,
             _ => ThemeVariant.Default
         };
-
-        UpdateAndroidSystemBarTheme();
     }
 
     private void ConfigureAndroidSystemBars()
@@ -5142,52 +5139,6 @@ if (visibleItems.Count > 0)
         insets.DisplayEdgeToEdgePreference = true;
         insets.IsSystemBarVisible = true;
         insets.SystemBarColor = Colors.Transparent;
-        UpdateAndroidSystemBarTheme();
-    }
-
-    private void UpdateAndroidSystemBarTheme(Color? backgroundColor = null)
-    {
-        if (!OperatingSystem.IsAndroid() || _topLevel?.InsetsManager is not { } insets)
-            return;
-
-        if (backgroundColor is { } color)
-        {
-            insets.SystemBarTheme = IsLightBackgroundColor(color)
-                ? SystemBarTheme.Light
-                : SystemBarTheme.Dark;
-            return;
-        }
-
-        if (Background is SolidColorBrush solid)
-        {
-            insets.SystemBarTheme = IsLightBackgroundColor(solid.Color)
-                ? SystemBarTheme.Light
-                : SystemBarTheme.Dark;
-            return;
-        }
-
-        var app = Application.Current;
-        var darkTheme = app?.RequestedThemeVariant == ThemeVariant.Dark ||
-                        (app?.RequestedThemeVariant == ThemeVariant.Default &&
-                         app.ActualThemeVariant == ThemeVariant.Dark);
-        insets.SystemBarTheme = darkTheme ? SystemBarTheme.Dark : SystemBarTheme.Light;
-    }
-
-    private static bool IsLightBackgroundColor(Color color)
-    {
-        static double Linearize(byte channel)
-        {
-            var value = channel / 255d;
-            return value <= 0.04045
-                ? value / 12.92
-                : Math.Pow((value + 0.055) / 1.055, 2.4);
-        }
-
-        var luminance =
-            0.2126 * Linearize(color.R) +
-            0.7152 * Linearize(color.G) +
-            0.0722 * Linearize(color.B);
-        return luminance >= 0.42;
     }
 
     private void SyncAndroidOuterBackground(IBrush brush)
@@ -5201,8 +5152,6 @@ if (visibleItems.Count > 0)
 
         if (_topLevel?.InsetsManager is { } insets)
             insets.SystemBarColor = Colors.Transparent;
-
-        UpdateAndroidSystemBarTheme(brush is SolidColorBrush solid ? solid.Color : null);
     }
 
     private void SyncAndroidOuterBackground(Bitmap? bitmap)
@@ -5228,8 +5177,6 @@ if (visibleItems.Count > 0)
 
         if (_topLevel?.InsetsManager is { } insets)
             insets.SystemBarColor = Colors.Transparent;
-
-        UpdateAndroidSystemBarTheme();
     }
 
     private static void ApplyFileItemBackground(MainViewModel vm)
