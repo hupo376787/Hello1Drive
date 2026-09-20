@@ -168,6 +168,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private readonly nint _oldParentWndProc;
     private readonly nint _oldListWndProc;
     private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];
+    private readonly HashSet<int> _nativeSelectedIndices = [];
     private readonly Dictionary<string, NativeThumbnail> _thumbnailCache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _thumbnailLru = [];
     private HashSet<string> _visibleNativeThumbnailIds = new(StringComparer.Ordinal);
