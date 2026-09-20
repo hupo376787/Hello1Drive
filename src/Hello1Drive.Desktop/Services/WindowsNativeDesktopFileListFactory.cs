@@ -146,7 +146,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int UnitPixel = 2;
     private const int CombineModeReplace = 0;
     private const int InterpolationModeHighQualityBilinear = 6;
-    private const int MaxNativeThumbnailCache = 320;
+    private const int MaxNativeThumbnailCache = 96;
 
     private const double DetailsRowHeight = 46;
     private const double GridSpacing = 4;
