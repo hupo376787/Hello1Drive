@@ -220,49 +220,67 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
         }
 
-        if (_viewModel.ViewMode != FileViewMode.Details)
+        nint thumbnailGraphics = 0;
+        if (_gdiPlusToken != 0 &&
+            GdipCreateFromHDC(hdc, out thumbnailGraphics) == 0 &&
+            thumbnailGraphics != 0)
         {
-            var metrics = CalculateNativeGridMetrics();
-            var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
-            var origin = GetNativeViewOrigin();
+            GdipSetInterpolationMode(
+                thumbnailGraphics,
+                _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
+        }
 
-            // Restrict candidate rows to the dirty vertical band, with one-row guard for native
-            // icon-origin offsets. RectVisible below then tests the real complex update region.
-            var firstRow = Math.Max(0, (Math.Max(0, origin.y + dirtyRect.top) / pitchY) - 1);
-            var lastRow = Math.Max(firstRow,
-                ((Math.Max(0, origin.y + dirtyRect.bottom) / pitchY) + 1));
-            var first = Math.Max(0, firstRow * metrics.Columns);
-            var last = Math.Min(_viewModel.VirtualItems.Count - 1,
-                ((lastRow + 1) * metrics.Columns) - 1);
-
-            for (var index = first; index <= last; index++)
+        try
+        {
+            if (_viewModel.ViewMode != FileViewMode.Details)
             {
-                if (!TryGetNativeGridCellRect(index, origin, out var rect))
-                    continue;
-                if (!RectsIntersect(rect, dirtyRect))
-                    continue;
+                var metrics = CalculateNativeGridMetrics();
+                var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
+                var origin = GetNativeViewOrigin();
 
+                // Restrict candidate rows to the dirty vertical band. Grid positions are cached by
+                // column/row, so this loop no longer sends LVM_GETITEMPOSITION for every card.
+                var firstRow = Math.Max(0, (Math.Max(0, origin.y + dirtyRect.top) / pitchY) - 1);
+                var lastRow = Math.Max(firstRow,
+                    ((Math.Max(0, origin.y + dirtyRect.bottom) / pitchY) + 1));
+                var first = Math.Max(0, firstRow * metrics.Columns);
+                var last = Math.Min(_viewModel.VirtualItems.Count - 1,
+                    ((lastRow + 1) * metrics.Columns) - 1);
+
+                for (var index = first; index <= last; index++)
+                {
+                    if (!TryGetNativeGridCellRect(index, origin, out var rect))
+                        continue;
+                    if (!RectsIntersect(rect, dirtyRect))
+                        continue;
+
+                    var visibilityRect = rect;
+                    if (!RectVisible(hdc, ref visibilityRect))
+                        continue;
+
+                    DrawItem(hdc, thumbnailGraphics, rect, index, _viewModel.VirtualItems[index]);
+                }
+                return;
+            }
+
+            var (detailFirst, detailLast) = GetVisibleIndexRange();
+            if (detailFirst < 0 || detailLast < detailFirst)
+                return;
+
+            for (var index = detailFirst; index <= detailLast; index++)
+            {
+                if (!TryGetNativeItemRect(index, out var rect) || !RectsIntersect(rect, dirtyRect))
+                    continue;
                 var visibilityRect = rect;
                 if (!RectVisible(hdc, ref visibilityRect))
                     continue;
-
-                DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
+                DrawItem(hdc, thumbnailGraphics, rect, index, _viewModel.VirtualItems[index]);
             }
-            return;
         }
-
-        var (detailFirst, detailLast) = GetVisibleIndexRange();
-        if (detailFirst < 0 || detailLast < detailFirst)
-            return;
-
-        for (var index = detailFirst; index <= detailLast; index++)
+        finally
         {
-            if (!TryGetNativeItemRect(index, out var rect) || !RectsIntersect(rect, dirtyRect))
-                continue;
-            var visibilityRect = rect;
-            if (!RectVisible(hdc, ref visibilityRect))
-                continue;
-            DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
+            if (thumbnailGraphics != 0)
+                GdipDeleteGraphics(thumbnailGraphics);
         }
     }
 
@@ -288,7 +306,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private void DrawItem(nint hdc, RECT nativeRect, int index, VirtualDriveItemSlot slot)
+    private void DrawItem(nint hdc, RECT nativeRect, int index, VirtualDriveItemSlot slot) =>
+        DrawItem(hdc, 0, nativeRect, index, slot);
+
+    private void DrawItem(nint hdc, nint thumbnailGraphics, RECT nativeRect, int index, VirtualDriveItemSlot slot)
     {
         var palette = _palette;
         RECT drawRect;
@@ -309,9 +330,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
             SetBkMode(hdc, TRANSPARENT);
 
             if (_viewModel?.ViewMode == FileViewMode.Details)
-                DrawDetailsItem(hdc, drawRect, index, slot, palette);
+                DrawDetailsItem(hdc, thumbnailGraphics, drawRect, index, slot, palette);
             else
-                DrawGridItem(hdc, drawRect, index, slot, palette);
+                DrawGridItem(hdc, thumbnailGraphics, drawRect, index, slot, palette);
         }
         finally
         {
@@ -320,7 +341,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private void DrawDetailsItem(nint hdc, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
+    private void DrawDetailsItem(nint hdc, nint thumbnailGraphics, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
     {
         var selected = IsItemSelected(index) || slot.Item?.IsMobileSelected == true;
         var hover = _hotIndex == index && !selected;
@@ -344,7 +365,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             rect.top + ScaleInt(7),
             rect.left + ScaleInt(37),
             rect.top + ScaleInt(39));
-        DrawArtwork(hdc, item, art, ScaleInt(5), palette);
+        DrawArtwork(hdc, thumbnailGraphics, item, art, ScaleInt(5), palette);
 
         var width = rect.Width;
         var gap = ScaleInt(6);
@@ -373,7 +394,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             _smallFont, palette.MutedText, center: false);
     }
 
-    private void DrawGridItem(nint hdc, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
+    private void DrawGridItem(nint hdc, nint thumbnailGraphics, RECT rect, int index, VirtualDriveItemSlot slot, Palette palette)
     {
         var selected = IsItemSelected(index) || slot.Item?.IsMobileSelected == true;
         var hover = _hotIndex == index && !selected;
@@ -407,7 +428,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var artworkY = Math.Max(rect.top + padding,
             rect.top + (artworkBottom - rect.top - artworkSize + padding) / 2);
         var art = new RECT(artworkX, artworkY, artworkX + artworkSize, artworkY + artworkSize);
-        DrawArtwork(hdc, item, art, ScaleInt(extra ? 11 : 9), palette);
+        DrawArtwork(hdc, thumbnailGraphics, item, art, ScaleInt(extra ? 11 : 9), palette);
 
         var nameY = rect.bottom - padding - sizeHeight - captionHeight - ScaleInt(2);
         DrawTextLine(hdc, item.Name,
@@ -418,9 +439,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
             _smallFont, palette.MutedText, center: true);
     }
 
-    private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)
+    private void DrawArtwork(nint hdc, nint thumbnailGraphics, DriveItemModel item, RECT dest, int radius, Palette palette)
     {
-        if (item.SupportsThumbnail && TryDrawThumbnail(hdc, item, dest, radius))
+        if (item.SupportsThumbnail && TryDrawThumbnail(hdc, thumbnailGraphics, item, dest, radius))
         {
             if (item.IsVideo)
                 DrawVideoBadge(hdc, dest, palette);
