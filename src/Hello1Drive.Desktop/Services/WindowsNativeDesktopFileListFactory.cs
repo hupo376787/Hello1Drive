@@ -170,6 +170,11 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];
     private readonly Dictionary<string, NativeThumbnail> _thumbnailCache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _thumbnailLru = [];
+    private HashSet<string> _visibleNativeThumbnailIds = new(StringComparer.Ordinal);
+    private int[] _cachedIconColumnLefts = [];
+    private int _cachedIconFirstTop;
+    private int _cachedIconRowPitch;
+    private bool _cachedIconGeometryValid;
 
     private MainViewModel? _viewModel;
     private long _collectionVersion;
