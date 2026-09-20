@@ -35,11 +35,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
                 if (hdr.code == LVN_ITEMCHANGED || hdr.code == LVN_ODSTATECHANGED)
                 {
-                    // OWNERDATA selection/focus state lives in SysListView32. Our icon cards are
-                    // wider than the native image rectangle, so repaint the whole client whenever
-                    // Windows changes selection state instead of accepting its smaller dirty region.
-                    if (_viewModel?.ViewMode != FileViewMode.Details)
-                        InvalidateRect(ListHandle, 0, false);
+                    HandleNativeSelectionStateNotification(lParam, hdr.code);
                     return 0;
                 }
             }
@@ -58,11 +54,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (msg == WM_PAINT)
         {
             var hdc = BeginPaint(hwnd, out var paint);
-            if (hdc != 0)
-            {
-                GetClientRect(hwnd, out var client);
-                PaintNativeBackdrop(hdc, client);
-            }
+            if (hdc != 0 && paint.rcPaint.Width > 0 && paint.rcPaint.Height > 0)
+                PaintNativeBackdrop(hdc, paint.rcPaint);
             EndPaint(hwnd, ref paint);
             return 0;
         }
@@ -87,17 +80,15 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         if (msg == WM_PAINT && _viewModel?.ViewMode != FileViewMode.Details)
         {
-            // Icon view is visually owned entirely by Hello1Drive. Calling the stock painter here
-            // lets Common Controls draw its own selection/focus surface inside a smaller native
-            // item rectangle, which conflicts with our full-card background and leaves fragments
-            // after deselection. Keep SysListView32 for layout/scroll/state only.
+            // Icon view is visually owned by Hello1Drive, but only repaint Windows' dirty region.
+            // BeginPaint already gives the HDC the exact update-region clip; honoring rcPaint here
+            // avoids re-running GDI+/thumbnail work for every visible card after a one-item change.
             var hdc = BeginPaint(hwnd, out var paint);
-            if (hdc != 0)
+            if (hdc != 0 && paint.rcPaint.Width > 0 && paint.rcPaint.Height > 0)
             {
                 SyncBackdrop(force: false);
-                GetClientRect(hwnd, out var client);
-                PaintNativeBackdrop(hdc, client);
-                DrawVisibleItems(hdc);
+                PaintNativeBackdrop(hdc, paint.rcPaint);
+                DrawVisibleItems(hdc, paint.rcPaint);
             }
             EndPaint(hwnd, ref paint);
             return 0;
@@ -108,7 +99,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             SyncBackdrop(force: false);
             GetClientRect(hwnd, out var client);
             PaintNativeBackdrop(wParam, client);
-            DrawVisibleItems(wParam);
+            DrawVisibleItems(wParam, client);
             return 1;
         }
 
@@ -129,13 +120,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 RaiseSelectionChanged();
                 ReportScrollPosition();
                 QueueVisibleThumbnails(allowNetwork: true);
-                InvalidateVisibleItems();
                 break;
             case WM_KEYUP:
                 RaiseSelectionChanged();
                 ReportScrollPosition();
                 QueueVisibleThumbnails(allowNetwork: true);
-                InvalidateVisibleItems();
                 break;
             case WM_LBUTTONDBLCLK:
                 if (HitTest(lParam) is { } doubleItem)
@@ -145,24 +134,51 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 if (HitTest(lParam) is { } contextItem)
                     _host.RaiseItemContextRequested(contextItem);
                 RaiseSelectionChanged();
-                InvalidateVisibleItems();
                 break;
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
                 ClampNativeIconScrollToContent();
                 BeginNativeScroll();
-                InvalidateRect(ListHandle, 0, false);
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
                 {
                     ClampNativeIconScrollToContent();
                     EndNativeScroll();
-                    InvalidateRect(ListHandle, 0, false);
                 }
                 break;
         }
         return result;
+    }
+
+    private void HandleNativeSelectionStateNotification(nint lParam, uint code)
+    {
+        if (_viewModel?.ViewMode == FileViewMode.Details || lParam == 0)
+            return;
+
+        if (code == LVN_ITEMCHANGED)
+        {
+            var change = Marshal.PtrToStructure<NMLISTVIEW>(lParam);
+            if ((change.uChanged & LVIF_STATE) == 0 ||
+                ((change.uOldState ^ change.uNewState) & LVIS_SELECTED) == 0 ||
+                change.iItem < 0)
+            {
+                return;
+            }
+
+            InvalidateNativeItemRange(change.iItem, change.iItem);
+            return;
+        }
+
+        var range = Marshal.PtrToStructure<NMLVODSTATECHANGE>(lParam);
+        if (((range.uOldState ^ range.uNewState) & LVIS_SELECTED) == 0)
+            return;
+
+        var first = Math.Max(0, Math.Min(range.iFrom, range.iTo));
+        var last = Math.Min((_viewModel?.VirtualItems.Count ?? 0) - 1,
+            Math.Max(range.iFrom, range.iTo));
+        if (last >= first)
+            InvalidateNativeItemRange(first, last);
     }
 
     private nint HandleCustomDraw(nint lParam)
@@ -212,7 +228,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 // backdrop first so deselected cards cannot leave blue/hover fragments behind.
                 GetClientRect(ListHandle, out var client);
                 PaintNativeBackdrop(custom.nmcd.hdc, client);
-                DrawVisibleItems(custom.nmcd.hdc);
+                DrawVisibleItems(custom.nmcd.hdc, client);
             }
             return (nint)CDRF_DODEFAULT_NATIVE;
         }
@@ -220,46 +236,62 @@ internal sealed partial class WindowsNativeDesktopFileListController
         return (nint)CDRF_DODEFAULT_NATIVE;
     }
 
-    private void DrawVisibleItems(nint hdc)
+    private void DrawVisibleItems(nint hdc, RECT dirtyRect)
     {
-        if (_viewModel is null || _viewModel.VirtualItems.Count == 0)
+        if (_viewModel is null || _viewModel.VirtualItems.Count == 0 ||
+            dirtyRect.Width <= 0 || dirtyRect.Height <= 0)
+        {
             return;
+        }
 
         if (_viewModel.ViewMode != FileViewMode.Details)
         {
-            var visible = GetVisibleIconIndices();
-            if (visible.Count == 0)
-            {
-                var estimated = GetEstimatedVisibleIconIndexRange();
-                if (estimated.First < 0 || estimated.Last < estimated.First)
-                    return;
-                for (var i = estimated.First; i <= estimated.Last; i++)
-                    visible.Add(i);
-            }
+            var metrics = CalculateNativeGridMetrics();
+            var pitchY = Math.Max(1, metrics.CellHeight + metrics.Gap);
+            var origin = GetNativeViewOrigin();
 
-            foreach (var index in visible)
+            // Restrict candidate rows to the dirty vertical band, with one-row guard for native
+            // icon-origin offsets. RectVisible below then tests the real complex update region.
+            var firstRow = Math.Max(0, (Math.Max(0, origin.y + dirtyRect.top) / pitchY) - 1);
+            var lastRow = Math.Max(firstRow,
+                ((Math.Max(0, origin.y + dirtyRect.bottom) / pitchY) + 1));
+            var first = Math.Max(0, firstRow * metrics.Columns);
+            var last = Math.Min(_viewModel.VirtualItems.Count - 1,
+                ((lastRow + 1) * metrics.Columns) - 1);
+
+            for (var index = first; index <= last; index++)
             {
-                if (index < 0 || index >= _viewModel.VirtualItems.Count)
-                    continue;
                 if (!TryGetNativeGridCellRect(index, out var rect))
                     continue;
+                if (!RectsIntersect(rect, dirtyRect))
+                    continue;
+
+                var visibilityRect = rect;
+                if (!RectVisible(hdc, ref visibilityRect))
+                    continue;
+
                 DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
-                ObserveNativePaintedItem(index);
             }
             return;
         }
 
-        var (first, last) = GetVisibleIndexRange();
-        if (first < 0 || last < first)
+        var (detailFirst, detailLast) = GetVisibleIndexRange();
+        if (detailFirst < 0 || detailLast < detailFirst)
             return;
 
-        for (var index = first; index <= last; index++)
+        for (var index = detailFirst; index <= detailLast; index++)
         {
-            if (!TryGetNativeItemRect(index, out var rect))
+            if (!TryGetNativeItemRect(index, out var rect) || !RectsIntersect(rect, dirtyRect))
+                continue;
+            var visibilityRect = rect;
+            if (!RectVisible(hdc, ref visibilityRect))
                 continue;
             DrawItem(hdc, rect, index, _viewModel.VirtualItems[index]);
         }
     }
+
+    private static bool RectsIntersect(RECT a, RECT b) =>
+        a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
     private bool TryGetNativeItemRect(int index, out RECT rect)
     {

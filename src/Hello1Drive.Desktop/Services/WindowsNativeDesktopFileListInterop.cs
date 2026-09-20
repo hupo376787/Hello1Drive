@@ -99,6 +99,29 @@ internal sealed partial class WindowsNativeDesktopFileListController
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NMLISTVIEW
+    {
+        public NMHDR hdr;
+        public int iItem;
+        public int iSubItem;
+        public uint uNewState;
+        public uint uOldState;
+        public uint uChanged;
+        public POINT ptAction;
+        public nint lParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NMLVODSTATECHANGE
+    {
+        public NMHDR hdr;
+        public int iFrom;
+        public int iTo;
+        public uint uNewState;
+        public uint uOldState;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct NMCUSTOMDRAW
     {
         public NMHDR hdr;
@@ -263,6 +286,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RectVisible(nint hdc, ref RECT rect);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool RoundRect(nint hdc, int left, int top, int right, int bottom, int width, int height);
 
     [DllImport("gdi32.dll")]
@@ -314,6 +341,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     [DllImport("gdiplus.dll")]
     private static extern int GdipLoadImageFromStream([MarshalAs(UnmanagedType.Interface)] IStream stream, out nint image);
+
+    [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+    private static extern int GdipLoadImageFromFile(string filename, out nint image);
+
+    [DllImport("gdiplus.dll")]
+    private static extern int GdipGetImageThumbnail(
+        nint image,
+        uint thumbWidth,
+        uint thumbHeight,
+        out nint thumbImage,
+        nint callback,
+        nint callbackData);
 
     [DllImport("gdiplus.dll")]
     private static extern int GdipDisposeImage(nint image);

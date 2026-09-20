@@ -125,8 +125,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var scaleY = backdrop.Height / viewport.Height;
         var nativeScale = Math.Max(0.01, _dpi / 96d);
 
-        var sourceX = (int)Math.Round(_host.BackdropOrigin.X * scaleX);
-        var sourceY = (int)Math.Round(_host.BackdropOrigin.Y * scaleY);
+        // client can be the complete viewport or only WM_PAINT's dirty rectangle. Convert
+        // its physical-pixel offset back to Avalonia DIPs before sampling the cached wallpaper.
+        // This makes dirty-rect painting pixel-identical to a full repaint.
+        var sourceX = (int)Math.Round((_host.BackdropOrigin.X + client.left / nativeScale) * scaleX);
+        var sourceY = (int)Math.Round((_host.BackdropOrigin.Y + client.top / nativeScale) * scaleY);
         var sourceWidth = Math.Max(1, (int)Math.Round((client.Width / nativeScale) * scaleX));
         var sourceHeight = Math.Max(1, (int)Math.Round((client.Height / nativeScale) * scaleY));
 

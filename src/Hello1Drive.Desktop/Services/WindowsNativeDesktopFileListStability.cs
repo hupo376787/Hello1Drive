@@ -10,8 +10,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private const int SB_HORZ_NATIVE = 0;
 
     private bool _nativeRedrawFlushScheduled;
-    private int _pendingNativeRedrawFirst = int.MaxValue;
-    private int _pendingNativeRedrawLast = -1;
+    private readonly HashSet<int> _pendingNativeRedrawIndices = [];
     private readonly HashSet<int> _nativePaintedIndices = [];
     private bool _nativePaintedFlushScheduled;
 
@@ -20,8 +19,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (_disposed || index < 0)
             return;
 
-        _pendingNativeRedrawFirst = Math.Min(_pendingNativeRedrawFirst, index);
-        _pendingNativeRedrawLast = Math.Max(_pendingNativeRedrawLast, index);
+        _pendingNativeRedrawIndices.Add(index);
         if (_nativeRedrawFlushScheduled)
             return;
 
@@ -32,17 +30,24 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private void FlushQueuedNativeItemRedraws()
     {
         _nativeRedrawFlushScheduled = false;
-        var first = _pendingNativeRedrawFirst;
-        var last = _pendingNativeRedrawLast;
-        _pendingNativeRedrawFirst = int.MaxValue;
-        _pendingNativeRedrawLast = -1;
-
-        if (_disposed || ListHandle == 0 || _viewModel is null || last < first)
+        if (_disposed || ListHandle == 0 || _viewModel is null || _pendingNativeRedrawIndices.Count == 0)
+        {
+            _pendingNativeRedrawIndices.Clear();
             return;
+        }
 
-        // Do not filter this through our estimated viewport. SysListView32 clips the dirty rectangle
-        // itself; filtering here used to drop thumbnail redraws when icon-view origin math lagged a frame.
-        InvalidateNativeItemRange(first, last);
+        var pending = _pendingNativeRedrawIndices
+            .Where(index => index >= 0 && index < _viewModel.VirtualItems.Count)
+            .Distinct()
+            .ToArray();
+        _pendingNativeRedrawIndices.Clear();
+
+        // Keep separate dirty rectangles. BeginPaint exposes their union as the HDC clip region,
+        // and DrawVisibleItems uses RectVisible to skip cards outside that region. Collapsing all
+        // thumbnail completions to [min..max] used to turn a handful of image updates into a
+        // near-full-viewport repaint.
+        foreach (var index in pending)
+            InvalidateNativeItemRange(index, index);
     }
 
     private void ObserveNativePaintedItem(int index)

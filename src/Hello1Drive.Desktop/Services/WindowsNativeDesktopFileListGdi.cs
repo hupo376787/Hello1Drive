@@ -140,29 +140,24 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private sealed class NativeThumbnail : IDisposable
     {
-        public NativeThumbnail(Bitmap source, string versionToken, nint image, uint width, uint height, IStream stream)
+        public NativeThumbnail(string versionToken, nint image, uint width, uint height)
         {
-            Source = source;
             VersionToken = versionToken;
             Image = image;
             Width = width;
             Height = height;
-            Stream = stream;
         }
 
-        public Bitmap Source { get; }
         public string VersionToken { get; }
         public nint Image { get; }
         public uint Width { get; }
         public uint Height { get; }
-        public IStream Stream { get; }
         public LinkedListNode<string>? LruNode { get; set; }
 
         public void Dispose()
         {
             if (Image != 0)
                 GdipDisposeImage(Image);
-            ReleaseComStream(Stream);
         }
     }
 

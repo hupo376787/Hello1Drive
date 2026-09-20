@@ -107,6 +107,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint LVIS_SELECTED = 0x0002;
     private const uint LVIF_TEXT = 0x0001;
     private const uint LVIF_IMAGE = 0x0002;
+    private const uint LVIF_STATE = 0x0008;
     private const uint LVCF_FMT = 0x0001;
     private const uint LVCF_WIDTH = 0x0002;
     private const uint LVCF_TEXT = 0x0004;
@@ -145,7 +146,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const int UnitPixel = 2;
     private const int CombineModeReplace = 0;
     private const int InterpolationModeHighQualityBilinear = 6;
-    private const int MaxNativeThumbnailCache = 320;
+    private const int MaxNativeThumbnailCache = 96;
 
     private const double DetailsRowHeight = 46;
     private const double GridSpacing = 4;
