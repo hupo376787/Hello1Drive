@@ -109,8 +109,9 @@ public partial class MainViewModel : ViewModelBase
     private string _presentedFolderCacheKey = "__ROOT__";
 
     public AvaloniaList<DriveItemModel> Items { get; } = [];
-    // Shared fixed-slot collection used by every file surface. The historic MobileItems name is
-    // retained for source compatibility; desktop repeaters bind through VirtualItems.
+    // Shared virtual-slot collection used by every file surface. Mobile can reserve the full
+    // logical childCount; desktop grows only with materialized metadata so it has no blank tail.
+    // The historic MobileItems name is retained for source compatibility.
     public AvaloniaList<VirtualDriveItemSlot> MobileItems { get; } = [];
     public AvaloniaList<VirtualDriveItemSlot> VirtualItems => MobileItems;
     public bool UseNativeAndroidFileList => OperatingSystem.IsAndroid();
