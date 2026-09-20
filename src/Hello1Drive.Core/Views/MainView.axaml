@@ -6,7 +6,8 @@
   xmlns:models="using:Hello1Drive.Models"
   xmlns:vm="using:Hello1Drive.ViewModels"
   x:CompileBindings="True"
-  x:DataType="vm:MainViewModel">
+  x:DataType="vm:MainViewModel"
+  TopLevel.AutoSafeAreaPadding="False">
   <UserControl.Resources>
     <DataTemplate x:Key="DetailsFileItemTemplate" x:DataType="models:DriveItemModel">
       <Grid
@@ -1933,6 +1934,16 @@
       x:Name="BackgroundScrimLayer"
       Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
       Opacity="0.30" />
+
+    <!--
+      Background layers above intentionally span the complete edge-to-edge viewport.
+      Safe-area padding belongs only to interactive content so one wallpaper continues
+      underneath Android/iOS system bars instead of restarting below them.
+    -->
+    <Border
+      x:Name="SafeAreaContentHost"
+      Background="Transparent">
+      <Grid>
 
     <!--  Cross-platform startup splash.  -->
     <Grid
@@ -5249,5 +5260,7 @@
         </StackPanel>
       </Border>
     </Grid>
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>
