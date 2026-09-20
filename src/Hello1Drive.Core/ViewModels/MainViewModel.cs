@@ -4806,7 +4806,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 bitmap = await DecodeThumbnailBitmapAsync(
                     cachedPath,
-                    IsMobilePlatform ? 160 : 320,
+                    IsMobilePlatform ? 160 : 256,
                     cancellationToken).ConfigureAwait(false);
             }
             catch when (!cancellationToken.IsCancellationRequested)
@@ -4822,7 +4822,7 @@ public partial class MainViewModel : ViewModelBase
 
                 bitmap = await DecodeThumbnailBitmapAsync(
                     cachedPath,
-                    IsMobilePlatform ? 160 : 320,
+                    IsMobilePlatform ? 160 : 256,
                     cancellationToken).ConfigureAwait(false);
             }
 
