@@ -172,6 +172,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private readonly LinkedList<string> _thumbnailLru = [];
     private HashSet<string> _visibleNativeThumbnailIds = new(StringComparer.Ordinal);
     private int[] _cachedIconColumnLefts = [];
+    private int _cachedIconFirstBaseLeft;
     private int _cachedIconFirstTop;
     private int _cachedIconRowPitch;
     private bool _cachedIconGeometryValid;
