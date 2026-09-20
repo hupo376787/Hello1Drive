@@ -213,13 +213,27 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
 
         var lastIndex = _viewModel.VirtualItems.Count - 1;
-        if (!TryGetNativeItemViewPosition(lastIndex, out var lastPosition))
-            return;
-
         GetClientRect(ListHandle, out var client);
         var metrics = CalculateNativeGridMetrics();
         var bottomMargin = ScaleInt(GridBottomMargin);
-        var contentBottom = lastPosition.y + metrics.CellHeight + bottomMargin;
+
+        int contentBottom;
+        if (TryGetNativeItemViewPosition(lastIndex, out var lastPosition))
+        {
+            contentBottom = lastPosition.y + metrics.CellHeight + bottomMargin;
+        }
+        else
+        {
+            // Defensive fallback for transient Common Controls layout states immediately after a
+            // count/view switch. The desired row geometry is already known from our spacing.
+            var rows = Math.Max(1,
+                (_viewModel.VirtualItems.Count + metrics.Columns - 1) / metrics.Columns);
+            contentBottom =
+                rows * metrics.CellHeight +
+                Math.Max(0, rows - 1) * metrics.Gap +
+                bottomMargin;
+        }
+
         var maxOriginY = Math.Max(0, contentBottom - Math.Max(1, client.Height));
 
         var origin = GetNativeViewOrigin();
