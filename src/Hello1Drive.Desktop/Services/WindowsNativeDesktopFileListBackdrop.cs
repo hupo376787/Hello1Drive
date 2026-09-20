@@ -145,7 +145,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         try
         {
-            GdipSetInterpolationMode(graphics, InterpolationModeHighQualityBilinear);
+            GdipSetInterpolationMode(
+                graphics,
+                _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
             GdipDrawImageRectRectI(
                 graphics,
                 backdrop.Image,
