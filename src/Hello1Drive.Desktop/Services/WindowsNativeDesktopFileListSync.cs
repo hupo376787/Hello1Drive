@@ -202,14 +202,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
             _lastNativeItemCount >= 0 &&
             slots.Count >= _lastNativeItemCount)
         {
-            var oldCount = _lastNativeItemCount;
             SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
             _lastNativeItemCount = slots.Count;
             _lastSyncedCollectionVersion = _collectionVersion;
 
-            if (slots.Count > oldCount)
-                InvalidateNativeItemRange(oldCount, slots.Count - 1);
-
+            // Common Controls invalidates newly visible owner-data items itself. Do not walk every
+            // appended index just to build a giant dirty rectangle; large OneDrive page arrivals
+            // should remain O(1) on the UI thread.
             QueueVisibleThumbnails(allowNetwork: !_scrolling);
             return;
         }
