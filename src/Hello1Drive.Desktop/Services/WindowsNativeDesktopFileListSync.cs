@@ -31,6 +31,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         unchecked { _collectionVersion++; }
         _lastSyncedCollectionVersion = -1;
         _lastSyncedViewMode = -1;
+        _lastNativeItemCount = -1;
         ResetNativeIconLayout();
         if (_viewModel is not null)
         {
@@ -189,9 +190,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             ApplyNativeView(mode);
 
-            // LVS_OWNERDATA keeps only selection/focus state inside SysListView32. One message
-            // replaces the previous O(n) DELETE/INSERT loop, regardless of folder size.
+            // LVS_OWNERDATA keeps only selection/focus state inside SysListView32. When an
+            // icon-view collection shrinks, clear the virtual count once before applying the new
+            // count. This forces Common Controls to discard its old icon work extent/scroll range;
+            // selection is restored immediately below while redraw is suspended.
+            if (mode != FileViewMode.Details &&
+                _lastNativeItemCount >= 0 &&
+                slots.Count < _lastNativeItemCount)
+            {
+                SendMessage(ListHandle, LVM_SETITEMCOUNT, 0, 0);
+            }
+
             SendMessage(ListHandle, LVM_SETITEMCOUNT, (nint)slots.Count, 0);
+            _lastNativeItemCount = slots.Count;
 
             if (mode != FileViewMode.Details)
                 LayoutNativeIconItems(force: true, redrawAlreadySuspended: true);
@@ -209,6 +220,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         UpdateColumnWidth();
         ResetNativeHorizontalScroll();
+        ClampNativeIconScrollToContent();
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: true);
     }

@@ -46,6 +46,8 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var maxWidth = ScaleInt(extra ? 276d : 184d);
         var cellHeight = ScaleInt(extra ? ExtraHeight : LargeHeight);
         var gap = ScaleInt(GridSpacing);
+        // Keep the proven column-count calculation unchanged. GridOuterMargin is a visual inset,
+        // not part of native wrapping; otherwise a narrow resize can incorrectly lose a column.
         var edgePadding = Math.Max(gap, (int)Math.Round(6d * scale));
         var usableWidth = Math.Max(1, client.Width - edgePadding * 2);
 
@@ -118,6 +120,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutItemCount = itemCount;
         _lastIconLayoutMode = mode;
         ResetNativeHorizontalScroll();
+        ClampNativeIconScrollToContent();
     }
 
     private bool TryGetNativeGridCellRect(int index, out RECT rect)
@@ -144,9 +147,30 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // Hello1Drive's painted card is wider than that layout image, so recover the grid-cell
         // origin by removing the native centering offset before converting view -> client coords.
         var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
-        var left = position.x - horizontalInset - origin.x;
+
+        // Normalize against item 0 before applying our centered outer margin. Common Controls may
+        // give the first icon a theme/image-list dependent x offset; carrying that offset into the
+        // custom card is what made the first column appear glued to (or slightly outside) the edge.
+        var firstBaseLeft = 0;
+        if (TryGetNativeItemViewPosition(0, out var firstPosition))
+            firstBaseLeft = firstPosition.x - horizontalInset;
+
+        var relativeLeft = (position.x - horizontalInset) - firstBaseLeft;
+        var left = relativeLeft - origin.x;
+        var right = left + metrics.CellWidth;
         var top = position.y - origin.y;
-        rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
+
+        // LVS_EX_JUSTIFYCOLUMNS deliberately uses the whole native view. Preserve that native
+        // geometry (it gives us the correct column count), but inset only the visual outer edges
+        // so the Hello1Drive grid has symmetric breathing room without changing wrap behavior.
+        var edgeMargin = ScaleInt(GridOuterMargin);
+        var column = metrics.Columns > 0 ? index % metrics.Columns : 0;
+        if (column == 0)
+            left += edgeMargin;
+        if (column == metrics.Columns - 1)
+            right -= edgeMargin;
+
+        rect = new RECT(left, top, Math.Max(left + 1, right), top + metrics.CellHeight);
         return true;
     }
 
@@ -188,5 +212,61 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private readonly record struct NativeGridMetrics(int Columns, int CellWidth, int CellHeight, int Gap);
+    private void ClampNativeIconScrollToContent()
+    {
+        if (_clampingNativeIconScroll ||
+            _viewModel is null ||
+            _viewModel.ViewMode == FileViewMode.Details ||
+            _viewModel.VirtualItems.Count == 0 ||
+            ListHandle == 0)
+        {
+            return;
+        }
+
+        var lastIndex = _viewModel.VirtualItems.Count - 1;
+        GetClientRect(ListHandle, out var client);
+        var metrics = CalculateNativeGridMetrics();
+        var bottomMargin = ScaleInt(GridBottomMargin);
+
+        int contentBottom;
+        if (TryGetNativeItemViewPosition(lastIndex, out var lastPosition))
+        {
+            contentBottom = lastPosition.y + metrics.CellHeight + bottomMargin;
+        }
+        else
+        {
+            // Defensive fallback for transient Common Controls layout states immediately after a
+            // count/view switch. The desired row geometry is already known from our spacing.
+            var rows = Math.Max(1,
+                (_viewModel.VirtualItems.Count + metrics.Columns - 1) / metrics.Columns);
+            contentBottom =
+                rows * metrics.CellHeight +
+                Math.Max(0, rows - 1) * metrics.Gap +
+                bottomMargin;
+        }
+
+        var maxOriginY = Math.Max(0, contentBottom - Math.Max(1, client.Height));
+
+        var origin = GetNativeViewOrigin();
+        if (origin.y <= maxOriginY)
+            return;
+
+        _clampingNativeIconScroll = true;
+        try
+        {
+            // LVM_SCROLL uses a delta. Clamp any stale native icon-view extent back to the
+            // bottom of the final real card instead of allowing a viewport of empty background.
+            SendMessage(ListHandle, LVM_SCROLL_NATIVE, 0, (nint)(maxOriginY - origin.y));
+        }
+        finally
+        {
+            _clampingNativeIconScroll = false;
+        }
+    }
+
+    private readonly record struct NativeGridMetrics(
+        int Columns,
+        int CellWidth,
+        int CellHeight,
+        int Gap);
 }

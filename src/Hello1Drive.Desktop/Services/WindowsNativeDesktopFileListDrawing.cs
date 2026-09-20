@@ -32,6 +32,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
                     HandleVirtualCacheHint(lParam);
                     return 0;
                 }
+
+                if (hdr.code == LVN_ITEMCHANGED || hdr.code == LVN_ODSTATECHANGED)
+                {
+                    // OWNERDATA selection/focus state lives in SysListView32. Our icon cards are
+                    // wider than the native image rectangle, so repaint the whole client whenever
+                    // Windows changes selection state instead of accepting its smaller dirty region.
+                    if (_viewModel?.ViewMode != FileViewMode.Details)
+                        InvalidateRect(ListHandle, 0, false);
+                    return 0;
+                }
             }
         }
 
@@ -74,6 +84,24 @@ internal sealed partial class WindowsNativeDesktopFileListController
     {
         if (msg == WM_ERASEBKGND)
             return 1;
+
+        if (msg == WM_PAINT && _viewModel?.ViewMode != FileViewMode.Details)
+        {
+            // Icon view is visually owned entirely by Hello1Drive. Calling the stock painter here
+            // lets Common Controls draw its own selection/focus surface inside a smaller native
+            // item rectangle, which conflicts with our full-card background and leaves fragments
+            // after deselection. Keep SysListView32 for layout/scroll/state only.
+            var hdc = BeginPaint(hwnd, out var paint);
+            if (hdc != 0)
+            {
+                SyncBackdrop(force: false);
+                GetClientRect(hwnd, out var client);
+                PaintNativeBackdrop(hdc, client);
+                DrawVisibleItems(hdc);
+            }
+            EndPaint(hwnd, ref paint);
+            return 0;
+        }
 
         if (msg == WM_PRINTCLIENT && wParam != 0)
         {
@@ -121,12 +149,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 break;
             case WM_MOUSEWHEEL:
             case WM_VSCROLL:
+                ClampNativeIconScrollToContent();
                 BeginNativeScroll();
                 InvalidateRect(ListHandle, 0, false);
                 break;
             case WM_TIMER:
                 if ((nuint)wParam == (nuint)ScrollIdleTimerId)
                 {
+                    ClampNativeIconScrollToContent();
                     EndNativeScroll();
                     InvalidateRect(ListHandle, 0, false);
                 }
