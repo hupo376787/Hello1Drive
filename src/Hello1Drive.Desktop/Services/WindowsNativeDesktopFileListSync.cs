@@ -141,10 +141,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // Feeding real names to SysListView32 makes icon view include label widths in its native
         // extent calculation, which is what kept recreating the horizontal scrollbar.
 
-        if (e.PropertyName == nameof(VirtualDriveItemSlot.ThumbnailImage) && slot.Item is { } thumbnailItem &&
-            thumbnailItem.ThumbnailImage is null)
+        if (e.PropertyName == nameof(VirtualDriveItemSlot.ThumbnailImage) && slot.Item is { } thumbnailItem)
         {
-            RemoveThumbnail(thumbnailItem.Id);
+            if (thumbnailItem.ThumbnailImage is null)
+                RemoveThumbnail(thumbnailItem.Id);
+            else
+                QueueNativeThumbnailPreparation(thumbnailItem);
         }
 
         if (e.PropertyName is nameof(VirtualDriveItemSlot.Item)
