@@ -52,16 +52,17 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void ObserveNativePaintedItem(int index)
     {
-        if (_disposed || _viewModel is null || index < 0 || index >= _viewModel.VirtualItems.Count)
+        if (!_scrolling || _disposed || _viewModel is null ||
+            index < 0 || index >= _viewModel.VirtualItems.Count ||
+            _viewModel.VirtualItems[index].Item is null)
+        {
             return;
-        if (_viewModel.VirtualItems[index].Item is null)
-            return;
+        }
 
+        // Painted-item tracking only exists to recover the final viewport after a wheel/trackpad
+        // fling. Scheduling it for ordinary hover/selection repaints made every mouse transition
+        // enqueue another thumbnail/scroll-state pass.
         _nativePaintedIndices.Add(index);
-        if (_scrolling)
-            return;
-
-        ScheduleNativePaintedThumbnailFlush();
     }
 
     private void ScheduleNativePaintedThumbnailFlush()
