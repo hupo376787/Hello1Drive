@@ -342,6 +342,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
     [DllImport("gdiplus.dll")]
     private static extern int GdipLoadImageFromStream([MarshalAs(UnmanagedType.Interface)] IStream stream, out nint image);
 
+    [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+    private static extern int GdipLoadImageFromFile(string filename, out nint image);
+
+    [DllImport("gdiplus.dll")]
+    private static extern int GdipGetImageThumbnail(
+        nint image,
+        uint thumbWidth,
+        uint thumbHeight,
+        out nint thumbImage,
+        nint callback,
+        nint callbackData);
+
     [DllImport("gdiplus.dll")]
     private static extern int GdipDisposeImage(nint image);
 
