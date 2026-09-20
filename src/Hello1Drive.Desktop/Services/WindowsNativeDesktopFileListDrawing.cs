@@ -176,7 +176,14 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (custom.nmcd.dwDrawStage == CDDS_POSTPAINT_NATIVE)
         {
             if (_viewModel?.ViewMode != FileViewMode.Details)
+            {
+                // Custom grid cards extend beyond the native icon rectangle. A selection/hover
+                // transition therefore dirties less area than we paint. Repaint the clipped
+                // backdrop first so deselected cards cannot leave blue/hover fragments behind.
+                GetClientRect(ListHandle, out var client);
+                PaintNativeBackdrop(custom.nmcd.hdc, client);
                 DrawVisibleItems(custom.nmcd.hdc);
+            }
             return (nint)CDRF_DODEFAULT_NATIVE;
         }
 

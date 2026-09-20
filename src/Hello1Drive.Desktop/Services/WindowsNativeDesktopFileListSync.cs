@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Hello1Drive.Controls;
 using Hello1Drive.Models;
 using Hello1Drive.Services;
@@ -90,6 +91,20 @@ internal sealed partial class WindowsNativeDesktopFileListController
             foreach (var value in e.NewItems)
                 if (value is VirtualDriveItemSlot slot)
                     AttachSlot(slot);
+        }
+
+        // Owner-data ListView does not observe Avalonia collection changes by itself. Coalesce
+        // bursty AddRange/RemoveAt notifications into one UI pass; otherwise shrinking a previously
+        // preallocated placeholder tail could trigger hundreds of native relayouts.
+        if (!_collectionSyncScheduled)
+        {
+            _collectionSyncScheduled = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                _collectionSyncScheduled = false;
+                if (!_disposed)
+                    SyncPresentation(force: false);
+            }, DispatcherPriority.Background);
         }
     }
 
