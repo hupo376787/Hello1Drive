@@ -46,7 +46,9 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var maxWidth = ScaleInt(extra ? 276d : 184d);
         var cellHeight = ScaleInt(extra ? ExtraHeight : LargeHeight);
         var gap = ScaleInt(GridSpacing);
-        var edgePadding = Math.Max(gap, ScaleInt(GridOuterMargin));
+        // Keep the proven column-count calculation unchanged. GridOuterMargin is a visual inset,
+        // not part of native wrapping; otherwise a narrow resize can incorrectly lose a column.
+        var edgePadding = Math.Max(gap, (int)Math.Round(6d * scale));
         var usableWidth = Math.Max(1, client.Width - edgePadding * 2);
 
         var columns = Math.Max(1, (usableWidth + gap) / Math.Max(1, preferredWidth + gap));
@@ -64,10 +66,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ? Math.Max(1, Math.Min(maxWidth, rawCellWidth))
             : Math.Clamp(rawCellWidth, minWidth, maxWidth);
 
-        var gridWidth = columns * cellWidth + Math.Max(0, columns - 1) * gap;
-        var leftMargin = Math.Max(edgePadding, (client.Width - gridWidth) / 2);
-
-        return new NativeGridMetrics(columns, cellWidth, cellHeight, gap, leftMargin);
+        return new NativeGridMetrics(columns, cellWidth, cellHeight, gap);
     }
 
     private void LayoutNativeIconItems(bool force, bool redrawAlreadySuspended = false)
@@ -157,9 +156,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
             firstBaseLeft = firstPosition.x - horizontalInset;
 
         var relativeLeft = (position.x - horizontalInset) - firstBaseLeft;
-        var left = metrics.LeftMargin + relativeLeft - origin.x;
+        var left = relativeLeft - origin.x;
+        var right = left + metrics.CellWidth;
         var top = position.y - origin.y;
-        rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
+
+        // LVS_EX_JUSTIFYCOLUMNS deliberately uses the whole native view. Preserve that native
+        // geometry (it gives us the correct column count), but inset only the visual outer edges
+        // so the Hello1Drive grid has symmetric breathing room without changing wrap behavior.
+        var edgeMargin = ScaleInt(GridOuterMargin);
+        var column = metrics.Columns > 0 ? index % metrics.Columns : 0;
+        if (column == 0)
+            left += edgeMargin;
+        if (column == metrics.Columns - 1)
+            right -= edgeMargin;
+
+        rect = new RECT(left, top, Math.Max(left + 1, right), top + metrics.CellHeight);
         return true;
     }
 
@@ -257,6 +268,5 @@ internal sealed partial class WindowsNativeDesktopFileListController
         int Columns,
         int CellWidth,
         int CellHeight,
-        int Gap,
-        int LeftMargin);
+        int Gap);
 }
