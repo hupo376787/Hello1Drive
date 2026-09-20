@@ -46,7 +46,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         var maxWidth = ScaleInt(extra ? 276d : 184d);
         var cellHeight = ScaleInt(extra ? ExtraHeight : LargeHeight);
         var gap = ScaleInt(GridSpacing);
-        var edgePadding = Math.Max(gap, (int)Math.Round(6d * scale));
+        var edgePadding = Math.Max(gap, ScaleInt(GridOuterMargin));
         var usableWidth = Math.Max(1, client.Width - edgePadding * 2);
 
         var columns = Math.Max(1, (usableWidth + gap) / Math.Max(1, preferredWidth + gap));
@@ -64,7 +64,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
             ? Math.Max(1, Math.Min(maxWidth, rawCellWidth))
             : Math.Clamp(rawCellWidth, minWidth, maxWidth);
 
-        return new NativeGridMetrics(columns, cellWidth, cellHeight, gap);
+        var gridWidth = columns * cellWidth + Math.Max(0, columns - 1) * gap;
+        var leftMargin = Math.Max(edgePadding, (client.Width - gridWidth) / 2);
+
+        return new NativeGridMetrics(columns, cellWidth, cellHeight, gap, leftMargin);
     }
 
     private void LayoutNativeIconItems(bool force, bool redrawAlreadySuspended = false)
@@ -118,6 +121,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutItemCount = itemCount;
         _lastIconLayoutMode = mode;
         ResetNativeHorizontalScroll();
+        ClampNativeIconScrollToContent();
     }
 
     private bool TryGetNativeGridCellRect(int index, out RECT rect)
@@ -144,7 +148,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // Hello1Drive's painted card is wider than that layout image, so recover the grid-cell
         // origin by removing the native centering offset before converting view -> client coords.
         var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
-        var left = position.x - horizontalInset - origin.x;
+        var left = position.x - horizontalInset - origin.x + metrics.LeftMargin;
         var top = position.y - origin.y;
         rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
         return true;
@@ -188,5 +192,48 @@ internal sealed partial class WindowsNativeDesktopFileListController
         }
     }
 
-    private readonly record struct NativeGridMetrics(int Columns, int CellWidth, int CellHeight, int Gap);
+    private void ClampNativeIconScrollToContent()
+    {
+        if (_clampingNativeIconScroll ||
+            _viewModel is null ||
+            _viewModel.ViewMode == FileViewMode.Details ||
+            _viewModel.VirtualItems.Count == 0 ||
+            ListHandle == 0)
+        {
+            return;
+        }
+
+        var lastIndex = _viewModel.VirtualItems.Count - 1;
+        if (!TryGetNativeItemViewPosition(lastIndex, out var lastPosition))
+            return;
+
+        GetClientRect(ListHandle, out var client);
+        var metrics = CalculateNativeGridMetrics();
+        var bottomMargin = ScaleInt(GridBottomMargin);
+        var contentBottom = lastPosition.y + metrics.CellHeight + bottomMargin;
+        var maxOriginY = Math.Max(0, contentBottom - Math.Max(1, client.Height));
+
+        var origin = GetNativeViewOrigin();
+        if (origin.y <= maxOriginY)
+            return;
+
+        _clampingNativeIconScroll = true;
+        try
+        {
+            // LVM_SCROLL uses a delta. Clamp any stale native icon-view extent back to the
+            // bottom of the final real card instead of allowing a viewport of empty background.
+            SendMessage(ListHandle, LVM_SCROLL_NATIVE, 0, (nint)(maxOriginY - origin.y));
+        }
+        finally
+        {
+            _clampingNativeIconScroll = false;
+        }
+    }
+
+    private readonly record struct NativeGridMetrics(
+        int Columns,
+        int CellWidth,
+        int CellHeight,
+        int Gap,
+        int LeftMargin);
 }
