@@ -376,12 +376,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private static extern int GdipSetClipHrgn(nint graphics, nint region, int combineMode);
 
     [DllImport("gdiplus.dll")]
-    private static extern int GdipSaveGraphics(nint graphics, out uint state);
-
-    [DllImport("gdiplus.dll")]
-    private static extern int GdipRestoreGraphics(nint graphics, uint state);
-
-    [DllImport("gdiplus.dll")]
     private static extern int GdipDrawImageRectRectI(
         nint graphics,
         nint image,
