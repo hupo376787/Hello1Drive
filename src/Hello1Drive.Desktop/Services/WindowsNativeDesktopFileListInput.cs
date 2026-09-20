@@ -282,18 +282,19 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             _scrolling = true;
             _viewModel.SetDesktopListScrolling(true);
+
+            if (_hotIndex >= 0)
+            {
+                var old = _hotIndex;
+                _hotIndex = -1;
+                RedrawItem(old);
+            }
         }
 
-        if (_hotIndex >= 0)
-        {
-            var old = _hotIndex;
-            _hotIndex = -1;
-            RedrawItem(old);
-        }
-
-        SetTimer(ListHandle, (nuint)ScrollIdleTimerId, 150, 0);
-        ReportScrollPosition();
-        QueueVisibleThumbnails(allowNetwork: false);
+        // Wheel/trackpad input can arrive dozens of times per second. Do not walk visible items,
+        // touch thumbnail state, or publish scroll history for every delta; Common Controls can
+        // scroll its double buffer directly. The idle timer performs one consolidated recovery.
+        SetTimer(ListHandle, (nuint)ScrollIdleTimerId, 120, 0);
     }
 
     private void EndNativeScroll()
@@ -310,7 +311,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         ReportScrollPosition();
         QueueVisibleThumbnails(allowNetwork: true);
-        InvalidateVisibleItems();
+
+        // Painted indices are accumulated while the native double-buffer scrolls. Flush them once
+        // after motion stops instead of posting thumbnail work from every intermediate paint.
+        ScheduleNativePaintedThumbnailFlush();
     }
 
     private void UpdateHotItem(nint lParam)
