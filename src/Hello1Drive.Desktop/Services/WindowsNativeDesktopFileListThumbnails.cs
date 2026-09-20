@@ -18,7 +18,12 @@ internal sealed partial class WindowsNativeDesktopFileListController
     private readonly object _nativeThumbnailPreparationLock = new();
     private readonly HashSet<string> _nativeThumbnailPreparations = [];
     private readonly SemaphoreSlim _nativeThumbnailPreparationGate = new(2, 2);
-    private bool TryDrawThumbnail(nint hdc, DriveItemModel item, RECT dest, int radius)
+    private bool TryDrawThumbnail(
+        nint hdc,
+        nint sharedGraphics,
+        DriveItemModel item,
+        RECT dest,
+        int radius)
     {
         if (_gdiPlusToken == 0)
             return false;
@@ -38,16 +43,27 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
         TouchThumbnail(cached);
 
-        FillRectColor(hdc, dest, _palette.ThumbnailBackground);
-        if (GdipCreateFromHDC(hdc, out var graphics) != 0 || graphics == 0)
-            return false;
-
-        nint region = 0;
-        try
+        var graphics = sharedGraphics;
+        var ownsGraphics = false;
+        if (graphics == 0)
         {
+            if (GdipCreateFromHDC(hdc, out graphics) != 0 || graphics == 0)
+                return false;
+            ownsGraphics = true;
             GdipSetInterpolationMode(
                 graphics,
                 _scrolling ? InterpolationModeBilinear : InterpolationModeHighQualityBilinear);
+        }
+
+        uint graphicsState = 0;
+        var savedGraphics = GdipSaveGraphics(graphics, out graphicsState) == 0;
+        if (!savedGraphics && !ownsGraphics)
+            return false;
+
+        FillRectColor(hdc, dest, _palette.ThumbnailBackground);
+        nint region = 0;
+        try
+        {
             region = CreateRoundRectRgn(dest.left, dest.top, dest.right + 1, dest.bottom + 1, radius * 2, radius * 2);
             if (region != 0)
                 GdipSetClipHrgn(graphics, region, CombineModeReplace);
@@ -94,7 +110,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
         {
             if (region != 0)
                 DeleteObject(region);
-            GdipDeleteGraphics(graphics);
+            if (savedGraphics)
+                GdipRestoreGraphics(graphics, graphicsState);
+            if (ownsGraphics)
+                GdipDeleteGraphics(graphics);
         }
     }
 
