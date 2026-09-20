@@ -120,7 +120,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         _lastIconLayoutItemCount = itemCount;
         _lastIconLayoutMode = mode;
         ResetNativeHorizontalScroll();
-        ClampNativeIconScrollToContent();
     }
 
     private bool TryGetNativeGridCellRect(int index, out RECT rect)
@@ -209,58 +208,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         finally
         {
             Marshal.FreeHGlobal(ptr);
-        }
-    }
-
-    private void ClampNativeIconScrollToContent()
-    {
-        if (_clampingNativeIconScroll ||
-            _viewModel is null ||
-            _viewModel.ViewMode == FileViewMode.Details ||
-            _viewModel.VirtualItems.Count == 0 ||
-            ListHandle == 0)
-        {
-            return;
-        }
-
-        var lastIndex = _viewModel.VirtualItems.Count - 1;
-        GetClientRect(ListHandle, out var client);
-        var metrics = CalculateNativeGridMetrics();
-        var bottomMargin = ScaleInt(GridBottomMargin);
-
-        int contentBottom;
-        if (TryGetNativeItemViewPosition(lastIndex, out var lastPosition))
-        {
-            contentBottom = lastPosition.y + metrics.CellHeight + bottomMargin;
-        }
-        else
-        {
-            // Defensive fallback for transient Common Controls layout states immediately after a
-            // count/view switch. The desired row geometry is already known from our spacing.
-            var rows = Math.Max(1,
-                (_viewModel.VirtualItems.Count + metrics.Columns - 1) / metrics.Columns);
-            contentBottom =
-                rows * metrics.CellHeight +
-                Math.Max(0, rows - 1) * metrics.Gap +
-                bottomMargin;
-        }
-
-        var maxOriginY = Math.Max(0, contentBottom - Math.Max(1, client.Height));
-
-        var origin = GetNativeViewOrigin();
-        if (origin.y <= maxOriginY)
-            return;
-
-        _clampingNativeIconScroll = true;
-        try
-        {
-            // LVM_SCROLL uses a delta. Clamp any stale native icon-view extent back to the
-            // bottom of the final real card instead of allowing a viewport of empty background.
-            SendMessage(ListHandle, LVM_SCROLL_NATIVE, 0, (nint)(maxOriginY - origin.y));
-        }
-        finally
-        {
-            _clampingNativeIconScroll = false;
         }
     }
 
