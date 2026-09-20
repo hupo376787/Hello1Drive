@@ -239,6 +239,9 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     }
 
     [JsonIgnore]
+    public string? ThumbnailCachePath { get; set; }
+
+    [JsonIgnore]
     public Bitmap? ThumbnailImage
     {
         get => _thumbnailImage;
