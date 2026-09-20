@@ -130,7 +130,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private void HandleNativeSelectionStateNotification(nint lParam, uint code)
     {
-        if (_viewModel?.ViewMode == FileViewMode.Details || lParam == 0)
+        if (_viewModel is null || lParam == 0)
             return;
 
         if (code == LVN_ITEMCHANGED)
@@ -143,6 +143,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
                 return;
             }
 
+            if ((change.uNewState & LVIS_SELECTED) != 0)
+                _nativeSelectedIndices.Add(change.iItem);
+            else
+                _nativeSelectedIndices.Remove(change.iItem);
+
             InvalidateNativeItemRange(change.iItem, change.iItem);
             return;
         }
@@ -152,10 +157,21 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
 
         var first = Math.Max(0, Math.Min(range.iFrom, range.iTo));
-        var last = Math.Min((_viewModel?.VirtualItems.Count ?? 0) - 1,
+        var last = Math.Min(_viewModel.VirtualItems.Count - 1,
             Math.Max(range.iFrom, range.iTo));
-        if (last >= first)
-            InvalidateNativeItemRange(first, last);
+        if (last < first)
+            return;
+
+        var selected = (range.uNewState & LVIS_SELECTED) != 0;
+        for (var index = first; index <= last; index++)
+        {
+            if (selected)
+                _nativeSelectedIndices.Add(index);
+            else
+                _nativeSelectedIndices.Remove(index);
+        }
+
+        InvalidateNativeItemRange(first, last);
     }
 
     private nint HandleCustomDraw(nint lParam)
