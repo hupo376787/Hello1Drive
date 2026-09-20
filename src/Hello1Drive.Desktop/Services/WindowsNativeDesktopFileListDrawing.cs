@@ -78,15 +78,6 @@ internal sealed partial class WindowsNativeDesktopFileListController
         if (msg == WM_ERASEBKGND)
             return 1;
 
-        if (msg == WM_PRINTCLIENT && wParam != 0)
-        {
-            SyncBackdrop(force: false);
-            GetClientRect(hwnd, out var client);
-            PaintNativeBackdrop(wParam, client);
-            DrawVisibleItems(wParam, client);
-            return 1;
-        }
-
         // Mark scrolling before Common Controls processes the wheel/scrollbar message. The
         // default procedure can synchronously paint while handling the message; setting the flag
         // first prevents those intermediate paints from scheduling thumbnail/decode work.
@@ -246,7 +237,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
             for (var index = first; index <= last; index++)
             {
-                if (!TryGetNativeGridCellRect(index, out var rect))
+                if (!TryGetNativeGridCellRect(index, origin, out var rect))
                     continue;
                 if (!RectsIntersect(rect, dirtyRect))
                     continue;
