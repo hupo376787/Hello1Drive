@@ -99,6 +99,29 @@ internal sealed partial class WindowsNativeDesktopFileListController
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NMLISTVIEW
+    {
+        public NMHDR hdr;
+        public int iItem;
+        public int iSubItem;
+        public uint uNewState;
+        public uint uOldState;
+        public uint uChanged;
+        public POINT ptAction;
+        public nint lParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NMLVODSTATECHANGE
+    {
+        public NMHDR hdr;
+        public int iFrom;
+        public int iTo;
+        public uint uNewState;
+        public uint uOldState;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct NMCUSTOMDRAW
     {
         public NMHDR hdr;
@@ -260,6 +283,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     [DllImport("user32.dll")]
     private static extern int FillRect(nint hdc, ref RECT rect, nint brush);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RectVisible(nint hdc, ref RECT rect);
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
