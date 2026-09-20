@@ -148,7 +148,16 @@ internal sealed partial class WindowsNativeDesktopFileListController
         // Hello1Drive's painted card is wider than that layout image, so recover the grid-cell
         // origin by removing the native centering offset before converting view -> client coords.
         var horizontalInset = Math.Max(0, (metrics.CellWidth - iconWidth) / 2);
-        var left = position.x - horizontalInset - origin.x + metrics.LeftMargin;
+
+        // Normalize against item 0 before applying our centered outer margin. Common Controls may
+        // give the first icon a theme/image-list dependent x offset; carrying that offset into the
+        // custom card is what made the first column appear glued to (or slightly outside) the edge.
+        var firstBaseLeft = 0;
+        if (TryGetNativeItemViewPosition(0, out var firstPosition))
+            firstBaseLeft = firstPosition.x - horizontalInset;
+
+        var relativeLeft = (position.x - horizontalInset) - firstBaseLeft;
+        var left = metrics.LeftMargin + relativeLeft - origin.x;
         var top = position.y - origin.y;
         rect = new RECT(left, top, left + metrics.CellWidth, top + metrics.CellHeight);
         return true;
