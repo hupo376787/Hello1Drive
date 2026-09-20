@@ -145,6 +145,7 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const uint GMEM_MOVEABLE = 0x0002;
     private const int UnitPixel = 2;
     private const int CombineModeReplace = 0;
+    private const int InterpolationModeBilinear = 3;
     private const int InterpolationModeHighQualityBilinear = 6;
     private const int MaxNativeThumbnailCache = 96;
 
