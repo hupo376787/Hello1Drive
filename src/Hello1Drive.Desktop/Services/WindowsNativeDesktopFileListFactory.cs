@@ -151,7 +151,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private const double DetailsRowHeight = 46;
     private const double GridSpacing = 4;
     private const double GridOuterMargin = 10;
-    private const double GridBottomMargin = 10;
     private const double LargeWidth = 152;
     private const double LargeHeight = 162;
     private const double ExtraWidth = 220;
@@ -180,7 +179,6 @@ internal sealed partial class WindowsNativeDesktopFileListController : IDisposab
     private bool _synchronizingSelection;
     private bool _trackingMouseLeave;
     private bool _scrolling;
-    private bool _clampingNativeIconScroll;
     private int _hotIndex = -1;
     private int _lastNativeItemCount = -1;
     private int _lastIconLayoutColumns = -1;
