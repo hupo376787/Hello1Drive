@@ -12,10 +12,12 @@ namespace Hello1Drive.Models;
 public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
 {
     private DriveItemModel? _item;
+    private bool _showModifiedDateInIconView;
 
-    public VirtualDriveItemSlot(int index, DriveItemModel? item = null)
+    public VirtualDriveItemSlot(int index, DriveItemModel? item = null, bool showModifiedDateInIconView = false)
     {
         Index = index;
+        _showModifiedDateInIconView = showModifiedDateInIconView;
         _item = item;
         if (_item is not null)
         {
@@ -33,6 +35,19 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
     public string Id => _item?.Id ?? string.Empty;
     public string Name => _item?.Name ?? string.Empty;
     public string SizeDisplay => _item?.SizeDisplay ?? string.Empty;
+    public string ModifiedDisplay => _item?.ModifiedDisplay ?? string.Empty;
+    public string IconSecondaryDisplay
+    {
+        get
+        {
+            var size = SizeDisplay;
+            if (!_showModifiedDateInIconView || string.IsNullOrWhiteSpace(ModifiedDisplay))
+                return size;
+            if (string.IsNullOrWhiteSpace(size))
+                return ModifiedDisplay;
+            return $"{ModifiedDisplay} · {size}";
+        }
+    }
     public bool IsFolder => _item?.IsFolder == true;
     public bool IsImage => _item?.IsImage == true;
     public bool ShowMobileFileBadge => _item?.ShowMobileFileBadge == true;
@@ -43,6 +58,14 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
     public bool ShowVideoThumbnailBadge => _item?.ShowVideoThumbnailBadge == true;
     public bool IsMobileSelected => _item?.IsMobileSelected == true;
     public bool IsMobileSelectionMode => _item?.IsMobileSelectionMode == true;
+
+    public void SetIconDateVisibility(bool show)
+    {
+        if (_showModifiedDateInIconView == show)
+            return;
+        _showModifiedDateInIconView = show;
+        OnPropertyChanged(nameof(IconSecondaryDisplay));
+    }
 
     public void SetItem(DriveItemModel? item, bool compactNotification = false)
     {
@@ -86,6 +109,13 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         // remains stable and never has to be replaced in the collection.
         if (!string.IsNullOrWhiteSpace(e.PropertyName))
             OnPropertyChanged(e.PropertyName);
+
+        if (e.PropertyName is nameof(DriveItemModel.ModifiedDisplay) or nameof(DriveItemModel.SizeDisplay) or
+            nameof(DriveItemModel.LastModifiedDateTime) or nameof(DriveItemModel.Size) or nameof(DriveItemModel.ChildCount))
+        {
+            OnPropertyChanged(nameof(ModifiedDisplay));
+            OnPropertyChanged(nameof(IconSecondaryDisplay));
+        }
     }
 
     public void Dispose()
@@ -106,6 +136,8 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Id));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(SizeDisplay));
+        OnPropertyChanged(nameof(ModifiedDisplay));
+        OnPropertyChanged(nameof(IconSecondaryDisplay));
         OnPropertyChanged(nameof(IsFolder));
         OnPropertyChanged(nameof(IsImage));
         OnPropertyChanged(nameof(ShowMobileFileBadge));
