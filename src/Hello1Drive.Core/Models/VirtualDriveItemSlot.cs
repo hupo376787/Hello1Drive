@@ -36,16 +36,17 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
     public string Name => _item?.Name ?? string.Empty;
     public string SizeDisplay => _item?.SizeDisplay ?? string.Empty;
     public string ModifiedDisplay => _item?.ModifiedDisplay ?? string.Empty;
+    public string ModifiedDateDisplay => _item?.ModifiedDateDisplay ?? string.Empty;
     public string IconSecondaryDisplay
     {
         get
         {
             var size = SizeDisplay;
-            if (!_showModifiedDateInIconView || string.IsNullOrWhiteSpace(ModifiedDisplay))
+            if (!_showModifiedDateInIconView || string.IsNullOrWhiteSpace(ModifiedDateDisplay))
                 return size;
             if (string.IsNullOrWhiteSpace(size))
-                return ModifiedDisplay;
-            return $"{ModifiedDisplay} · {size}";
+                return ModifiedDateDisplay;
+            return $"{ModifiedDateDisplay} · {size}";
         }
     }
     public bool IsFolder => _item?.IsFolder == true;
@@ -114,6 +115,7 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
             nameof(DriveItemModel.LastModifiedDateTime) or nameof(DriveItemModel.Size) or nameof(DriveItemModel.ChildCount))
         {
             OnPropertyChanged(nameof(ModifiedDisplay));
+            OnPropertyChanged(nameof(ModifiedDateDisplay));
             OnPropertyChanged(nameof(IconSecondaryDisplay));
         }
     }
@@ -137,6 +139,7 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(SizeDisplay));
         OnPropertyChanged(nameof(ModifiedDisplay));
+        OnPropertyChanged(nameof(ModifiedDateDisplay));
         OnPropertyChanged(nameof(IconSecondaryDisplay));
         OnPropertyChanged(nameof(IsFolder));
         OnPropertyChanged(nameof(IsImage));
