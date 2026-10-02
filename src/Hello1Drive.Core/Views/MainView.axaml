@@ -851,7 +851,7 @@
             Grid.Row="2"
             HorizontalAlignment="Center"
             Classes="caption"
-            Text="{Binding SizeDisplay}" />
+            Text="{Binding IconSecondaryDisplay}" />
         </Grid>
       </Border>
     </DataTemplate>
@@ -1051,7 +1051,7 @@
             Grid.Row="2"
             HorizontalAlignment="Center"
             Classes="caption"
-            Text="{Binding SizeDisplay}" />
+            Text="{Binding IconSecondaryDisplay}" />
         </Grid>
       </Border>
     </DataTemplate>
@@ -4857,6 +4857,9 @@
                 <CheckBox Content="记住退出时所在目录" IsChecked="{Binding RememberLastFolder, Mode=TwoWay}" />
                 <CheckBox Content="显示悬浮上传按钮" IsChecked="{Binding ShowFloatingUploadButton, Mode=TwoWay}" />
                 <CheckBox Content="显示工具栏" IsChecked="{Binding ShowToolbar, Mode=TwoWay}" />
+                <CheckBox
+                  Content="大图标/超大图标显示文件日期"
+                  IsChecked="{Binding ShowModifiedDateInIconView, Mode=TwoWay}" />
                 <CheckBox Content="文件项背景透明" IsChecked="{Binding TransparentFileItemBackground, Mode=TwoWay}" />
                 <CheckBox Content="删除文件/文件夹前确认" IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}" />
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
