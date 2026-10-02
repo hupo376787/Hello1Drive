@@ -1197,6 +1197,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
             not nameof(VirtualDriveItemSlot.Name) and
             not nameof(VirtualDriveItemSlot.SizeDisplay) and
             not nameof(VirtualDriveItemSlot.ModifiedDisplay) and
+            not nameof(VirtualDriveItemSlot.ModifiedDateDisplay) and
             not nameof(VirtualDriveItemSlot.IconSecondaryDisplay))
             return;
 
@@ -1383,10 +1384,10 @@ internal sealed class NativeFileItemView : View
 
         ConfigureTextPaint(primary: false, Sp(11));
         _secondaryTextPaint.TextAlign = Paint.Align.Center;
-        var metadata = _showModifiedDateInIconView && !string.IsNullOrWhiteSpace(item.ModifiedDisplay)
+        var metadata = _showModifiedDateInIconView && !string.IsNullOrWhiteSpace(item.ModifiedDateDisplay)
             ? string.IsNullOrWhiteSpace(item.SizeDisplay)
-                ? item.ModifiedDisplay
-                : $"{item.ModifiedDisplay} · {item.SizeDisplay}"
+                ? item.ModifiedDateDisplay
+                : $"{item.ModifiedDateDisplay} · {item.SizeDisplay}"
             : item.SizeDisplay;
         canvas.DrawText(Ellipsize(metadata, _secondaryTextPaint, width - Dp(18)), width / 2f, nameY + Dp(18), _secondaryTextPaint);
         _textPaint.TextAlign = Paint.Align.Left;
