@@ -207,7 +207,8 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
             nameof(MainViewModel.SelectedBackgroundModeText) or
-            nameof(MainViewModel.TransparentFileItemBackground))
+            nameof(MainViewModel.TransparentFileItemBackground) or
+            nameof(MainViewModel.ShowModifiedDateInIconView))
         {
             UpdateTheme();
         }
@@ -310,7 +311,10 @@ internal sealed class IosNativeFileListController : NSObject, IDisposable
         _collection.BackgroundColor = transparent ? UIColor.Clear : background;
         _collection.Opaque = !transparent;
         _refresh.TintColor = dark ? UIColor.White : UIColor.DarkGray;
-        _source.SetPresentation(dark, transparent);
+        _source.SetPresentation(
+            dark,
+            transparent,
+            _viewModel?.ShowModifiedDateInIconView == true);
     }
 
     private bool IsDarkTheme()
@@ -586,6 +590,7 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
     private bool _scrolling;
     private bool _darkTheme;
     private bool _transparentBackground;
+    private bool _showModifiedDateInIconView;
     private bool _selectionMode;
     private HashSet<string> _selectedIds = new(StringComparer.Ordinal);
     private FileViewMode _mode = FileViewMode.Details;
@@ -630,12 +635,18 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         RebindVisible();
     }
 
-    public void SetPresentation(bool dark, bool transparentBackground)
+    public void SetPresentation(bool dark, bool transparentBackground, bool showModifiedDateInIconView)
     {
-        if (_darkTheme == dark && _transparentBackground == transparentBackground)
+        if (_darkTheme == dark &&
+            _transparentBackground == transparentBackground &&
+            _showModifiedDateInIconView == showModifiedDateInIconView)
+        {
             return;
+        }
+
         _darkTheme = dark;
         _transparentBackground = transparentBackground;
+        _showModifiedDateInIconView = showModifiedDateInIconView;
         RebindVisible();
     }
 
@@ -814,8 +825,16 @@ internal sealed class IosNativeFileCollectionSource : UICollectionViewSource
         if (item is not null)
             TryGetImage(item, out cached);
 
-        presenter.Bind(position, slot, _mode, _darkTheme, _transparentBackground, _selectionMode,
-            item is not null && _selectedIds.Contains(item.Id), cached);
+        presenter.Bind(
+            position,
+            slot,
+            _mode,
+            _darkTheme,
+            _transparentBackground,
+            _showModifiedDateInIconView,
+            _selectionMode,
+            item is not null && _selectedIds.Contains(item.Id),
+            cached);
 
         if (!_scrolling && cached is null)
             RequestThumbnailIfNeeded(presenter, position);
@@ -1117,6 +1136,7 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
         FileViewMode mode,
         bool darkTheme,
         bool transparentBackground,
+        bool showModifiedDateInIconView,
         bool selectionMode,
         bool selected,
         UIImage? image)
@@ -1131,7 +1151,15 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
         }
 
         _thumbnailRequestItemId = null;
-        _content.Bind(slot.Item, mode, darkTheme, transparentBackground, selectionMode, selected, image);
+        _content.Bind(
+            slot.Item,
+            mode,
+            darkTheme,
+            transparentBackground,
+            showModifiedDateInIconView,
+            selectionMode,
+            selected,
+            image);
     }
 
     public void MarkThumbnailRequest(string itemId) => _thumbnailRequestItemId = itemId;
@@ -1216,7 +1244,15 @@ internal sealed class IosNativeFileCellContentView : UIView
         AddSubview(_sizeLabel);
     }
 
-    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool transparentBackground, bool selectionMode, bool selected, UIImage? image)
+    public void Bind(
+        DriveItemModel? item,
+        FileViewMode mode,
+        bool darkTheme,
+        bool transparentBackground,
+        bool showModifiedDateInIconView,
+        bool selectionMode,
+        bool selected,
+        UIImage? image)
     {
         _item = item;
         _mode = mode;
@@ -1229,7 +1265,17 @@ internal sealed class IosNativeFileCellContentView : UIView
         _nameLabel.TextColor = primary;
         _sizeLabel.TextColor = secondary;
         _nameLabel.Text = item?.Name ?? string.Empty;
-        _sizeLabel.Text = item?.SizeDisplay ?? string.Empty;
+        if (item is null || mode == FileViewMode.Details || !showModifiedDateInIconView ||
+            string.IsNullOrWhiteSpace(item.ModifiedDisplay))
+        {
+            _sizeLabel.Text = item?.SizeDisplay ?? string.Empty;
+        }
+        else
+        {
+            _sizeLabel.Text = string.IsNullOrWhiteSpace(item.SizeDisplay)
+                ? item.ModifiedDisplay
+                : $"{item.ModifiedDisplay} · {item.SizeDisplay}";
+        }
 
         BackgroundColor = selected
             ? (darkTheme ? UIColor.FromRGBA(47, 128, 237, 77) : UIColor.FromRGBA(47, 128, 237, 36))
