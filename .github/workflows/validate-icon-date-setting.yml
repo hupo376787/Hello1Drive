@@ -1,0 +1,35 @@
+name: Validate icon date setting
+
+on:
+  push:
+    branches:
+      - feat/show-date-in-icon-view
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build desktop
+        shell: pwsh
+        run: dotnet build src/Hello1Drive.Desktop/Hello1Drive.Desktop.csproj -c Release
+
+  mobile-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install mobile workloads
+        run: dotnet workload install android ios
+      - name: Build Android
+        run: dotnet build src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
+      - name: Build iOS
+        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios
