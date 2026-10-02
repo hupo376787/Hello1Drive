@@ -1195,7 +1195,9 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
     {
         if (e.PropertyName is not nameof(VirtualDriveItemSlot.Item) and
             not nameof(VirtualDriveItemSlot.Name) and
-            not nameof(VirtualDriveItemSlot.SizeDisplay))
+            not nameof(VirtualDriveItemSlot.SizeDisplay) and
+            not nameof(VirtualDriveItemSlot.ModifiedDisplay) and
+            not nameof(VirtualDriveItemSlot.IconSecondaryDisplay))
             return;
 
         if (Interlocked.Exchange(ref _refreshQueued, 1) != 0)
