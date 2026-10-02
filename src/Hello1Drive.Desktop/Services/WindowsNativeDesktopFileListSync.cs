@@ -58,6 +58,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.ShowModifiedDateInIconView))
+        {
+            if (_viewModel.ViewMode is FileViewMode.LargeIcons or FileViewMode.ExtraLargeIcons)
+                InvalidateRect(ListHandle, 0, false);
+            return;
+        }
+
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText)
             or nameof(MainViewModel.TransparentFileItemBackground)
             or nameof(MainViewModel.SelectedBackgroundModeText)
@@ -167,7 +174,10 @@ internal sealed partial class WindowsNativeDesktopFileListController
             or nameof(VirtualDriveItemSlot.IsMobileSelected)
             or nameof(VirtualDriveItemSlot.IsPlaceholder)
             or nameof(VirtualDriveItemSlot.Name)
-            or nameof(VirtualDriveItemSlot.SizeDisplay))
+            or nameof(VirtualDriveItemSlot.SizeDisplay)
+            or nameof(VirtualDriveItemSlot.ModifiedDisplay)
+            or nameof(VirtualDriveItemSlot.ModifiedDateDisplay)
+            or nameof(VirtualDriveItemSlot.IconSecondaryDisplay))
         {
             QueueNativeItemRedraw(index);
         }

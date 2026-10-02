@@ -370,6 +370,7 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
 
     public string SizeDisplay => IsFolder ? $"{ChildCount} 项" : FormatBytes(Size);
     public string ModifiedDisplay => LastModifiedDateTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? string.Empty;
+    public string ModifiedDateDisplay => LastModifiedDateTime?.ToLocalTime().ToString("yyyy-MM-dd") ?? string.Empty;
 
     public string IconText => IsFolder ? "📁" : IsImage ? "🖼" : IsVideo ? "▶" : IsAudio ? "♫" : FileBadgeText;
 
@@ -488,6 +489,7 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(TypeDisplay));
         OnPropertyChanged(nameof(SizeDisplay));
         OnPropertyChanged(nameof(ModifiedDisplay));
+        OnPropertyChanged(nameof(ModifiedDateDisplay));
         OnPropertyChanged(nameof(IconText));
         OnPropertyChanged(nameof(FileBadgeText));
         OnPropertyChanged(nameof(ShowMobileFileBadge));
