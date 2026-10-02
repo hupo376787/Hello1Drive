@@ -58,6 +58,13 @@ internal sealed partial class WindowsNativeDesktopFileListController
             return;
         }
 
+        if (e.PropertyName == nameof(MainViewModel.ShowModifiedDateInIconView))
+        {
+            if (_viewModel.ViewMode is FileViewMode.LargeIcons or FileViewMode.ExtraLargeIcons)
+                InvalidateRect(ListHandle, 0, false);
+            return;
+        }
+
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText)
             or nameof(MainViewModel.TransparentFileItemBackground)
             or nameof(MainViewModel.SelectedBackgroundModeText)
