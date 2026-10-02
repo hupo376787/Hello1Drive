@@ -576,8 +576,15 @@ public partial class MainViewModel : ViewModelBase
     partial void OnShowModifiedDateInIconViewChanged(bool value)
     {
         Settings.ShowModifiedDateInIconView = value;
-        foreach (var slot in MobileItems)
-            slot.SetIconDateVisibility(value);
+
+        // Android/iOS and Windows native surfaces read the ViewModel property directly and refresh
+        // only realized items. Only the Avalonia mobile fallback needs the value copied into slots.
+        if (IsMobilePlatform && !UsesNativeMobileFileList)
+        {
+            foreach (var slot in MobileItems)
+                slot.SetIconDateVisibility(value);
+        }
+
         _ = _settingsService.SaveAsync();
     }
 
