@@ -440,11 +440,11 @@ internal sealed partial class WindowsNativeDesktopFileListController
 
     private string GetGridSecondaryText(DriveItemModel item)
     {
-        if (_viewModel?.ShowModifiedDateInIconView != true || string.IsNullOrWhiteSpace(item.ModifiedDisplay))
+        if (_viewModel?.ShowModifiedDateInIconView != true || string.IsNullOrWhiteSpace(item.ModifiedDateDisplay))
             return item.SizeDisplay;
         if (string.IsNullOrWhiteSpace(item.SizeDisplay))
-            return item.ModifiedDisplay;
-        return $"{item.ModifiedDisplay} · {item.SizeDisplay}";
+            return item.ModifiedDateDisplay;
+        return $"{item.ModifiedDateDisplay} · {item.SizeDisplay}";
     }
 
     private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)
