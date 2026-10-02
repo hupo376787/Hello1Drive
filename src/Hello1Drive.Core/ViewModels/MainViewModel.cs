@@ -171,6 +171,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool rememberLastFolder = true;
     [ObservableProperty] private bool showFloatingUploadButton = true;
     [ObservableProperty] private bool showToolbar = true;
+    [ObservableProperty] private bool showModifiedDateInIconView;
     [ObservableProperty] private bool transparentFileItemBackground;
     [ObservableProperty] private string cacheStatusText = string.Empty;
     [ObservableProperty] private bool confirmBeforeDelete = true;
@@ -569,6 +570,14 @@ public partial class MainViewModel : ViewModelBase
     partial void OnShowToolbarChanged(bool value)
     {
         Settings.ShowToolbar = value;
+        _ = _settingsService.SaveAsync();
+    }
+
+    partial void OnShowModifiedDateInIconViewChanged(bool value)
+    {
+        Settings.ShowModifiedDateInIconView = value;
+        foreach (var slot in MobileItems)
+            slot.SetIconDateVisibility(value);
         _ = _settingsService.SaveAsync();
     }
 
@@ -2427,6 +2436,7 @@ public partial class MainViewModel : ViewModelBase
         Settings.RememberLastFolder = RememberLastFolder;
         Settings.ShowFloatingUploadButton = ShowFloatingUploadButton;
         Settings.ShowToolbar = ShowToolbar;
+        Settings.ShowModifiedDateInIconView = ShowModifiedDateInIconView;
         Settings.TransparentFileItemBackground = TransparentFileItemBackground;
         Settings.ConfirmBeforeDelete = ConfirmBeforeDelete;
         Settings.UseBuiltInViewer = UseBuiltInViewer;
@@ -2794,6 +2804,7 @@ public partial class MainViewModel : ViewModelBase
         RememberLastFolder = s.RememberLastFolder;
         ShowFloatingUploadButton = s.ShowFloatingUploadButton;
         ShowToolbar = s.ShowToolbar;
+        ShowModifiedDateInIconView = s.ShowModifiedDateInIconView;
         TransparentFileItemBackground = s.TransparentFileItemBackground;
         ConfirmBeforeDelete = s.ConfirmBeforeDelete;
         UseBuiltInViewer = s.UseBuiltInViewer;
@@ -4470,7 +4481,10 @@ public partial class MainViewModel : ViewModelBase
         totalCount = Math.Max(totalCount, loadedItems.Count);
         var slots = new VirtualDriveItemSlot[totalCount];
         for (var i = 0; i < totalCount; i++)
-            slots[i] = new VirtualDriveItemSlot(i, i < loadedItems.Count ? loadedItems[i] : null);
+            slots[i] = new VirtualDriveItemSlot(
+                i,
+                i < loadedItems.Count ? loadedItems[i] : null,
+                ShowModifiedDateInIconView);
 
         ClearMobileSlots();
         MobileItems.AddRange(slots);
@@ -4486,7 +4500,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var newSlots = new List<VirtualDriveItemSlot>(required - MobileItems.Count);
             for (var i = MobileItems.Count; i < required; i++)
-                newSlots.Add(new VirtualDriveItemSlot(i));
+                newSlots.Add(new VirtualDriveItemSlot(i, showModifiedDateInIconView: ShowModifiedDateInIconView));
             MobileItems.AddRange(newSlots);
         }
 
@@ -4552,7 +4566,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var newSlots = new List<VirtualDriveItemSlot>(finalCount - MobileItems.Count);
             for (var i = MobileItems.Count; i < finalCount; i++)
-                newSlots.Add(new VirtualDriveItemSlot(i));
+                newSlots.Add(new VirtualDriveItemSlot(i, showModifiedDateInIconView: ShowModifiedDateInIconView));
             MobileItems.AddRange(newSlots);
         }
         else
