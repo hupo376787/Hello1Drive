@@ -1180,6 +1180,7 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
             not nameof(VirtualDriveItemSlot.Name) and
             not nameof(VirtualDriveItemSlot.SizeDisplay) and
             not nameof(VirtualDriveItemSlot.ModifiedDisplay) and
+            not nameof(VirtualDriveItemSlot.ModifiedDateDisplay) and
             not nameof(VirtualDriveItemSlot.IconSecondaryDisplay))
             return;
 
@@ -1268,15 +1269,15 @@ internal sealed class IosNativeFileCellContentView : UIView
         _sizeLabel.TextColor = secondary;
         _nameLabel.Text = item?.Name ?? string.Empty;
         if (item is null || mode == FileViewMode.Details || !showModifiedDateInIconView ||
-            string.IsNullOrWhiteSpace(item.ModifiedDisplay))
+            string.IsNullOrWhiteSpace(item.ModifiedDateDisplay))
         {
             _sizeLabel.Text = item?.SizeDisplay ?? string.Empty;
         }
         else
         {
             _sizeLabel.Text = string.IsNullOrWhiteSpace(item.SizeDisplay)
-                ? item.ModifiedDisplay
-                : $"{item.ModifiedDisplay} · {item.SizeDisplay}";
+                ? item.ModifiedDateDisplay
+                : $"{item.ModifiedDateDisplay} · {item.SizeDisplay}";
         }
 
         BackgroundColor = selected
