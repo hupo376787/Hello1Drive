@@ -196,7 +196,8 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         if (e.PropertyName is nameof(MainViewModel.SelectedThemeText) or
             nameof(MainViewModel.BackgroundColorText) or
             nameof(MainViewModel.SelectedBackgroundModeText) or
-            nameof(MainViewModel.TransparentFileItemBackground))
+            nameof(MainViewModel.TransparentFileItemBackground) or
+            nameof(MainViewModel.ShowModifiedDateInIconView))
         {
             UpdateTheme();
         }
@@ -293,7 +294,10 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
             : dark ? Color.Rgb(18, 18, 18) : Color.Rgb(250, 250, 250);
         _refresh.SetBackgroundColor(background);
         _recycler.SetBackgroundColor(background);
-        _adapter.SetPresentation(dark, transparent);
+        _adapter.SetPresentation(
+            dark,
+            transparent,
+            _viewModel?.ShowModifiedDateInIconView == true);
     }
 
     private bool IsDarkTheme()
@@ -617,6 +621,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     private bool _scrolling;
     private bool _darkTheme;
     private bool _transparentBackground;
+    private bool _showModifiedDateInIconView;
     private bool _selectionMode;
     private HashSet<string> _selectedIds = new(StringComparer.Ordinal);
     private int _visibleFirst;
@@ -662,12 +667,18 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         CancelThumbnailGeneration();
     }
 
-    public void SetPresentation(bool dark, bool transparentBackground)
+    public void SetPresentation(bool dark, bool transparentBackground, bool showModifiedDateInIconView)
     {
-        if (_darkTheme == dark && _transparentBackground == transparentBackground)
+        if (_darkTheme == dark &&
+            _transparentBackground == transparentBackground &&
+            _showModifiedDateInIconView == showModifiedDateInIconView)
+        {
             return;
+        }
+
         _darkTheme = dark;
         _transparentBackground = transparentBackground;
+        _showModifiedDateInIconView = showModifiedDateInIconView;
         RefreshVisible();
     }
 
@@ -757,8 +768,15 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (item is not null)
             TryGetBitmap(item, out cachedBitmap);
 
-        fileHolder.Bind(slot, Mode, _darkTheme, _transparentBackground, _selectionMode,
-            item is not null && _selectedIds.Contains(item.Id), cachedBitmap);
+        fileHolder.Bind(
+            slot,
+            Mode,
+            _darkTheme,
+            _transparentBackground,
+            _showModifiedDateInIconView,
+            _selectionMode,
+            item is not null && _selectedIds.Contains(item.Id),
+            cachedBitmap);
 
         if (!_scrolling && cachedBitmap is null)
             RequestThumbnailIfNeeded(fileHolder, position);
@@ -1124,6 +1142,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
         FileViewMode mode,
         bool darkTheme,
         bool transparentBackground,
+        bool showModifiedDateInIconView,
         bool selectionMode,
         bool selected,
         Bitmap? bitmap)
@@ -1137,7 +1156,15 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
         }
 
         _thumbnailRequestItemId = null;
-        _view.Bind(slot.Item, mode, darkTheme, transparentBackground, selectionMode, selected, bitmap);
+        _view.Bind(
+            slot.Item,
+            mode,
+            darkTheme,
+            transparentBackground,
+            showModifiedDateInIconView,
+            selectionMode,
+            selected,
+            bitmap);
     }
 
     public void MarkThumbnailRequest(string itemId) => _thumbnailRequestItemId = itemId;
@@ -1161,7 +1188,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
             _slot.PropertyChanged -= Slot_PropertyChanged;
         _slot = null;
         _thumbnailRequestItemId = null;
-        _view.Bind(null, _view.Mode, _view.DarkTheme, _view.TransparentBackground, false, false, null);
+        _view.Bind(null, _view.Mode, _view.DarkTheme, _view.TransparentBackground, false, false, false, null);
     }
 
     private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1213,6 +1240,7 @@ internal sealed class NativeFileItemView : View
     private Bitmap? _thumbnail;
     private bool _selectionMode;
     private bool _selected;
+    private bool _showModifiedDateInIconView;
 
     public NativeFileItemView(Context context) : base(context)
     {
@@ -1229,13 +1257,22 @@ internal sealed class NativeFileItemView : View
     public bool DarkTheme { get; private set; }
     public bool TransparentBackground { get; private set; }
 
-    public void Bind(DriveItemModel? item, FileViewMode mode, bool darkTheme, bool transparentBackground, bool selectionMode, bool selected, Bitmap? thumbnail)
+    public void Bind(
+        DriveItemModel? item,
+        FileViewMode mode,
+        bool darkTheme,
+        bool transparentBackground,
+        bool showModifiedDateInIconView,
+        bool selectionMode,
+        bool selected,
+        Bitmap? thumbnail)
     {
         var modeChanged = Mode != mode;
         _item = item;
         Mode = mode;
         DarkTheme = darkTheme;
         TransparentBackground = transparentBackground;
+        _showModifiedDateInIconView = showModifiedDateInIconView;
         _selectionMode = selectionMode;
         _selected = selected;
         _thumbnail = thumbnail;
@@ -1344,7 +1381,12 @@ internal sealed class NativeFileItemView : View
 
         ConfigureTextPaint(primary: false, Sp(11));
         _secondaryTextPaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText(Ellipsize(item.SizeDisplay, _secondaryTextPaint, width - Dp(18)), width / 2f, nameY + Dp(18), _secondaryTextPaint);
+        var metadata = _showModifiedDateInIconView && !string.IsNullOrWhiteSpace(item.ModifiedDisplay)
+            ? string.IsNullOrWhiteSpace(item.SizeDisplay)
+                ? item.ModifiedDisplay
+                : $"{item.ModifiedDisplay} · {item.SizeDisplay}"
+            : item.SizeDisplay;
+        canvas.DrawText(Ellipsize(metadata, _secondaryTextPaint, width - Dp(18)), width / 2f, nameY + Dp(18), _secondaryTextPaint);
         _textPaint.TextAlign = Paint.Align.Left;
         _secondaryTextPaint.TextAlign = Paint.Align.Left;
     }
