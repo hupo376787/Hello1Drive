@@ -433,9 +433,18 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DrawTextLine(hdc, item.Name,
             new RECT(rect.left + padding, nameY, rect.right - padding, nameY + captionHeight),
             _mediumFont, palette.Text, center: true);
-        DrawTextLine(hdc, item.SizeDisplay,
+        DrawTextLine(hdc, GetGridSecondaryText(item),
             new RECT(rect.left + padding, rect.bottom - padding - sizeHeight, rect.right - padding, rect.bottom - padding),
             _smallFont, palette.MutedText, center: true);
+    }
+
+    private string GetGridSecondaryText(DriveItemModel item)
+    {
+        if (_viewModel?.ShowModifiedDateInIconView != true || string.IsNullOrWhiteSpace(item.ModifiedDisplay))
+            return item.SizeDisplay;
+        if (string.IsNullOrWhiteSpace(item.SizeDisplay))
+            return item.ModifiedDisplay;
+        return $"{item.ModifiedDisplay} · {item.SizeDisplay}";
     }
 
     private void DrawArtwork(nint hdc, DriveItemModel item, RECT dest, int radius, Palette palette)
