@@ -3589,6 +3589,53 @@ public partial class MainViewModel : ViewModelBase
             (_allItems.Count > 0 || MobileItems.Count > 0 || _folderCache.ContainsKey(cacheKey));
         if (refreshesPresentedFolder)
         {
+            if (IsMobilePlatform && reason == FolderNavigationReason.Sort)
+            {
+                // Sorting is an explicit user action. Keeping the old list visible until every
+                // Graph page has been re-enumerated makes a large mobile folder look as though
+                // sorting did nothing. Present the server-sorted first page immediately, preserve
+                // the known logical childCount as placeholders, then stream the remaining pages
+                // into those fixed slots in server order.
+                var logicalTotal = Math.Max(
+                    _currentFolderTotalItemCount ?? _allItems.Count,
+                    page.Items.Count);
+
+                ApplyFolderItemsIncrementally(page.Items, logicalTotal, cacheKey);
+
+                _nextChildrenLink = page.NextLink;
+                HasMoreItems = page.HasMore;
+                if (_folderCache.TryGetValue(cacheKey, out var sortedEntry))
+                {
+                    sortedEntry.NextLink = page.NextLink;
+                    sortedEntry.TotalItemCount = logicalTotal;
+                    sortedEntry.LastAccessUtc = DateTimeOffset.UtcNow;
+                    sortedEntry.OrderBy = orderBy;
+                }
+
+                if (sizeSortFallback)
+                    StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
+                else
+                    StatusText = page.HasMore
+                        ? $"{logicalTotal} 个项目 · 正在同步"
+                        : $"{logicalTotal} 个项目";
+
+                // Fire FolderLoaded after the first sorted page is in place. Mobile hosts treat
+                // Sort as a fresh presentation and return to the top instead of restoring the
+                // previous viewport anchor in the newly ordered list.
+                FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
+
+                var sortedSeed = _allItems.ToArray();
+                StartFolderMetadataSync(
+                    folderId,
+                    cacheKey,
+                    navigationVersion,
+                    orderBy,
+                    seedItems: sortedSeed,
+                    nextLink: page.NextLink,
+                    streamIntoPlaceholders: true);
+                return;
+            }
+
             if (sizeSortFallback)
                 StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
             else
@@ -4169,6 +4216,7 @@ public partial class MainViewModel : ViewModelBase
             entry.TotalItemCount = finalCount;
             entry.LastAccessUtc = DateTimeOffset.UtcNow;
             entry.LastValidatedUtc = DateTimeOffset.UtcNow;
+            entry.OrderBy = GetGraphOrderBy();
         }
         else
         {
@@ -5373,7 +5421,7 @@ public partial class MainViewModel : ViewModelBase
         public int? TotalItemCount { get; set; }
         public DateTimeOffset LastAccessUtc { get; set; }
         public DateTimeOffset LastValidatedUtc { get; set; }
-        public string? OrderBy { get; }
+        public string? OrderBy { get; set; }
     }
 
     private sealed class ObjectComparer : IComparer<object?>
