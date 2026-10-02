@@ -32,4 +32,4 @@ jobs:
       - name: Build Android
         run: dotnet build src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0
       - name: Build iOS
-        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios
+        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios26.0
