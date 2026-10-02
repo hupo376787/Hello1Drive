@@ -176,6 +176,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             or nameof(VirtualDriveItemSlot.Name)
             or nameof(VirtualDriveItemSlot.SizeDisplay)
             or nameof(VirtualDriveItemSlot.ModifiedDisplay)
+            or nameof(VirtualDriveItemSlot.ModifiedDateDisplay)
             or nameof(VirtualDriveItemSlot.IconSecondaryDisplay))
         {
             QueueNativeItemRedraw(index);
