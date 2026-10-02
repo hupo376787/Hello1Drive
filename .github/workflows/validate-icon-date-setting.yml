@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: validate-icon-date-setting
+  cancel-in-progress: true
+
 jobs:
   windows-build:
     runs-on: windows-latest
