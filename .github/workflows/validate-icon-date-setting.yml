@@ -23,4 +23,4 @@ jobs:
       - name: Install iOS workload
         run: dotnet workload install ios
       - name: Build iOS without signing
-        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios26.0 -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false -p:CodesignRequireProvisioningProfile=false
+        run: dotnet build src/Hello1Drive.iOS/Hello1Drive.iOS.csproj -c Release -f net10.0-ios26.0 -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false -p:CodesignRequireProvisioningProfile=false -p:AppIcon=
