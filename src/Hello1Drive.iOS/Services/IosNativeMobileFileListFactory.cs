@@ -1150,6 +1150,7 @@ internal sealed class IosNativeFileCellPresenter : IDisposable
     {
         if (e.PropertyName is not nameof(VirtualDriveItemSlot.Item) and
             not nameof(VirtualDriveItemSlot.Name) and
+            not nameof(VirtualDriveItemSlot.IconMetadataDisplay) and
             not nameof(VirtualDriveItemSlot.SizeDisplay))
             return;
 
@@ -1229,7 +1230,11 @@ internal sealed class IosNativeFileCellContentView : UIView
         _nameLabel.TextColor = primary;
         _sizeLabel.TextColor = secondary;
         _nameLabel.Text = item?.Name ?? string.Empty;
-        _sizeLabel.Text = item?.SizeDisplay ?? string.Empty;
+        _sizeLabel.AdjustsFontSizeToFitWidth = mode is FileViewMode.LargeIcons or FileViewMode.ExtraLargeIcons;
+        _sizeLabel.MinimumScaleFactor = 0.75f;
+        _sizeLabel.Text = (mode is FileViewMode.LargeIcons or FileViewMode.ExtraLargeIcons
+            ? item?.IconMetadataDisplay
+            : item?.SizeDisplay) ?? string.Empty;
 
         BackgroundColor = selected
             ? (darkTheme ? UIColor.FromRGBA(47, 128, 237, 77) : UIColor.FromRGBA(47, 128, 237, 36))
@@ -1651,3 +1656,4 @@ internal sealed class IosNativeFileVisualView : UIView
             height);
     }
 }
+

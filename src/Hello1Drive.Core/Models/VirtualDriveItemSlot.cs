@@ -33,6 +33,7 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
     public string Id => _item?.Id ?? string.Empty;
     public string Name => _item?.Name ?? string.Empty;
     public string SizeDisplay => _item?.SizeDisplay ?? string.Empty;
+    public string IconMetadataDisplay => _item?.IconMetadataDisplay ?? string.Empty;
     public bool IsFolder => _item?.IsFolder == true;
     public bool IsImage => _item?.IsImage == true;
     public bool ShowMobileFileBadge => _item?.ShowMobileFileBadge == true;
@@ -106,6 +107,7 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Id));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(SizeDisplay));
+        OnPropertyChanged(nameof(IconMetadataDisplay));
         OnPropertyChanged(nameof(IsFolder));
         OnPropertyChanged(nameof(IsImage));
         OnPropertyChanged(nameof(ShowMobileFileBadge));
@@ -118,3 +120,4 @@ public sealed class VirtualDriveItemSlot : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsMobileSelectionMode));
     }
 }
+

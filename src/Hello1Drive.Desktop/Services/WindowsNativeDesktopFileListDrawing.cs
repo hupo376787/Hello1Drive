@@ -433,7 +433,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DrawTextLine(hdc, item.Name,
             new RECT(rect.left + padding, nameY, rect.right - padding, nameY + captionHeight),
             _mediumFont, palette.Text, center: true);
-        DrawTextLine(hdc, item.SizeDisplay,
+        DrawTextLine(hdc, item.IconMetadataDisplay,
             new RECT(rect.left + padding, rect.bottom - padding - sizeHeight, rect.right - padding, rect.bottom - padding),
             _smallFont, palette.MutedText, center: true);
     }
@@ -456,3 +456,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
         DrawFileBadge(hdc, item, dest, radius, palette);
     }
 }
+

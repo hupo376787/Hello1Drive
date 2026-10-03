@@ -223,6 +223,7 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
     private Bitmap? _galleryImage;
     private bool _isMobileSelected;
     private bool _isMobileSelectionMode;
+    private bool _showFileDateInIcons;
 
     [JsonIgnore]
     public bool IsMobileSelected
@@ -368,6 +369,23 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         }
     }
 
+    [JsonIgnore]
+    public bool ShowFileDateInIcons
+    {
+        get => _showFileDateInIcons;
+        set
+        {
+            if (SetProperty(ref _showFileDateInIcons, value))
+                OnPropertyChanged(nameof(IconMetadataDisplay));
+        }
+    }
+
+    // Icon captions use a compact local modification date; details retain their size column.
+    [JsonIgnore]
+    public string IconMetadataDisplay => ShowFileDateInIcons && !IsFolder && LastModifiedDateTime is { } modified
+        ? $"{modified.ToLocalTime():yyyy-MM-dd} / {SizeDisplay}"
+        : SizeDisplay;
+
     public string SizeDisplay => IsFolder ? $"{ChildCount} 项" : FormatBytes(Size);
     public string ModifiedDisplay => LastModifiedDateTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? string.Empty;
 
@@ -488,6 +506,7 @@ public sealed class DriveItemModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(TypeDisplay));
         OnPropertyChanged(nameof(SizeDisplay));
         OnPropertyChanged(nameof(ModifiedDisplay));
+        OnPropertyChanged(nameof(IconMetadataDisplay));
         OnPropertyChanged(nameof(IconText));
         OnPropertyChanged(nameof(FileBadgeText));
         OnPropertyChanged(nameof(ShowMobileFileBadge));

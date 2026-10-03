@@ -95,6 +95,7 @@ public sealed class AppSettings
     public List<RememberedFolderViewMode> FolderViewModes { get; set; } = [];
     public bool ShowFloatingUploadButton { get; set; } = true;
     public bool ShowToolbar { get; set; } = true;
+    public bool ShowFileDateInIcons { get; set; }
     public bool TransparentFileItemBackground { get; set; }
     public bool ConfirmBeforeDelete { get; set; } = true;
     public bool UseBuiltInViewer { get; set; } = true;
@@ -118,3 +119,4 @@ public sealed class AppSettings
     public double FloatingUploadX { get; set; } = 0.94;
     public double FloatingUploadY { get; set; } = 0.90;
 }
+

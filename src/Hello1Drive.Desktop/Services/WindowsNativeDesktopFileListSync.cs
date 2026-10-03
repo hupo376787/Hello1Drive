@@ -167,6 +167,7 @@ internal sealed partial class WindowsNativeDesktopFileListController
             or nameof(VirtualDriveItemSlot.IsMobileSelected)
             or nameof(VirtualDriveItemSlot.IsPlaceholder)
             or nameof(VirtualDriveItemSlot.Name)
+            or nameof(VirtualDriveItemSlot.IconMetadataDisplay)
             or nameof(VirtualDriveItemSlot.SizeDisplay))
         {
             QueueNativeItemRedraw(index);
@@ -359,3 +360,4 @@ internal sealed partial class WindowsNativeDesktopFileListController
     }
 
 }
+

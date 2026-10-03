@@ -412,6 +412,7 @@ public sealed class DesktopVirtualFileSurface : Control
                 or nameof(VirtualDriveItemSlot.IsMobileSelected)
                 or nameof(VirtualDriveItemSlot.IsPlaceholder)
                 or nameof(VirtualDriveItemSlot.Name)
+                or nameof(VirtualDriveItemSlot.IconMetadataDisplay)
                 or nameof(VirtualDriveItemSlot.SizeDisplay)))
         {
             InvalidateVisual();
@@ -581,7 +582,7 @@ public sealed class DesktopVirtualFileSurface : Control
         DrawSingleLine(context, item.Name,
             new Rect(rect.X + padding, nameY, Math.Max(1, rect.Width - padding * 2), captionHeight),
             extra ? 13.5 : 13, Foreground, TextAlignment.Center, FontWeight.Medium);
-        DrawSingleLine(context, item.SizeDisplay,
+        DrawSingleLine(context, item.IconMetadataDisplay,
             new Rect(rect.X + padding, rect.Bottom - padding - sizeHeight, Math.Max(1, rect.Width - padding * 2), sizeHeight),
             11.5, MutedForeground, TextAlignment.Center);
     }
@@ -771,3 +772,4 @@ public sealed class DesktopVirtualFileSurface : Control
     private static bool Intersects(Rect a, Rect b) =>
         a.Left < b.Right && a.Right > b.Left && a.Top < b.Bottom && a.Bottom > b.Top;
 }
+

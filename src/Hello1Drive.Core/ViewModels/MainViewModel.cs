@@ -171,6 +171,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool rememberLastFolder = true;
     [ObservableProperty] private bool showFloatingUploadButton = true;
     [ObservableProperty] private bool showToolbar = true;
+    [ObservableProperty] private bool showFileDateInIcons;
     [ObservableProperty] private bool transparentFileItemBackground;
     [ObservableProperty] private string cacheStatusText = string.Empty;
     [ObservableProperty] private bool confirmBeforeDelete = true;
@@ -569,6 +570,14 @@ public partial class MainViewModel : ViewModelBase
     partial void OnShowToolbarChanged(bool value)
     {
         Settings.ShowToolbar = value;
+        _ = _settingsService.SaveAsync();
+    }
+
+    partial void OnShowFileDateInIconsChanged(bool value)
+    {
+        Settings.ShowFileDateInIcons = value;
+        foreach (var item in _allItems)
+            item.ShowFileDateInIcons = value;
         _ = _settingsService.SaveAsync();
     }
 
@@ -2427,6 +2436,7 @@ public partial class MainViewModel : ViewModelBase
         Settings.RememberLastFolder = RememberLastFolder;
         Settings.ShowFloatingUploadButton = ShowFloatingUploadButton;
         Settings.ShowToolbar = ShowToolbar;
+        Settings.ShowFileDateInIcons = ShowFileDateInIcons;
         Settings.TransparentFileItemBackground = TransparentFileItemBackground;
         Settings.ConfirmBeforeDelete = ConfirmBeforeDelete;
         Settings.UseBuiltInViewer = UseBuiltInViewer;
@@ -2794,6 +2804,7 @@ public partial class MainViewModel : ViewModelBase
         RememberLastFolder = s.RememberLastFolder;
         ShowFloatingUploadButton = s.ShowFloatingUploadButton;
         ShowToolbar = s.ShowToolbar;
+        ShowFileDateInIcons = s.ShowFileDateInIcons;
         TransparentFileItemBackground = s.TransparentFileItemBackground;
         ConfirmBeforeDelete = s.ConfirmBeforeDelete;
         UseBuiltInViewer = s.UseBuiltInViewer;
@@ -4016,6 +4027,7 @@ public partial class MainViewModel : ViewModelBase
         {
             if (!string.IsNullOrWhiteSpace(pageItem.Id))
                 _currentItemIds.Add(pageItem.Id);
+            pageItem.ShowFileDateInIcons = ShowFileDateInIcons;
             pageItem.IsMobileSelectionMode = MobileSelectionModeActive;
         }
 
@@ -4179,6 +4191,7 @@ public partial class MainViewModel : ViewModelBase
         _currentItemIds.Clear();
         foreach (var item in merged)
         {
+            item.ShowFileDateInIcons = ShowFileDateInIcons;
             if (!string.IsNullOrWhiteSpace(item.Id))
                 _currentItemIds.Add(item.Id);
         }
@@ -4467,6 +4480,8 @@ public partial class MainViewModel : ViewModelBase
 
     private void RebuildMobileSlots(int totalCount, IReadOnlyList<DriveItemModel> loadedItems)
     {
+        foreach (var item in loadedItems)
+            item.ShowFileDateInIcons = ShowFileDateInIcons;
         totalCount = Math.Max(totalCount, loadedItems.Count);
         var slots = new VirtualDriveItemSlot[totalCount];
         for (var i = 0; i < totalCount; i++)
@@ -5440,3 +5455,4 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 }
+

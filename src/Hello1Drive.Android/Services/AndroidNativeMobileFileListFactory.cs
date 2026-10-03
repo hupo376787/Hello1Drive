@@ -1168,6 +1168,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
     {
         if (e.PropertyName is not nameof(VirtualDriveItemSlot.Item) and
             not nameof(VirtualDriveItemSlot.Name) and
+            not nameof(VirtualDriveItemSlot.IconMetadataDisplay) and
             not nameof(VirtualDriveItemSlot.SizeDisplay))
             return;
 
@@ -1344,7 +1345,12 @@ internal sealed class NativeFileItemView : View
 
         ConfigureTextPaint(primary: false, Sp(11));
         _secondaryTextPaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText(Ellipsize(item.SizeDisplay, _secondaryTextPaint, width - Dp(18)), width / 2f, nameY + Dp(18), _secondaryTextPaint);
+        var metadata = item.IconMetadataDisplay;
+        var metadataWidth = Math.Max(1, width - Dp(18));
+        var measuredWidth = _secondaryTextPaint.MeasureText(metadata);
+        if (item.ShowFileDateInIcons && measuredWidth > metadataWidth)
+            _secondaryTextPaint.TextSize = Math.Max(Sp(8), _secondaryTextPaint.TextSize * metadataWidth / measuredWidth);
+        canvas.DrawText(Ellipsize(metadata, _secondaryTextPaint, metadataWidth), width / 2f, nameY + Dp(18), _secondaryTextPaint);
         _textPaint.TextAlign = Paint.Align.Left;
         _secondaryTextPaint.TextAlign = Paint.Align.Left;
     }
@@ -1724,3 +1730,4 @@ internal sealed class NativeFileItemView : View
                 metrics);
     }
 }
+
