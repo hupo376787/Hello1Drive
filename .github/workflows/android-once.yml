@@ -1,0 +1,39 @@
+name: One-off Android APK
+on:
+  push:
+    branches:
+      - 'build/android-apk-20261008-6d864790'
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android workload
+        run: dotnet workload install android
+      - name: Build signed APK
+        run: dotnet publish src/Hello1Drive.Android/Hello1Drive.Android.csproj -c Release -f net10.0-android36.0 -p:AndroidPackageFormats=apk -p:AndroidKeyStore=false
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apk-output
+          APK="$(find src/Hello1Drive.Android/bin/Release/net10.0-android36.0/publish -maxdepth 1 -type f -name '*-Signed.apk' -print -quit)"
+          test -n "$APK"
+          cp "$APK" apk-output/Hello1Drive-20261008.apk
+          sha256sum apk-output/Hello1Drive-20261008.apk > apk-output/Hello1Drive-20261008.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hello1Drive-Android-APK
+          path: apk-output/*
+          if-no-files-found: error
+          retention-days: 7
