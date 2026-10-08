@@ -92,6 +92,8 @@ public sealed class PersistedTransferRecord
     public TransferState State { get; set; }
     public string Message { get; set; } = string.Empty;
     public TransferResumeInfo? ResumeInfo { get; set; }
+    public string? LocalFileUri { get; set; }
+    public string? LocalFileBookmark { get; set; }
 
     public static PersistedTransferRecord FromModel(TransferItemModel item) => new()
     {
@@ -102,6 +104,8 @@ public sealed class PersistedTransferRecord
         Progress = item.Progress,
         State = item.State,
         Message = item.Message,
-        ResumeInfo = item.ResumeInfo
+        ResumeInfo = item.ResumeInfo,
+        LocalFileUri = item.LocalFileUri,
+        LocalFileBookmark = item.LocalFileBookmark
     };
 }

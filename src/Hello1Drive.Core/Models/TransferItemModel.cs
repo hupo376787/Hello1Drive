@@ -51,6 +51,11 @@ public partial class TransferItemModel : ObservableObject
     // pending upload/download/cache job to be reconstructed after the next launch.
     public TransferResumeInfo? ResumeInfo { get; set; }
 
+    // The preview location survives completion, when ResumeInfo is deliberately cleared.
+    // Keep a storage bookmark as well as the URI for Android/iOS document providers.
+    public string? LocalFileUri { get; set; }
+    public string? LocalFileBookmark { get; set; }
+
     // Runtime-only retry callback. It intentionally isn't serialized and is owned by
     // the current application session.
     [JsonIgnore]

@@ -3813,6 +3813,7 @@
                 Padding="10"
                 Background="Transparent"
                 CornerRadius="8"
+                Tapped="TransferItem_Tapped"
                 ToolTip.Tip="{Binding Message}">
                 <Grid
                   ColumnDefinitions="*,Auto,Auto"
@@ -5268,4 +5269,5 @@
     </Border>
   </Grid>
 </UserControl>
+
 

@@ -794,6 +794,7 @@ public partial class MainView : UserControl
             if (file is null)
                 throw new IOException("无法重新打开待上传的本地文件");
 
+            await RememberTransferLocalFileAsync(vm, transfer, file);
             await using var stream = await file.OpenReadAsync();
             await vm.UploadFileAsync(resume.TargetFolderId, transfer.FileName, stream, refreshWhenDone: true, transfer);
         };
@@ -815,6 +816,7 @@ public partial class MainView : UserControl
                 throw new IOException("无法重新打开下载保存位置");
 
             var item = await AppServices.OneDrive.GetItemMetadataAsync(resume.OneDriveItemId);
+            await RememberTransferLocalFileAsync(vm, transfer, target);
             await using var stream = await target.OpenWriteAsync();
             if (stream.CanSeek)
                 stream.SetLength(0);
@@ -854,6 +856,7 @@ public partial class MainView : UserControl
                 if (target is null)
                     throw new IOException($"无法创建文件：{fileName}");
 
+                await RememberTransferLocalFileAsync(vm, transfer, target);
                 await using var stream = await target.OpenWriteAsync();
                 if (stream.CanSeek)
                     stream.SetLength(0);
@@ -3565,6 +3568,7 @@ if (visibleItems.Count > 0)
                 TargetFolderId = targetFolderId,
                 StorageBookmark = bookmark
             });
+            vm.SetTransferLocalFile(transfer, file.Path.ToString(), bookmark);
             jobs.Add(new UploadJob(file, transfer));
         }
 
@@ -3586,6 +3590,7 @@ if (visibleItems.Count > 0)
     {
         try
         {
+            await RememberTransferLocalFileAsync(vm, transfer, file);
             await using var stream = await file.OpenReadAsync();
             await vm.UploadFileAsync(targetFolderId, file.Name, stream, refreshWhenDone, transfer);
             if (transfer.State == TransferState.Completed)
@@ -4104,6 +4109,7 @@ if (visibleItems.Count > 0)
             if (target is null)
                 throw new IOException($"无法创建文件：{fileName}");
 
+            await RememberTransferLocalFileAsync(vm, plan.Transfer, target);
             await using var stream = await target.OpenWriteAsync();
             if (stream.CanSeek)
                 stream.SetLength(0);
@@ -4135,6 +4141,7 @@ if (visibleItems.Count > 0)
     {
         try
         {
+            await RememberTransferLocalFileAsync(vm, transfer, target);
             await using var stream = await target.OpenWriteAsync();
             if (stream.CanSeek)
                 stream.SetLength(0);

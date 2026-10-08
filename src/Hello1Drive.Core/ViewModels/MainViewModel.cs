@@ -1141,6 +1141,13 @@ public partial class MainViewModel : ViewModelBase
         return transfer;
     }
 
+    public void SetTransferLocalFile(TransferItemModel transfer, string? fileUri, string? bookmark)
+    {
+        transfer.LocalFileUri = fileUri;
+        transfer.LocalFileBookmark = bookmark;
+        ScheduleTransferPersistence();
+    }
+
     public void SetTransferResumeInfo(TransferItemModel transfer, TransferResumeInfo resumeInfo)
     {
         transfer.ResumeInfo = resumeInfo;
@@ -1194,6 +1201,8 @@ public partial class MainViewModel : ViewModelBase
                     }
                     : record.Message ?? string.Empty,
                 ResumeInfo = record.ResumeInfo,
+                LocalFileUri = record.LocalFileUri,
+                LocalFileBookmark = record.LocalFileBookmark,
                 IsRestoredFromDisk = wasPending
             };
             AttachTransfer(transfer);
@@ -1282,12 +1291,9 @@ public partial class MainViewModel : ViewModelBase
             transfer.Message = "已上传";
             transfer.ResumeInfo = null;
             StatusText = $"上传完成：{fileName}";
-            if (refreshWhenDone)
-            {
-                InvalidateFolderCache(targetFolderId);
-                if (FolderCacheKey(CurrentFolderId) == FolderCacheKey(targetFolderId))
-                    await LoadCurrentFolderAsync(forceRemote: true);
-            }
+            InvalidateFolderCache(targetFolderId);
+            if (refreshWhenDone && FolderCacheKey(CurrentFolderId) == FolderCacheKey(targetFolderId))
+                await RefreshCurrentFolderAsync();
         }
         catch (Exception ex)
         {
@@ -2636,7 +2642,7 @@ public partial class MainViewModel : ViewModelBase
                 transfer.Message = "正在缓存";
             });
 
-            await _fileCache.GetOrDownloadAsync(item, _oneDrive, cancellationToken, progress);
+            transfer.LocalFileUri = new Uri(await _fileCache.GetOrDownloadAsync(item, _oneDrive, cancellationToken, progress)).AbsoluteUri;
 
             if (item.SupportsThumbnail)
             {
@@ -3600,67 +3606,44 @@ public partial class MainViewModel : ViewModelBase
             (_allItems.Count > 0 || MobileItems.Count > 0 || _folderCache.ContainsKey(cacheKey));
         if (refreshesPresentedFolder)
         {
-            if (IsMobilePlatform && reason == FolderNavigationReason.Sort)
+            // Explicit refresh, upload refresh and sort all publish page one immediately.
+            // A large folder must not keep an obsolete scene until every continuation succeeds.
+            var logicalTotal = page.HasMore
+                ? Math.Max(_currentFolderTotalItemCount ?? _allItems.Count, page.Items.Count)
+                : page.Items.Count;
+
+            ApplyFolderItemsIncrementally(page.Items, logicalTotal, cacheKey, preserveViewport: false);
+
+            _nextChildrenLink = page.NextLink;
+            HasMoreItems = page.HasMore;
+            if (_folderCache.TryGetValue(cacheKey, out var sortedEntry))
             {
-                // Sorting is an explicit user action. Keeping the old list visible until every
-                // Graph page has been re-enumerated makes a large mobile folder look as though
-                // sorting did nothing. Present the server-sorted first page immediately, preserve
-                // the known logical childCount as placeholders, then stream the remaining pages
-                // into those fixed slots in server order.
-                var logicalTotal = Math.Max(
-                    _currentFolderTotalItemCount ?? _allItems.Count,
-                    page.Items.Count);
-
-                ApplyFolderItemsIncrementally(page.Items, logicalTotal, cacheKey);
-
-                _nextChildrenLink = page.NextLink;
-                HasMoreItems = page.HasMore;
-                if (_folderCache.TryGetValue(cacheKey, out var sortedEntry))
-                {
-                    sortedEntry.NextLink = page.NextLink;
-                    sortedEntry.TotalItemCount = logicalTotal;
-                    sortedEntry.LastAccessUtc = DateTimeOffset.UtcNow;
-                    sortedEntry.OrderBy = orderBy;
-                }
-
-                if (sizeSortFallback)
-                    StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
-                else
-                    StatusText = page.HasMore
-                        ? $"{logicalTotal} 个项目 · 正在同步"
-                        : $"{logicalTotal} 个项目";
-
-                // Fire FolderLoaded after the first sorted page is in place. Mobile hosts treat
-                // Sort as a fresh presentation and return to the top instead of restoring the
-                // previous viewport anchor in the newly ordered list.
-                FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
-
-                var sortedSeed = _allItems.ToArray();
-                StartFolderMetadataSync(
-                    folderId,
-                    cacheKey,
-                    navigationVersion,
-                    orderBy,
-                    seedItems: sortedSeed,
-                    nextLink: page.NextLink,
-                    streamIntoPlaceholders: true);
-                return;
+                sortedEntry.NextLink = page.NextLink;
+                sortedEntry.TotalItemCount = logicalTotal;
+                sortedEntry.LastAccessUtc = DateTimeOffset.UtcNow;
+                sortedEntry.OrderBy = orderBy;
             }
 
             if (sizeSortFallback)
                 StatusText = "当前账户后端不支持大小排序，已对当前文件夹改用系统默认顺序";
             else
-                StatusText = $"{(_currentFolderTotalItemCount ?? _allItems.Count)} 个项目 · 正在同步";
+                StatusText = page.HasMore
+                    ? $"{logicalTotal} 个项目 · 正在同步"
+                    : $"{logicalTotal} 个项目";
 
+            // The new first page is already visible. Sort returns to the top; refresh
+            // keeps the current slot position without restoring an old item ID over new files.
             FolderLoaded?.Invoke(this, new FolderNavigationEventArgs(reason, cacheKey));
+
+            var presentedSeed = _allItems.ToArray();
             StartFolderMetadataSync(
                 folderId,
                 cacheKey,
                 navigationVersion,
                 orderBy,
-                seedItems: page.Items,
+                seedItems: presentedSeed,
                 nextLink: page.NextLink,
-                streamIntoPlaceholders: false);
+                streamIntoPlaceholders: true);
             return;
         }
 
@@ -3788,6 +3771,7 @@ public partial class MainViewModel : ViewModelBase
     {
         var token = request.Token;
         var collected = seedItems?.ToList() ?? [];
+        var seenIds = new HashSet<string>(collected.Where(item => !string.IsNullOrWhiteSpace(item.Id)).Select(item => item.Id), StringComparer.Ordinal);
         var cursor = nextLink;
         // Page one is already on-screen for a normal first visit. Hold page-two-and-later UI
         // mutation briefly so a user can start scrolling immediately without competing with a
@@ -3816,6 +3800,9 @@ public partial class MainViewModel : ViewModelBase
                 }
 
                 collected.AddRange(first.Items);
+                foreach (var item in first.Items)
+                    if (!string.IsNullOrWhiteSpace(item.Id))
+                        seenIds.Add(item.Id);
                 cursor = first.NextLink;
 
                 // This path is used when the local index knows the folder/count but has not yet
@@ -3830,7 +3817,8 @@ public partial class MainViewModel : ViewModelBase
                         await WaitForMetadataPresentationWindowAsync(presentationNotBeforeUtc, token).ConfigureAwait(false);
                         await Dispatcher.UIThread.InvokeAsync(() =>
                         {
-                            if (navigationVersion != _folderNavigationVersion ||
+                            if (token.IsCancellationRequested || !ReferenceEquals(_folderMetadataSyncCts, request) ||
+                                navigationVersion != _folderNavigationVersion ||
                                 FolderCacheKey(CurrentFolderId) != cacheKey)
                             {
                                 firstApplied = true;
@@ -3846,6 +3834,7 @@ public partial class MainViewModel : ViewModelBase
                         }, DispatcherPriority.Background);
                     }
 
+                    token.ThrowIfCancellationRequested();
                     if (firstApplied && !await PresentBackgroundSlotsInSlicesAsync(
                             0, first.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
                         return;
@@ -3862,7 +3851,10 @@ public partial class MainViewModel : ViewModelBase
                     CurrentFolderPageSize,
                     token,
                     orderBy: null).ConfigureAwait(false);
-                collected.AddRange(page.Items);
+                var pageItems = page.Items.Where(item => string.IsNullOrWhiteSpace(item.Id) || seenIds.Add(item.Id)).ToArray();
+                foreach (var duplicate in page.Items.Except(pageItems))
+                    duplicate.Dispose();
+                collected.AddRange(pageItems);
                 cursor = page.NextLink;
 
                 if (streamIntoPlaceholders)
@@ -3873,7 +3865,8 @@ public partial class MainViewModel : ViewModelBase
                         await WaitForMetadataPresentationWindowAsync(presentationNotBeforeUtc, token).ConfigureAwait(false);
                         await Dispatcher.UIThread.InvokeAsync(() =>
                         {
-                            if (navigationVersion != _folderNavigationVersion ||
+                            if (token.IsCancellationRequested || !ReferenceEquals(_folderMetadataSyncCts, request) ||
+                                navigationVersion != _folderNavigationVersion ||
                                 FolderCacheKey(CurrentFolderId) != cacheKey)
                             {
                                 applied = true; // Navigation changed; stop retrying this old page.
@@ -3884,13 +3877,14 @@ public partial class MainViewModel : ViewModelBase
                                 (!IsMobilePlatform && _desktopListScrolling))
                                 return;
 
-                            AppendBackgroundMetadataPageHeader(offset, page.Items, page.NextLink);
+                            AppendBackgroundMetadataPageHeader(offset, pageItems, page.NextLink);
                             applied = true;
                         }, DispatcherPriority.Background);
                     }
 
+                    token.ThrowIfCancellationRequested();
                     if (applied && !await PresentBackgroundSlotsInSlicesAsync(
-                            offset, page.Items, cacheKey, navigationVersion, token).ConfigureAwait(false))
+                            offset, pageItems, cacheKey, navigationVersion, token).ConfigureAwait(false))
                         return;
                 }
             }
@@ -3924,7 +3918,8 @@ public partial class MainViewModel : ViewModelBase
 
                 var reconcileResult = await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (navigationVersion != _folderNavigationVersion ||
+                    if (token.IsCancellationRequested || !ReferenceEquals(_folderMetadataSyncCts, request) ||
+                        navigationVersion != _folderNavigationVersion ||
                         FolderCacheKey(CurrentFolderId) != cacheKey)
                         return -1;
 
@@ -3943,7 +3938,9 @@ public partial class MainViewModel : ViewModelBase
                         // Mobile keeps the fixed logical childCount extent. Desktop owner-data
                         // ListView should expose only materialized rows so it never leaves a long
                         // blank scroll tail while background metadata is still arriving.
-                        ReconcileMobileSlotCount(IsMobilePlatform ? finalCount : _allItems.Count);
+                        ReconcileMobileSlotCount(string.IsNullOrWhiteSpace(SearchText)
+                            ? (IsMobilePlatform ? finalCount : _allItems.Count)
+                            : _allItems.Count(item => item.Name.Contains(SearchText.Trim(), StringComparison.CurrentCultureIgnoreCase)));
                         if (_folderCache.TryGetValue(cacheKey, out var entry))
                         {
                             entry.NextLink = null;
@@ -3999,8 +3996,20 @@ public partial class MainViewModel : ViewModelBase
         }
         catch
         {
-            // Local metadata is already usable. Background cloud synchronization must never turn
-            // an offline / temporarily throttled folder into an error surface.
+            // Keep the freshly displayed page usable, but do not claim an incomplete
+            // enumeration has finished. Its cached continuation can resume on the next visit.
+            if (streamIntoPlaceholders)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (token.IsCancellationRequested || !ReferenceEquals(_folderMetadataSyncCts, request) ||
+                        navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                        return;
+                    if (_folderCache.TryGetValue(cacheKey, out var entry))
+                        entry.LastValidatedUtc = DateTimeOffset.MinValue;
+                    StatusText = $"{_allItems.Count} / {_currentFolderTotalItemCount ?? _allItems.Count} 个项目 · 同步未完成，请刷新重试";
+                }, DispatcherPriority.Background);
+            }
         }
         finally
         {
@@ -4055,7 +4064,7 @@ public partial class MainViewModel : ViewModelBase
         {
             return await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                if (cancellationToken.IsCancellationRequested || navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
                     return false;
 
                 // Search-mode header presentation already rebuilt the filtered slot collection.
@@ -4088,7 +4097,7 @@ public partial class MainViewModel : ViewModelBase
 
                 var result = await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
+                    if (cancellationToken.IsCancellationRequested || navigationVersion != _folderNavigationVersion || FolderCacheKey(CurrentFolderId) != cacheKey)
                         return -1;
                     if (_desktopListScrolling)
                         return 0;
@@ -4111,7 +4120,8 @@ public partial class MainViewModel : ViewModelBase
     private void ApplyFolderItemsIncrementally(
         IReadOnlyList<DriveItemModel> incomingItems,
         int finalCount,
-        string cacheKey)
+        string cacheKey,
+        bool preserveViewport = true)
     {
         // Normalize duplicate Graph rows before comparing order. IDs are the stable OneDrive identity.
         var incoming = new List<DriveItemModel>(incomingItems.Count);
@@ -4143,7 +4153,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Capture the top visible item before any position changes. MainView restores the same ID
         // after reconciliation, so inserts/deletes above the viewport do not move what the user sees.
-        if (orderChanged)
+        if (orderChanged && preserveViewport)
             FolderItemsIncrementalChanging?.Invoke(this, EventArgs.Empty);
 
         var existingById = new Dictionary<string, DriveItemModel>(StringComparer.Ordinal);
@@ -4291,7 +4301,7 @@ public partial class MainViewModel : ViewModelBase
         if (IsAuthenticated && !string.IsNullOrWhiteSpace(CurrentAccountId))
             ScheduleStartupSnapshotSave();
 
-        if (orderChanged)
+        if (orderChanged && preserveViewport)
             FolderItemsIncrementalChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -5455,4 +5465,5 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 }
+
 
