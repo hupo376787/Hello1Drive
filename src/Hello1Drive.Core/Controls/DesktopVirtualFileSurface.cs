@@ -1,8 +1,7 @@
-using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -13,12 +12,11 @@ using Hello1Drive.ViewModels;
 namespace Hello1Drive.Controls;
 
 /// <summary>
-/// One retained-mode desktop surface for an entire OneDrive folder. It owns no per-file controls:
-/// the ScrollViewer only moves this single visual, while Render draws the current viewport plus one
-/// viewport of look-behind/look-ahead. Small wheel movements therefore reuse the already-generated
-/// scene instead of asking an ItemsRepeater to realize/recycle/layout another batch of controls.
+/// A virtualized desktop ItemsControl. The panel realizes and recycles only viewport-sized
+/// batches of lightweight item controls, each with its own retained drawing and slot subscription.
+/// All view modes share one Avalonia scroll/selection path, including while overlays are open.
 /// </summary>
-public sealed class DesktopVirtualFileSurface : Control
+public sealed partial class DesktopVirtualFileSurface : ItemsControl
 {
     public static readonly StyledProperty<FileViewMode> ModeProperty =
         AvaloniaProperty.Register<DesktopVirtualFileSurface, FileViewMode>(nameof(Mode), FileViewMode.Details);
@@ -68,18 +66,14 @@ public sealed class DesktopVirtualFileSurface : Control
     private static readonly IBrush LightFileBody = new SolidColorBrush(Color.Parse("#F8FAFC"));
     private static readonly IBrush DarkFileBody = new SolidColorBrush(Color.Parse("#2A2C32"));
 
-    private readonly HashSet<VirtualDriveItemSlot> _subscribedSlots = [];
-    private readonly List<VirtualDriveItemSlot> _subscriptionScratch = [];
     private readonly Dictionary<TextCacheKey, FormattedText> _textCache = [];
     private readonly Queue<TextCacheKey> _textCacheOrder = [];
     private MainViewModel? _vm;
     private double _viewportOffsetY;
     private double _viewportHeight = 800;
     private double _viewportWidth = 800;
-    private int _renderFrom = -1;
-    private int _renderTo = -1;
+    private DesktopFileVirtualizingPanel? _virtualizingPanel;
     private int _hoverIndex = -1;
-    private bool _deferredHoverVisualRefresh;
 
     private readonly record struct TextCacheKey(
         string Text,
@@ -99,26 +93,25 @@ public sealed class DesktopVirtualFileSurface : Control
 
     public DesktopVirtualFileSurface()
     {
-        ClipToBounds = false;
         Focusable = true;
+        ItemsPanel = new FuncTemplate<Panel?>(() =>
+        {
+            _virtualizingPanel = new DesktopFileVirtualizingPanel(this);
+            return _virtualizingPanel;
+        });
         DataContextChanged += (_, _) => AttachViewModel(DataContext as MainViewModel);
         AttachedToVisualTree += (_, _) => AttachViewModel(DataContext as MainViewModel);
         DetachedFromVisualTree += (_, _) => AttachViewModel(null);
         PointerMoved += Surface_PointerMoved;
-        PointerExited += (_, _) =>
-        {
-            if (_hoverIndex < 0)
-                return;
-            _hoverIndex = -1;
-            _deferredHoverVisualRefresh = false;
-            InvalidateVisual();
-        };
+        PointerExited += (_, _) => SetHoverIndex(-1);
         ActualThemeVariantChanged += (_, _) =>
         {
             ClearTextCache();
-            InvalidateVisual();
+            InvalidateRealizedItems();
         };
     }
+
+    protected override Type StyleKeyOverride => typeof(ItemsControl);
 
     public FileViewMode Mode
     {
@@ -145,60 +138,25 @@ public sealed class DesktopVirtualFileSurface : Control
         _ => DetailsRowHeight
     };
 
-    public void ClearHoverForScroll()
+    public void ClearHoverForScroll() => SetHoverIndex(-1);
+
+    public void RefreshLayout()
     {
-        if (_hoverIndex < 0)
-            return;
-
-        // Do not redraw the three-viewport retained scene on the first wheel/scrollbar frame.
-        // The old hover highlight can remain in the already-recorded scene for the short active
-        // scroll interval; it is cleared once input becomes idle or by an unrelated scene rebuild.
-        _hoverIndex = -1;
-        _deferredHoverVisualRefresh = true;
-    }
-
-    public void FlushDeferredHoverVisual()
-    {
-        if (!_deferredHoverVisualRefresh)
-            return;
-
-        _deferredHoverVisualRefresh = false;
-        InvalidateVisual();
+        InvalidateMeasure();
+        _virtualizingPanel?.RefreshViewport(force: true);
     }
 
     public void SetViewport(double offsetY, double viewportHeight, double viewportWidth)
     {
-        var offset = Math.Max(0, offsetY);
-        var height = Math.Max(1, viewportHeight);
         var width = Math.Max(1, viewportWidth);
-        var offsetChanged = Math.Abs(offset - _viewportOffsetY) > 0.01;
-        var heightChanged = Math.Abs(height - _viewportHeight) > 0.5;
         var widthChanged = Math.Abs(width - _viewportWidth) > 0.5;
-        if (!offsetChanged && !heightChanged && !widthChanged)
-            return;
-
-        _viewportOffsetY = offset;
-        _viewportHeight = height;
+        var heightChanged = Math.Abs(Math.Max(1, viewportHeight) - _viewportHeight) > 0.5;
+        _viewportOffsetY = Math.Max(0, offsetY);
+        _viewportHeight = Math.Max(1, viewportHeight);
         _viewportWidth = width;
-
         if (widthChanged)
-        {
-            _renderFrom = -1;
-            _renderTo = -1;
             ClearTextCache();
-            InvalidateMeasure();
-            InvalidateVisual();
-            return;
-        }
-
-        var (first, last) = CalculateVisibleRange(_viewportOffsetY, _viewportHeight, width);
-        if (first < 0)
-            return;
-
-        // The retained scene already contains one viewport before/after the visible viewport.
-        // As long as the user remains inside that window, scrolling is a pure compositor move.
-        if (_renderFrom < 0 || first < _renderFrom || last > _renderTo)
-            InvalidateVisual();
+        _virtualizingPanel?.RefreshViewport(force: widthChanged || heightChanged);
     }
 
     public (int First, int Last) GetVisibleRange() =>
@@ -218,26 +176,26 @@ public sealed class DesktopVirtualFileSurface : Control
     public DriveItemModel? GetItemAt(Point point)
     {
         var index = GetIndexAt(point);
-        if (_vm is null || index < 0 || index >= _vm.VirtualItems.Count)
+        if (index < 0 || index >= ItemsView.Count)
             return null;
-        return _vm.VirtualItems[index].Item;
+        return (ItemsView[index] as VirtualDriveItemSlot)?.Item;
     }
 
     public IReadOnlyList<DriveItemModel> GetItemsIntersecting(Rect rect)
     {
-        if (_vm is null || _vm.VirtualItems.Count == 0 || rect.Width <= 0 || rect.Height <= 0)
+        if (ItemsView.Count == 0 || rect.Width <= 0 || rect.Height <= 0)
             return Array.Empty<DriveItemModel>();
 
         var result = new List<DriveItemModel>();
         var width = LayoutWidth;
         if (Mode == FileViewMode.Details)
         {
-            var first = Math.Clamp((int)Math.Floor(rect.Top / DetailsRowHeight), 0, _vm.VirtualItems.Count - 1);
-            var last = Math.Clamp((int)Math.Floor(Math.Max(rect.Top, rect.Bottom - 0.01) / DetailsRowHeight), 0, _vm.VirtualItems.Count - 1);
+            var first = Math.Clamp((int)Math.Floor(rect.Top / DetailsRowHeight), 0, ItemsView.Count - 1);
+            var last = Math.Clamp((int)Math.Floor(Math.Max(rect.Top, rect.Bottom - 0.01) / DetailsRowHeight), 0, ItemsView.Count - 1);
             for (var i = first; i <= last; i++)
             {
                 var itemRect = new Rect(0, i * DetailsRowHeight, width, DetailsRowHeight);
-                if (Intersects(rect, itemRect) && _vm.VirtualItems[i].Item is { } item)
+                if (Intersects(rect, itemRect) && ItemsView[i] is VirtualDriveItemSlot { Item: { } item })
                     result.Add(item);
             }
             return result;
@@ -252,193 +210,76 @@ public sealed class DesktopVirtualFileSurface : Control
             for (var col = 0; col < metrics.Columns; col++)
             {
                 var index = row * metrics.Columns + col;
-                if (index >= _vm.VirtualItems.Count)
+                if (index >= ItemsView.Count)
                     return result;
                 var itemRect = GetGridItemRect(index, metrics);
-                if (Intersects(rect, itemRect) && _vm.VirtualItems[index].Item is { } item)
+                if (Intersects(rect, itemRect) && ItemsView[index] is VirtualDriveItemSlot { Item: { } item })
                     result.Add(item);
             }
         }
         return result;
     }
 
-    protected override Size MeasureOverride(Size availableSize)
+    internal void RenderItem(DrawingContext context, VirtualDriveItemSlot slot, int index, Size size)
     {
-        var width = double.IsFinite(availableSize.Width) && availableSize.Width > 1
-            ? availableSize.Width
-            : Math.Max(1, _viewportWidth);
-        var count = _vm?.VirtualItems.Count ?? 0;
-        return new Size(width, CalculateExtentHeight(count, width));
-    }
-
-    public override void Render(DrawingContext context)
-    {
-        base.Render(context);
-        // Any real scene rebuild has already removed a hover that was deferred at scroll start.
-        _deferredHoverVisualRefresh = false;
-        var vm = _vm;
-        if (vm is null || vm.VirtualItems.Count == 0 || Bounds.Width <= 1 || Bounds.Height <= 0)
-        {
-            _renderFrom = -1;
-            _renderTo = -1;
-            return;
-        }
-
-        var width = LayoutWidth;
-        var (visibleFirst, visibleLast) = CalculateVisibleRange(_viewportOffsetY, _viewportHeight, width);
-        if (visibleFirst < 0)
-            return;
-
-        var visibleCount = Math.Max(1, visibleLast - visibleFirst + 1);
-        var from = Math.Max(0, visibleFirst - visibleCount);
-        var to = Math.Min(vm.VirtualItems.Count - 1, visibleLast + visibleCount);
-
-        // Grid ranges should begin/end on complete rows so a sideways edge never appears halfway
-        // through the retained scene when the next wheel frame is compositor-only.
-        if (Mode != FileViewMode.Details)
-        {
-            var metrics = GetGridMetrics(width);
-            from = Math.Max(0, (from / metrics.Columns) * metrics.Columns);
-            to = Math.Min(vm.VirtualItems.Count - 1,
-                (((to / metrics.Columns) + 1) * metrics.Columns) - 1);
-        }
-
-        _renderFrom = from;
-        _renderTo = to;
-        UpdateSlotSubscriptions(from, to);
-
+        // Geometry is local to each recycled item; a hover or completed thumbnail redraws one item.
         if (Mode == FileViewMode.Details)
-        {
-            for (var index = from; index <= to; index++)
-                DrawDetailsSlot(context, vm.VirtualItems[index], index, width);
-            return;
-        }
-
-        var grid = GetGridMetrics(width);
-        for (var index = from; index <= to; index++)
-            DrawGridSlot(context, vm.VirtualItems[index], index, grid);
+            DrawDetailsSlot(context, slot, index, size.Width);
+        else
+            DrawGridSlot(context, slot, index, new Rect(size));
     }
 
     private void AttachViewModel(MainViewModel? vm)
     {
         if (ReferenceEquals(_vm, vm))
             return;
-
-        if (_vm is not null)
-            _vm.VirtualItems.CollectionChanged -= VirtualItems_CollectionChanged;
-        DetachAllSlots();
-
         _vm = vm;
-        if (_vm is not null)
-            _vm.VirtualItems.CollectionChanged += VirtualItems_CollectionChanged;
-
-        _renderFrom = -1;
-        _renderTo = -1;
+        _hoverIndex = -1;
         ClearTextCache();
-        InvalidateMeasure();
-        InvalidateVisual();
+        RefreshLayout();
     }
 
-    private void VirtualItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
-        if (e.OldItems is not null)
-            foreach (var value in e.OldItems)
-                if (value is VirtualDriveItemSlot slot)
-                    DetachSlot(slot);
-
-        if (e.Action == NotifyCollectionChangedAction.Reset)
-            DetachAllSlots();
-
-        _renderFrom = -1;
-        _renderTo = -1;
-        InvalidateMeasure();
-        InvalidateVisual();
-    }
-
-    private void UpdateSlotSubscriptions(int from, int to)
-    {
-        var vm = _vm;
-        if (vm is null || from < 0 || to < from || vm.VirtualItems.Count == 0)
+        base.OnPropertyChanged(change);
+        if (change.Property == ModeProperty)
         {
-            DetachAllSlots();
+            SetHoverIndex(-1);
+            ClearTextCache();
+            RefreshLayout();
+        }
+        if (change.Property == ModeProperty || change.Property == ItemBackgroundProperty ||
+            change.Property == SelectionBrushProperty)
+            InvalidateRealizedItems();
+    }
+
+    private void InvalidateRealizedItems() => _virtualizingPanel?.InvalidateRealizedItems();
+
+    private void SetHoverIndex(int index)
+    {
+        if (_hoverIndex == index)
             return;
-        }
-
-        _subscriptionScratch.Clear();
-        foreach (var slot in _subscribedSlots)
-        {
-            if (slot.Index < from || slot.Index > to)
-                _subscriptionScratch.Add(slot);
-        }
-        foreach (var slot in _subscriptionScratch)
-            DetachSlot(slot);
-
-        var last = Math.Min(to, vm.VirtualItems.Count - 1);
-        for (var index = Math.Max(0, from); index <= last; index++)
-            AttachSlot(vm.VirtualItems[index]);
-    }
-
-    private void AttachSlot(VirtualDriveItemSlot slot)
-    {
-        if (_subscribedSlots.Add(slot))
-            slot.PropertyChanged += Slot_PropertyChanged;
-    }
-
-    private void DetachSlot(VirtualDriveItemSlot slot)
-    {
-        if (_subscribedSlots.Remove(slot))
-            slot.PropertyChanged -= Slot_PropertyChanged;
-    }
-
-    private void DetachAllSlots()
-    {
-        foreach (var slot in _subscribedSlots)
-            slot.PropertyChanged -= Slot_PropertyChanged;
-        _subscribedSlots.Clear();
-        _subscriptionScratch.Clear();
-    }
-
-    private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (sender is not VirtualDriveItemSlot slot)
-            return;
-
-        // Desktop slot hydration uses one Item notification. Thumbnail/selection changes are
-        // forwarded by the slot later. Redraw only when the affected slot exists in the retained
-        // three-viewport scene; off-screen changes are picked up naturally on the next scene build.
-        if (slot.Index >= _renderFrom && slot.Index <= _renderTo &&
-            (e.PropertyName is nameof(VirtualDriveItemSlot.Item)
-                or nameof(VirtualDriveItemSlot.ThumbnailImage)
-                or nameof(VirtualDriveItemSlot.IsMobileSelected)
-                or nameof(VirtualDriveItemSlot.IsPlaceholder)
-                or nameof(VirtualDriveItemSlot.Name)
-                or nameof(VirtualDriveItemSlot.IconMetadataDisplay)
-                or nameof(VirtualDriveItemSlot.SizeDisplay)))
-        {
-            InvalidateVisual();
-        }
+        var old = _hoverIndex;
+        _hoverIndex = index;
+        _virtualizingPanel?.InvalidateItem(old);
+        _virtualizingPanel?.InvalidateItem(index);
     }
 
     private void Surface_PointerMoved(object? sender, PointerEventArgs e)
     {
-        var index = GetIndexAt(e.GetPosition(this));
-        if (index == _hoverIndex)
-            return;
-        _hoverIndex = index;
-        _deferredHoverVisualRefresh = false;
-        InvalidateVisual();
+        if (_vm?.IsDesktopListScrolling != true)
+            SetHoverIndex(GetIndexAt(e.GetPosition(this)));
     }
 
-    private int GetIndexAt(Point point)
+    public int GetIndexAt(Point point)
     {
-        var vm = _vm;
-        if (vm is null || point.X < 0 || point.Y < 0 || point.X > LayoutWidth)
+        if (point.X < 0 || point.Y < 0 || point.X > LayoutWidth)
             return -1;
 
         if (Mode == FileViewMode.Details)
         {
             var detailIndex = (int)Math.Floor(point.Y / DetailsRowHeight);
-            return detailIndex >= 0 && detailIndex < vm.VirtualItems.Count ? detailIndex : -1;
+            return detailIndex >= 0 && detailIndex < ItemsView.Count ? detailIndex : -1;
         }
 
         var metrics = GetGridMetrics(LayoutWidth);
@@ -455,12 +296,12 @@ public sealed class DesktopVirtualFileSurface : Control
             return -1;
 
         var index = row * metrics.Columns + col;
-        return index >= 0 && index < vm.VirtualItems.Count ? index : -1;
+        return index >= 0 && index < ItemsView.Count ? index : -1;
     }
 
     private (int First, int Last) CalculateVisibleRange(double offset, double viewportHeight, double width)
     {
-        var count = _vm?.VirtualItems.Count ?? 0;
+        var count = ItemsView.Count;
         if (count <= 0)
             return (-1, -1);
 
@@ -503,7 +344,7 @@ public sealed class DesktopVirtualFileSurface : Control
         var height = extra ? ExtraHeight : LargeHeight;
         var usable = Math.Max(minWidth, width);
         var columns = Math.Max(1, (int)Math.Floor((usable + GridSpacing) / (preferred + GridSpacing)));
-        var cellWidth = Math.Clamp((usable - GridSpacing * (columns - 1)) / columns, minWidth, maxWidth);
+        var cellWidth = Math.Min(Math.Max(1, width), Math.Clamp((usable - GridSpacing * (columns - 1)) / columns, minWidth, maxWidth));
         return new GridMetrics(columns, cellWidth, height);
     }
 
@@ -519,15 +360,21 @@ public sealed class DesktopVirtualFileSurface : Control
     }
 
     private double LayoutWidth => Math.Max(1, Bounds.Width > 1 ? Bounds.Width : _viewportWidth);
+    public int Columns => Mode == FileViewMode.Details ? 1 : GetGridMetrics(LayoutWidth).Columns;
+
+    public Rect GetItemBounds(int index) => Mode == FileViewMode.Details
+        ? new Rect(0, Math.Max(0, index) * DetailsRowHeight, LayoutWidth, DetailsRowHeight)
+        : GetGridItemRect(Math.Max(0, index), GetGridMetrics(LayoutWidth));
+
     private bool IsDark => ActualThemeVariant == ThemeVariant.Dark;
-    private IBrush Foreground => IsDark ? DarkText : LightText;
+    private IBrush ItemForeground => IsDark ? DarkText : LightText;
     private IBrush MutedForeground => IsDark ? DarkMutedText : LightMutedText;
 
     private readonly record struct GridMetrics(int Columns, double Width, double Height);
 
     private void DrawDetailsSlot(DrawingContext context, VirtualDriveItemSlot slot, int index, double width)
     {
-        var rect = new Rect(0, index * DetailsRowHeight, width, DetailsRowHeight);
+        var rect = new Rect(0, 0, width, DetailsRowHeight);
         DrawSurface(context, rect, slot, index, 5);
         if (slot.Item is not { } item)
         {
@@ -549,15 +396,14 @@ public sealed class DesktopVirtualFileSurface : Control
         var sizeX = typeX + typeWidth + gap;
         var modifiedX = sizeX + sizeWidth + gap;
 
-        DrawSingleLine(context, item.Name, new Rect(nameX, rect.Y, nameWidth, rect.Height), 13, Foreground);
+        DrawSingleLine(context, item.Name, new Rect(nameX, rect.Y, nameWidth, rect.Height), 13, ItemForeground);
         DrawSingleLine(context, item.TypeDisplay, new Rect(typeX, rect.Y, typeWidth, rect.Height), 12.5, MutedForeground);
         DrawSingleLine(context, item.SizeDisplay, new Rect(sizeX, rect.Y, sizeWidth, rect.Height), 12.5, MutedForeground);
         DrawSingleLine(context, item.ModifiedDisplay, new Rect(modifiedX, rect.Y, Math.Max(0, width - modifiedX - 4), rect.Height), 12.5, MutedForeground);
     }
 
-    private void DrawGridSlot(DrawingContext context, VirtualDriveItemSlot slot, int index, GridMetrics metrics)
+    private void DrawGridSlot(DrawingContext context, VirtualDriveItemSlot slot, int index, Rect rect)
     {
-        var rect = GetGridItemRect(index, metrics);
         var extra = Mode == FileViewMode.ExtraLargeIcons;
         var radius = extra ? 12d : 10d;
         DrawSurface(context, rect, slot, index, radius);
@@ -581,7 +427,7 @@ public sealed class DesktopVirtualFileSurface : Control
         var nameY = rect.Bottom - padding - sizeHeight - captionHeight - 2;
         DrawSingleLine(context, item.Name,
             new Rect(rect.X + padding, nameY, Math.Max(1, rect.Width - padding * 2), captionHeight),
-            extra ? 13.5 : 13, Foreground, TextAlignment.Center, FontWeight.Medium);
+            extra ? 13.5 : 13, ItemForeground, TextAlignment.Center, FontWeight.Medium);
         DrawSingleLine(context, item.IconMetadataDisplay,
             new Rect(rect.X + padding, rect.Bottom - padding - sizeHeight, Math.Max(1, rect.Width - padding * 2), sizeHeight),
             11.5, MutedForeground, TextAlignment.Center);

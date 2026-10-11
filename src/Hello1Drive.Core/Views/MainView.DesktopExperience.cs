@@ -4,21 +4,15 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Threading;
-using Hello1Drive.Controls;
-using Hello1Drive.Models;
-using Hello1Drive.Services;
 using Hello1Drive.ViewModels;
 
 namespace Hello1Drive.Views;
 
 public partial class MainView
 {
-    private NativeDesktopFileListHost? _nativeDesktopFileListHost;
-    private MainViewModel? _nativeDesktopHookedViewModel;
+    private string? _desktopFocusedItemId;
     private Button? _desktopPreviewPreviousButton;
     private Button? _desktopPreviewNextButton;
-    private bool _desktopOverlayVisibilityHooksAttached;
 
     private void InitializeDesktopExperienceEnhancements()
     {
@@ -27,10 +21,6 @@ public partial class MainView
 
         EqualizeDesktopDestinationButtons();
         InitializeDesktopPreviewEdgeNavigation();
-        InitializeNativeDesktopFileList();
-        AttachNativeDesktopViewModelEvents();
-        AttachDesktopOverlayVisibilityHooks();
-        UpdateNativeDesktopFileListVisibility();
     }
 
     private void DisposeDesktopExperienceEnhancements()
@@ -45,16 +35,6 @@ public partial class MainView
             _desktopPreviewPreviousButton.Click -= DesktopPreviewPreviousButton_Click;
         if (_desktopPreviewNextButton is not null)
             _desktopPreviewNextButton.Click -= DesktopPreviewNextButton_Click;
-
-        if (_nativeDesktopFileListHost is not null)
-        {
-            _nativeDesktopFileListHost.SelectionChanged -= NativeDesktopFileList_SelectionChanged;
-            _nativeDesktopFileListHost.ItemDoubleTapped -= NativeDesktopFileList_ItemDoubleTapped;
-            _nativeDesktopFileListHost.ItemContextRequested -= NativeDesktopFileList_ItemContextRequested;
-        }
-
-        DetachDesktopOverlayVisibilityHooks();
-        DetachNativeDesktopViewModelEvents();
     }
 
     private void EqualizeDesktopDestinationButtons()
@@ -174,187 +154,87 @@ public partial class MainView
         e.Handled = true;
     }
 
-    private void InitializeNativeDesktopFileList()
+    private async void DesktopFileSurface_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (IsMobilePlatform || AppServices.NativeDesktopFileListFactory is null || _nativeDesktopFileListHost is not null)
+        if (IsMobilePlatform || e.Handled || DataContext is not MainViewModel vm ||
+            vm.IsPreviewVisible || vm.IsSettingsPanelVisible || vm.IsTransferPanelVisible ||
+            vm.IsPromptVisible || vm.IsCloseConfirmVisible || vm.IsLogoutConfirmVisible ||
+            vm.VirtualItems.Count == 0)
             return;
 
-        if (DesktopVirtualScrollViewer.Parent is not Grid desktopGrid)
-            return;
-
-        var host = new NativeDesktopFileListHost
-        {
-            DataContext = DataContext,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
-        Grid.SetRow(host, 1);
-
-        host.SelectionChanged += NativeDesktopFileList_SelectionChanged;
-        host.ItemDoubleTapped += NativeDesktopFileList_ItemDoubleTapped;
-        host.ItemContextRequested += NativeDesktopFileList_ItemContextRequested;
-
-        desktopGrid.Children.Add(host);
-        _nativeDesktopFileListHost = host;
-
-        DesktopVirtualScrollViewer.IsVisible = false;
-        host.IsVisible = true;
-        Dispatcher.UIThread.Post(host.RefreshNativePresentation, DispatcherPriority.Loaded);
-    }
-
-    private Control[] GetDesktopAirspaceBlockingOverlays() =>
-    [
-        StartupSplashOverlay,
-        MobileDestinationOverlay,
-        MobileProfileOverlay,
-        MobileViewModeActionsOverlay,
-        MobileSortActionsOverlay,
-        MobilePreviewActionsOverlay,
-        DownloadAllConfirmOverlay
-    ];
-
-    private void AttachDesktopOverlayVisibilityHooks()
-    {
-        if (_desktopOverlayVisibilityHooksAttached)
-            return;
-
-        _desktopOverlayVisibilityHooksAttached = true;
-        foreach (var overlay in GetDesktopAirspaceBlockingOverlays())
-            overlay.PropertyChanged += DesktopOverlayVisibility_PropertyChanged;
-    }
-
-    private void DetachDesktopOverlayVisibilityHooks()
-    {
-        if (!_desktopOverlayVisibilityHooksAttached)
-            return;
-
-        foreach (var overlay in GetDesktopAirspaceBlockingOverlays())
-            overlay.PropertyChanged -= DesktopOverlayVisibility_PropertyChanged;
-        _desktopOverlayVisibilityHooksAttached = false;
-    }
-
-    private void DesktopOverlayVisibility_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (string.Equals(e.Property.Name, nameof(Control.IsVisible), StringComparison.Ordinal))
-            UpdateNativeDesktopFileListVisibility();
-    }
-
-    private void UpdateNativeDesktopFileListVisibility()
-    {
-        if (IsMobilePlatform || _nativeDesktopFileListHost is null)
-            return;
-
-        var vm = DataContext as MainViewModel;
-        var blockedByViewModel = vm is null || !vm.IsAuthenticated || vm.IsBusy ||
-            vm.IsSettingsPanelVisible || vm.IsTransferPanelVisible || vm.IsPreviewVisible ||
-            vm.IsPromptVisible || vm.IsLogoutConfirmVisible || vm.IsCloseConfirmVisible;
-        var blockedByOverlay = GetDesktopAirspaceBlockingOverlays().Any(static overlay => overlay.IsVisible);
-        var blocked = blockedByViewModel || blockedByOverlay;
-
-        if (blocked && _nativeDesktopFileListHost.IsVisible)
-        {
-            var firstVisible = Math.Max(0, _nativeDesktopFileListHost.LastFirstVisibleIndex);
-            var targetY = DesktopFileSurface.GetItemTop(firstVisible);
-            DesktopVirtualScrollViewer.Offset = new Vector(0, targetY);
-        }
-
-        _nativeDesktopFileListHost.IsVisible = !blocked;
-        DesktopVirtualScrollViewer.IsVisible = blocked;
-
-        if (!blocked)
-            Dispatcher.UIThread.Post(_nativeDesktopFileListHost.RefreshNativePresentation, DispatcherPriority.Loaded);
-    }
-
-    private void AttachNativeDesktopViewModelEvents()
-    {
-        if (_nativeDesktopFileListHost is null || DataContext is not MainViewModel vm ||
-            ReferenceEquals(_nativeDesktopHookedViewModel, vm))
-        {
-            return;
-        }
-
-        DetachNativeDesktopViewModelEvents();
-        vm.PropertyChanged += NativeDesktopViewModel_PropertyChanged;
-        vm.FolderLoaded += NativeDesktopViewModel_FolderLoaded;
-        vm.FolderItemsIncrementalChanged += NativeDesktopViewModel_FolderItemsIncrementalChanged;
-        _nativeDesktopHookedViewModel = vm;
-    }
-
-    private void DetachNativeDesktopViewModelEvents()
-    {
-        if (_nativeDesktopHookedViewModel is not { } vm)
-            return;
-        vm.PropertyChanged -= NativeDesktopViewModel_PropertyChanged;
-        vm.FolderLoaded -= NativeDesktopViewModel_FolderLoaded;
-        vm.FolderItemsIncrementalChanged -= NativeDesktopViewModel_FolderItemsIncrementalChanged;
-        _nativeDesktopHookedViewModel = null;
-    }
-
-    private void NativeDesktopViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(MainViewModel.ViewMode) or nameof(MainViewModel.SelectedThemeText) or
-            nameof(MainViewModel.TransparentFileItemBackground))
-        {
-            _nativeDesktopFileListHost?.RefreshNativePresentation();
-        }
-
-        if (e.PropertyName is nameof(MainViewModel.IsAuthenticated) or nameof(MainViewModel.IsBusy) or
-            nameof(MainViewModel.IsSettingsPanelVisible) or nameof(MainViewModel.IsTransferPanelVisible) or
-            nameof(MainViewModel.IsPreviewVisible) or nameof(MainViewModel.IsPromptVisible) or
-            nameof(MainViewModel.IsLogoutConfirmVisible) or nameof(MainViewModel.IsCloseConfirmVisible))
-        {
-            UpdateNativeDesktopFileListVisibility();
-        }
-    }
-
-    private void NativeDesktopViewModel_FolderLoaded(object? sender, FolderNavigationEventArgs e) =>
-        _nativeDesktopFileListHost?.RefreshNativePresentation();
-
-    private void NativeDesktopViewModel_FolderItemsIncrementalChanged(object? sender, EventArgs e) =>
-        _nativeDesktopFileListHost?.RefreshNativePresentation();
-
-    private void NativeDesktopFileList_SelectionChanged(object? sender, NativeDesktopSelectionChangedEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm)
-            return;
-
-        _desktopSelectedIds.Clear();
-        foreach (var id in e.ItemIds)
-            _desktopSelectedIds.Add(id);
-        _desktopSelectionAnchorId = e.ItemIds.LastOrDefault();
-        ApplyDesktopSelection(vm);
-    }
-
-    private async void NativeDesktopFileList_ItemDoubleTapped(object? sender, NativeDesktopFileItemEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm)
-            return;
-
-        _contextItem = e.Item;
-        _desktopSelectedIds.Clear();
-        _desktopSelectedIds.Add(e.Item.Id);
-        _desktopSelectionAnchorId = e.Item.Id;
-        ApplyDesktopSelection(vm);
-        await OpenDriveItemAsync(vm, e.Item);
-    }
-
-    private void NativeDesktopFileList_ItemContextRequested(object? sender, NativeDesktopFileItemEventArgs e)
-    {
-        if (DataContext is not MainViewModel vm || _nativeDesktopFileListHost is null)
-            return;
-
-        _contextItem = e.Item;
-        if (!_desktopSelectedIds.Contains(e.Item.Id))
+        if (e.Key == Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             _desktopSelectedIds.Clear();
-            _desktopSelectedIds.Add(e.Item.Id);
-            _desktopSelectionAnchorId = e.Item.Id;
+            foreach (var slot in vm.VirtualItems)
+                if (slot.Item is { } item)
+                    _desktopSelectedIds.Add(item.Id);
             ApplyDesktopSelection(vm);
+            e.Handled = true;
+            return;
         }
 
-        var menu = GetOrCreateDesktopFileItemContextMenu();
-        if (_desktopOpenWebMenuItem is not null)
-            _desktopOpenWebMenuItem.IsVisible = e.Item.HasWebUrl;
-        menu.Open(_nativeDesktopFileListHost);
+        var focusId = _desktopFocusedItemId ?? vm.SelectedItem?.Id;
+        var current = -1;
+        for (var i = 0; i < vm.VirtualItems.Count; i++)
+            if (string.Equals(vm.VirtualItems[i].Item?.Id, focusId, StringComparison.Ordinal) && focusId is not null)
+            {
+                current = i;
+                break;
+            }
+
+        if (e.Key is Key.Enter or Key.Space && current >= 0 && vm.VirtualItems[current].Item is { } focused)
+        {
+            e.Handled = true;
+            _contextItem = focused;
+            if (e.Key == Key.Enter)
+                await OpenDriveItemAsync(vm, focused);
+            else
+                ApplyDesktopPointerSelection(vm, focused, e.KeyModifiers);
+            return;
+        }
+
+        var columns = DesktopFileSurface.Columns;
+        var page = Math.Max(columns, (int)(DesktopVirtualScrollViewer.Viewport.Height /
+            DesktopFileSurface.MouseWheelLineHeight) * columns);
+        var target = e.Key switch
+        {
+            Key.Home => 0,
+            Key.End => vm.VirtualItems.Count - 1,
+            Key.Left => current - 1,
+            Key.Right => current + 1,
+            Key.Up => current - columns,
+            Key.Down => current + columns,
+            Key.PageUp => current - page,
+            Key.PageDown => current + page,
+            _ => -1
+        };
+        if (e.Key is not (Key.Home or Key.End or Key.Left or Key.Right or Key.Up or Key.Down or Key.PageUp or Key.PageDown))
+            return;
+
+        e.Handled = true;
+        target = current < 0 && e.Key is not (Key.Home or Key.End)
+            ? Math.Max(0, DesktopFileSurface.GetVisibleRange().First)
+            : Math.Clamp(target, 0, vm.VirtualItems.Count - 1);
+        // Skip metadata placeholders; they are visible slots but cannot be opened/selected yet.
+        var direction = e.Key is Key.End or Key.Left or Key.Up or Key.PageUp ? -1 : 1;
+        while (target >= 0 && target < vm.VirtualItems.Count && vm.VirtualItems[target].Item is null)
+            target += direction;
+        if (target < 0 || target >= vm.VirtualItems.Count || vm.VirtualItems[target].Item is not { } next)
+            return;
+
+        _desktopFocusedItemId = next.Id;
+        _contextItem = next;
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            ApplyDesktopPointerSelection(vm, next, e.KeyModifiers);
+
+        var rect = DesktopFileSurface.GetItemBounds(target);
+        var scroll = DesktopVirtualScrollViewer;
+        var offset = scroll.Offset.Y;
+        if (rect.Top < offset)
+            offset = rect.Top;
+        else if (rect.Bottom > offset + scroll.Viewport.Height)
+            offset = Math.Max(0, rect.Bottom - scroll.Viewport.Height);
+        scroll.Offset = new Vector(0, offset);
+        SyncDesktopVirtualSurfaceViewport(scroll);
     }
 }

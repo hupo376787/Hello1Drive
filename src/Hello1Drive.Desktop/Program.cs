@@ -14,7 +14,6 @@ internal static class Program
             new DesktopAuthenticationService(),
             new DesktopEmbeddedMediaPlayerFactory(),
             startupRegistrationService: new WindowsStartupRegistrationService(),
-            nativeDesktopFileListFactory: OperatingSystem.IsWindows() ? new WindowsNativeDesktopFileListFactory() : null,
             desktopInputSettingsService: new DesktopInputSettingsService());
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }

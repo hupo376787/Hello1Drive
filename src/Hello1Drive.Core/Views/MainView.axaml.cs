@@ -439,7 +439,7 @@ public partial class MainView : UserControl
                 Dispatcher.UIThread.Post(() =>
                 {
                     DesktopVirtualScrollViewer.Offset = new Vector(0, 0);
-                    DesktopFileSurface.InvalidateMeasure();
+                    DesktopFileSurface.RefreshLayout();
                     SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
                     if (!vm.IsDesktopListScrolling)
                         QueueRealizedDesktopThumbnails(DesktopVirtualScrollViewer, vm, allowNetwork: true);
@@ -1302,6 +1302,8 @@ public partial class MainView : UserControl
         if (item is null)
             return;
 
+        surface.Focus();
+        _desktopFocusedItemId = item.Id;
         _contextItem = item;
         var point = e.GetCurrentPoint(surface);
         if (point.Properties.IsLeftButtonPressed)
@@ -1330,9 +1332,15 @@ public partial class MainView : UserControl
 
     private void DesktopFileSurface_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
-        if (IsMobilePlatform || sender is not DesktopVirtualFileSurface surface || _contextItem is not { } item)
+        if (IsMobilePlatform || sender is not DesktopVirtualFileSurface surface || DataContext is not MainViewModel vm)
+            return;
+        var item = e.TryGetPosition(surface, out var position)
+            ? surface.GetItemAt(position)
+            : vm.SelectedItem;
+        if (item is null)
             return;
 
+        _contextItem = item;
         SelectContextItem(item);
         var menu = GetOrCreateDesktopFileItemContextMenu();
         if (_desktopOpenWebMenuItem is not null)
@@ -1363,8 +1371,8 @@ public partial class MainView : UserControl
 
     private void HandleDesktopFileScroll(ScrollViewer scroll, MainViewModel vm)
     {
-        // This is the complete desktop scroll hot path. SetViewport normally does not invalidate
-        // the surface while the visible viewport remains inside its retained +/-1 viewport scene.
+        // Move retained item visuals while the viewport remains in the realized buffer. The
+        // virtualizing panel recycles items only when scrolling leaves that buffer.
         SyncDesktopVirtualSurfaceViewport(scroll);
         _desktopScrollLastActivityUtc = DateTime.UtcNow;
         unchecked { _desktopThumbnailIdleRecoveryVersion++; }
@@ -1391,10 +1399,6 @@ public partial class MainView : UserControl
 
         _desktopScrollIdleTimer.Stop();
         vm.SetDesktopListScrolling(false);
-        // Hover cleanup is intentionally deferred until scrolling is quiet. Invalidating the
-        // retained file surface on the very first wheel frame makes that first movement compete
-        // with a full three-viewport redraw.
-        DesktopFileSurface.FlushDeferredHoverVisual();
         var scroll = GetActiveScrollViewer(vm);
         if (scroll is null || !scroll.IsVisible)
             return;
@@ -2846,6 +2850,7 @@ if (visibleItems.Count > 0)
         _mobileSelectedItemsById.Clear();
         _desktopSelectedIds.Clear();
         _desktopSelectionAnchorId = null;
+        _desktopFocusedItemId = null;
         _mobileSelectionMode = false;
         if (vm is not null)
             vm.MobileSelectionModeActive = false;
@@ -3304,7 +3309,7 @@ if (visibleItems.Count > 0)
         if (IsMobilePlatform)
             return;
 
-        DesktopFileSurface.InvalidateMeasure();
+        DesktopFileSurface.RefreshLayout();
         SyncDesktopVirtualSurfaceViewport(DesktopVirtualScrollViewer);
     }
 
@@ -3323,10 +3328,11 @@ if (visibleItems.Count > 0)
         if (pointerPosition.X >= Math.Max(0, FileArea.Bounds.Width - 22))
             return;
 
-        // The desktop file area is one control, so DataContext alone can no longer tell whether
-        // the pointer is over an item or an empty gap. Ask the virtual surface directly.
-        if (e.Source is DesktopVirtualFileSurface desktopSurface &&
-            desktopSurface.GetItemAt(e.GetPosition(desktopSurface)) is not null)
+        // Item controls are recycled; use the shared geometry for gaps/placeholders as well.
+        if (DesktopFileSurface.IsVisible &&
+            DesktopFileSurface.GetItemAt(e.GetPosition(DesktopFileSurface)) is not null &&
+            e.Source is Visual source &&
+            (ReferenceEquals(source, DesktopFileSurface) || source.GetVisualAncestors().Contains(DesktopFileSurface)))
             return;
 
         // Do not steal pointer capture from real controls. In particular the scrollbar thumb and

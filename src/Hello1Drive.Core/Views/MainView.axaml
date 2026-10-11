@@ -2996,6 +2996,8 @@
               ContextRequested="DesktopFileSurface_ContextRequested"
               DoubleTapped="DesktopFileSurface_DoubleTapped"
               ItemBackground="{DynamicResource HelloFileItemBrush}"
+              ItemsSource="{Binding VirtualItems}"
+              KeyDown="DesktopFileSurface_KeyDown"
               Mode="{Binding ViewMode}"
               PointerPressed="DesktopFileSurface_PointerPressed"
               SelectionBrush="{DynamicResource HelloExplorerSelectionBrush}" />
