@@ -16,14 +16,18 @@ public sealed class ResilientOneDriveService : IOneDriveService
     // intentionally longer than OneDriveService's normal 30-second request timeout, but shorter
     // than platform handlers which can otherwise sit on a dead background socket for several
     // minutes (the observed failure was around 300 seconds).
-    private static readonly TimeSpan TransferStallTimeout = TimeSpan.FromSeconds(75);
+    private static readonly TimeSpan DefaultTransferStallTimeout = TimeSpan.FromSeconds(75);
     private static readonly TimeSpan VerificationTimeout = TimeSpan.FromSeconds(15);
 
     private readonly IOneDriveService _inner;
+    private readonly TimeSpan _transferStallTimeout;
 
-    public ResilientOneDriveService(IOneDriveService inner)
+    public ResilientOneDriveService(IOneDriveService inner, TimeSpan? transferStallTimeout = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _transferStallTimeout = transferStallTimeout ?? DefaultTransferStallTimeout;
+        if (_transferStallTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(transferStallTimeout));
     }
 
     public long? UploadBytesPerSecondLimit
@@ -98,14 +102,9 @@ public sealed class ResilientOneDriveService : IOneDriveService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        // A non-seekable picker stream cannot be replayed safely. It still benefits from the
-        // inner service's resumable-upload retry logic, but we must not restart it from here.
-        if (!source.CanSeek)
-        {
-            await _inner.UploadFileAsync(parentItemId, fileName, source, progress, cancellationToken)
-                .ConfigureAwait(false);
-            return;
-        }
+        await using var prepared = await PreparedUploadSource.PrepareAsync(
+            source, forceCopy: OperatingSystem.IsAndroid(), cancellationToken).ConfigureAwait(false);
+        source = prepared.Stream;
 
         var originalPosition = source.Position;
         long? remainingLength = null;
@@ -120,44 +119,57 @@ public sealed class ResilientOneDriveService : IOneDriveService
 
         var startedUtc = DateTimeOffset.UtcNow;
         var attempt = 0;
-
-        while (true)
+        var sentFinalBytes = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            source.Position = originalPosition;
-            if (attempt > 0)
-                progress?.Report(0);
-
-            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCts.CancelAfter(TransferStallTimeout);
-            var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, TransferStallTimeout);
-
-            try
+            while (true)
             {
-                await _inner.UploadFileAsync(parentItemId, fileName, source, heartbeat, attemptCts.Token)
-                    .ConfigureAwait(false);
-                return;
-            }
-            catch (Exception ex) when (ShouldRetryAttempt(ex, cancellationToken, attemptCts))
-            {
-                // If the socket disappeared after the final request body was sent, the server may
-                // already have committed the item even though the client never saw the response.
-                // Verify before replaying the whole upload so a background timeout cannot create a
-                // second "file (1).ext" copy.
-                if (heartbeat.LastValue >= 0.995 && remainingLength is long expectedLength &&
-                    await TryVerifyCompletedUploadAsync(
-                        parentItemId,
-                        fileName,
-                        expectedLength,
-                        startedUtc,
-                        cancellationToken).ConfigureAwait(false))
+                cancellationToken.ThrowIfCancellationRequested();
+                source.Position = originalPosition;
+                if (attempt > 0)
+                    progress?.Report(0);
+
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var stallTimeout = _transferStallTimeout;
+                if (UploadBytesPerSecondLimit is long rate && rate > 0)
                 {
-                    progress?.Report(1.0);
+                    // An explicit low speed limit can intentionally leave >75 seconds between
+                    // 128 KiB progress reports. Do not cancel a healthy throttled transfer.
+                    var limitedInterval = TimeSpan.FromSeconds((double)ProgressStreamContent.BufferSize / rate + 30);
+                    if (limitedInterval > stallTimeout)
+                        stallTimeout = limitedInterval;
+                }
+                attemptCts.CancelAfter(stallTimeout);
+                var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, stallTimeout);
+
+                try
+                {
+                    await _inner.UploadFileAsync(parentItemId, fileName, source, heartbeat, attemptCts.Token)
+                        .ConfigureAwait(false);
                     return;
                 }
+                catch (Exception ex) when (ShouldRetryAttempt(ex, cancellationToken, attemptCts))
+                {
+                    // If the final acknowledgement was lost, verify before recovering/recreating
+                    // the session so a background timeout cannot create a second copy.
+                    sentFinalBytes |= heartbeat.LastValue >= 0.995;
+                    if (sentFinalBytes && remainingLength is long expectedLength &&
+                        await TryVerifyCompletedUploadAsync(
+                            parentItemId, fileName, expectedLength, startedUtc,
+                            cancellationToken).ConfigureAwait(false))
+                    {
+                        progress?.Report(1.0);
+                        return;
+                    }
 
-                await DelayBeforeTransferRetryAsync(attempt++, cancellationToken).ConfigureAwait(false);
+                    await DelayBeforeTransferRetryAsync(attempt++, cancellationToken).ConfigureAwait(false);
+                }
             }
+        }
+        finally
+        {
+            if (_inner is OneDriveService oneDrive)
+                oneDrive.ForgetUploadSession(source);
         }
     }
 
@@ -191,8 +203,8 @@ public sealed class ResilientOneDriveService : IOneDriveService
                 progress?.Report(0);
 
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCts.CancelAfter(TransferStallTimeout);
-            var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, TransferStallTimeout);
+            attemptCts.CancelAfter(_transferStallTimeout);
+            var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, _transferStallTimeout);
 
             try
             {
@@ -221,14 +233,21 @@ public sealed class ResilientOneDriveService : IOneDriveService
         {
             using var verifyCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             verifyCts.CancelAfter(VerificationTimeout);
-            var children = await _inner.GetChildrenAsync(parentItemId, verifyCts.Token).ConfigureAwait(false);
-
-            return children.Any(item =>
-                item.IsFile &&
-                item.Size == expectedLength &&
-                LooksLikeRequestedUploadName(requestedName, item.Name) &&
-                item.LastModifiedDateTime is { } modified &&
-                modified >= startedUtc.AddMinutes(-1));
+            string? nextLink = null;
+            do
+            {
+                // Newest files first and stop at a match. Reading the entire 1,000+ item folder
+                // before verifying its newest upload can exceed this deadline and replay a file
+                // which has already been committed.
+                var page = await _inner.GetChildrenPageAsync(parentItemId, nextLink, pageSize: 200,
+                    cancellationToken: verifyCts.Token, orderBy: "lastModifiedDateTime desc").ConfigureAwait(false);
+                if (page.Items.Any(item => item.IsFile && item.Size == expectedLength &&
+                    LooksLikeRequestedUploadName(requestedName, item.Name) &&
+                    item.LastModifiedDateTime is { } modified && modified >= startedUtc.AddMinutes(-1)))
+                    return true;
+                nextLink = page.NextLink;
+            } while (!string.IsNullOrWhiteSpace(nextLink));
+            return false;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -263,6 +282,11 @@ public sealed class ResilientOneDriveService : IOneDriveService
         if (userCancellationToken.IsCancellationRequested)
             return false;
 
+        // A session can disappear after the last fragment was committed but its response was
+        // lost. Run completion verification before deciding whether a new session is necessary.
+        if (ex is UploadSessionExpiredException)
+            return true;
+
         // Our progress watchdog deliberately cancels only the current socket attempt. Android and
         // iOS handlers can surface that as either TaskCanceledException or plain
         // OperationCanceledException, so both are retryable when the user token is still live.
@@ -273,30 +297,7 @@ public sealed class ResilientOneDriveService : IOneDriveService
     }
 
     private static bool IsTransientTransferFailure(Exception ex, CancellationToken cancellationToken)
-    {
-        if (cancellationToken.IsCancellationRequested)
-            return false;
-
-        // A platform HttpMessageHandler may use plain OperationCanceledException for its own
-        // timeout. If our caller token is not cancelled, this is a transport timeout, not a user
-        // cancellation, and must not turn the transfer row into Failed.
-        if (ex is OperationCanceledException)
-            return true;
-
-        if (ex is HttpRequestException http)
-        {
-            if (http.StatusCode is null)
-                return true;
-
-            var code = (int)http.StatusCode.Value;
-            return code is 408 or 425 or 429 || code >= 500;
-        }
-
-        if (ex is TimeoutException)
-            return true;
-
-        return ex.InnerException is not null && IsTransientTransferFailure(ex.InnerException, cancellationToken);
-    }
+        => NetworkFailureClassifier.IsTransient(ex, cancellationToken);
 
     private static async Task DelayBeforeTransferRetryAsync(int attempt, CancellationToken cancellationToken)
     {

@@ -110,7 +110,7 @@ internal sealed class RateLimitedReadStream : Stream
 
 internal sealed class ProgressStreamContent : HttpContent
 {
-    private const int BufferSize = 128 * 1024;
+    internal const int BufferSize = 128 * 1024;
 
     private readonly Stream _source;
     private readonly TransferRateLimiter _limiter;

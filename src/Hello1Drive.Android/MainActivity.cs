@@ -4,6 +4,7 @@ using Android.Content.PM;
 using Android.OS;
 using Avalonia.Android;
 using Microsoft.Identity.Client;
+using Hello1Drive.Android.Services;
 
 namespace Hello1Drive.Android;
 
@@ -17,6 +18,7 @@ namespace Hello1Drive.Android;
 public class MainActivity : AvaloniaMainActivity
 {
     public static MainActivity? Instance { get; private set; }
+    internal bool IsResumed { get; private set; }
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -28,6 +30,27 @@ public class MainActivity : AvaloniaMainActivity
     {
         base.OnActivityResult(requestCode, resultCode, data);
         AuthenticationContinuationHelper.SetAuthenticationContinuationEventArgs(requestCode, resultCode, data);
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        IsResumed = true;
+        AndroidTransferBackgroundService.ResumeActiveTransfers();
+    }
+
+    protected override void OnPause()
+    {
+        IsResumed = false;
+        // The transfer service/worker owns its lifetime; locking the screen must not stop it.
+        base.OnPause();
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        AndroidTransferBackgroundService.NotifyPermissionResult(requestCode);
+        AndroidTransferBackgroundService.ResumeActiveTransfers();
     }
 
     protected override void OnDestroy()

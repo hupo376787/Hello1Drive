@@ -14,6 +14,8 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
     private const int NotificationPermissionRequestCode = 4817;
     private static readonly object ServiceSync = new();
     private static bool _notificationPermissionRequestedThisProcess;
+    private static bool _notificationPermissionPending;
+    private static bool _batteryPermissionRequestedThisProcess;
     private static bool _serviceStarted;
     private static bool _hasLatestState;
     private static TransferBackgroundState _latestState;
@@ -41,7 +43,8 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
             return;
         }
 
-        TryRequestNotificationPermission();
+        if (!TryRequestNotificationPermission())
+            TryRequestBatteryOptimizationExemption();
 
         // Once the foreground service is running, never call Context.StartService just to refresh
         // counts. Android applies background-service start restrictions even when an FGS already
@@ -91,33 +94,91 @@ public sealed class AndroidTransferBackgroundService : ITransferBackgroundServic
             _serviceStarted = false;
     }
 
-    private static void TryRequestNotificationPermission()
+    internal static void ResumeActiveTransfers()
+    {
+        TransferBackgroundState state;
+        lock (ServiceSync)
+            state = _latestState;
+        if (state.HasActiveTransfers)
+        {
+            try { new AndroidTransferBackgroundService().Update(state); }
+            catch { /* Service starts may be restricted until the Activity is fully resumed. */ }
+        }
+    }
+
+    internal static void NotifyPermissionResult(int requestCode)
+    {
+        if (requestCode == NotificationPermissionRequestCode)
+            _notificationPermissionPending = false;
+    }
+
+    private static void TryRequestBatteryOptimizationExemption()
+    {
+        if (_batteryPermissionRequestedThisProcess)
+            return;
+        var activity = global::Hello1Drive.Android.MainActivity.Instance;
+        if (activity is null || !activity.IsResumed)
+            return;
+        var manager = activity.GetSystemService(global::Android.Content.Context.PowerService) as global::Android.OS.PowerManager;
+        if (manager is null || manager.IsIgnoringBatteryOptimizations(activity.PackageName))
+            return;
+
+        _batteryPermissionRequestedThisProcess = true;
+        activity.RunOnUiThread(() =>
+        {
+            if (!activity.IsResumed)
+                return;
+            try
+            {
+                // The system asks the user; the app never silently changes battery policy.
+                using var intent = new global::Android.Content.Intent(
+                    global::Android.Provider.Settings.ActionRequestIgnoreBatteryOptimizations,
+                    global::Android.Net.Uri.Parse($"package:{activity.PackageName}"));
+                activity.StartActivity(intent);
+            }
+            catch
+            {
+                // Some OEM builds omit this intent. The FGS and retry loop still remain active.
+            }
+        });
+    }
+
+    private static bool TryRequestNotificationPermission()
     {
         // POST_NOTIFICATIONS only exists from Android 13 (API 33). Keep every reference to the
         // API-33-only manifest constant inside an API-33 platform context so CA1416 also understands
         // the deferred RunOnUiThread callback.
+        // Waiting -> Running updates must not open the battery dialog over an active permission
+        // dialog. Continue permission setup only after Android delivers its result callback.
+        if (_notificationPermissionPending)
+            return true;
         if (_notificationPermissionRequestedThisProcess || !OperatingSystem.IsAndroidVersionAtLeast(33))
-            return;
+            return false;
 
         var activity = global::Hello1Drive.Android.MainActivity.Instance;
-        if (activity is null)
-            return;
+        if (activity is null || !activity.IsResumed)
+            return false;
 
         _notificationPermissionRequestedThisProcess = true;
-        RequestNotificationPermissionApi33(activity);
+        _notificationPermissionPending = true;
+        var requested = RequestNotificationPermissionApi33(activity);
+        if (!requested)
+            _notificationPermissionPending = false;
+        return requested;
     }
 
     [SupportedOSPlatform("android33.0")]
-    private static void RequestNotificationPermissionApi33(global::Hello1Drive.Android.MainActivity activity)
+    private static bool RequestNotificationPermissionApi33(global::Hello1Drive.Android.MainActivity activity)
     {
         if (activity.CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) ==
             global::Android.Content.PM.Permission.Granted)
         {
-            return;
+            return false;
         }
 
         activity.RunOnUiThread(() => activity.RequestPermissions(
             [global::Android.Manifest.Permission.PostNotifications],
             NotificationPermissionRequestCode));
+        return true;
     }
 }

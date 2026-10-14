@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.CompilerServices;
 using Hello1Drive.Configuration;
 using Hello1Drive.Models;
 
@@ -10,24 +11,30 @@ namespace Hello1Drive.Services;
 
 public sealed class OneDriveService : IOneDriveService
 {
-    private const long SimpleUploadLimit = 250L * 1024 * 1024;
     private const long UploadSessionThreshold = 10L * 1024 * 1024;
     private const int UploadChunkSize = 5 * 1024 * 1024; // 5 MiB = 16 * 320 KiB; smoother progress while staying within Graph guidance.
 
     private readonly IAuthenticationService _authentication;
-    private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient;
+    private readonly HttpClient _uploadClient;
+    private readonly ConditionalWeakTable<Stream, UploadSessionState> _uploadSessions = new();
+    private sealed record UploadSessionState(string? ParentId, string FileName, long Length, long SourceStart, string UploadUrl);
     private string? _driveId;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public OneDriveService(IAuthenticationService authentication)
+    public OneDriveService(
+        IAuthenticationService authentication, HttpClient? httpClient = null, HttpClient? uploadClient = null)
     {
         _authentication = authentication;
         // A dead Wi-Fi/TLS path should fail into our cancellation-aware retry loop instead of
         // occupying one Graph request for HttpClient's much longer default timeout.
-        _httpClient.Timeout = TimeSpan.FromSeconds(30);
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // Transfer progress is watched by ResilientOneDriveService. A fixed 30-second deadline
+        // would abort healthy slow/rate-limited uploads while bytes are still being sent.
+        _uploadClient = uploadClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     public long? UploadBytesPerSecondLimit { get; set; }
@@ -372,16 +379,24 @@ public sealed class OneDriveService : IOneDriveService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        long? length = source.CanSeek ? source.Length : null;
+        await using var prepared = await PreparedUploadSource.PrepareAsync(
+            source, forceCopy: false, cancellationToken).ConfigureAwait(false);
+        source = prepared.Stream;
+        var length = Math.Max(0, source.Length - source.Position);
 
         if (length is > UploadSessionThreshold)
         {
-            await UploadWithSessionAsync(parentItemId, fileName, source, length.Value, progress, cancellationToken);
+            try
+            {
+                await UploadWithSessionAsync(parentItemId, fileName, source, length, progress, cancellationToken);
+            }
+            catch (UploadSessionExpiredException)
+            {
+                ForgetUploadSession(source);
+                throw;
+            }
             return;
         }
-
-        if (length is > SimpleUploadLimit)
-            throw new InvalidOperationException("文件超过 250 MB，需要可恢复上传会话，但当前流无法满足上传条件。");
 
         var escapedName = EscapePathSegment(fileName);
         var url = parentItemId is null
@@ -400,7 +415,7 @@ public sealed class OneDriveService : IOneDriveService
                 "application/octet-stream")
         };
 
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(request, cancellationToken, client: _uploadClient).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         progress?.Report(1.0);
     }
@@ -508,6 +523,28 @@ public sealed class OneDriveService : IOneDriveService
         if (!source.CanSeek)
             throw new InvalidOperationException("大文件上传要求输入流可定位（CanSeek=true）。");
 
+        var sourceStart = source.Position;
+        var resume = _uploadSessions.TryGetValue(source, out var saved) &&
+            saved.ParentId == parentItemId && saved.FileName == fileName &&
+            saved.Length == length && saved.SourceStart == sourceStart;
+        var uploadUrl = resume ? saved!.UploadUrl : await CreateUploadSessionAsync(parentItemId, fileName, cancellationToken).ConfigureAwait(false);
+        if (!resume)
+        {
+            ForgetUploadSession(source);
+            _uploadSessions.Add(source, new UploadSessionState(parentItemId, fileName, length, sourceStart, uploadUrl));
+        }
+        // A progress watchdog cancels only the socket attempt. The next attempt keeps this
+        // source/session identity and asks OneDrive where to resume, even after a long lock/offline
+        // interval. Never silently create a second session just because an attempt timed out.
+        var offset = resume ? await GetUploadSessionOffsetAsync(uploadUrl, length, cancellationToken).ConfigureAwait(false) : 0;
+        await UploadSessionBytesAsync(source, sourceStart, uploadUrl, offset, length, progress, cancellationToken).ConfigureAwait(false);
+        ForgetUploadSession(source);
+    }
+
+    internal void ForgetUploadSession(Stream source) => _uploadSessions.Remove(source);
+
+    private async Task<string> CreateUploadSessionAsync(string? parentItemId, string fileName, CancellationToken cancellationToken)
+    {
         var escapedName = EscapePathSegment(fileName);
         var sessionUrl = parentItemId is null
             ? $"{AppConfig.GraphBaseUrl}/me/drive/root:/{escapedName}:/createUploadSession"
@@ -530,14 +567,20 @@ public sealed class OneDriveService : IOneDriveService
         var session = await DeserializeAsync<UploadSessionResponse>(createResponse, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(session.UploadUrl))
             throw new InvalidOperationException("Microsoft Graph 未返回上传会话 URL。");
+        return session.UploadUrl;
+    }
 
-        using var uploadClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    private async Task UploadSessionBytesAsync(
+        Stream source, long sourceStart, string uploadUrl, long offset, long length,
+        IProgress<double>? progress, CancellationToken cancellationToken)
+    {
         var buffer = new byte[UploadChunkSize];
-        long offset = 0;
-        source.Position = 0;
+        var recoveryAttempt = 0;
+        var retryAttempt = 0;
 
         while (offset < length)
         {
+            source.Position = sourceStart + offset;
             var wanted = (int)Math.Min(buffer.Length, length - offset);
             var readTotal = 0;
             while (readTotal < wanted)
@@ -548,11 +591,10 @@ public sealed class OneDriveService : IOneDriveService
                 readTotal += read;
             }
 
-            if (readTotal == 0)
+            if (readTotal != wanted)
                 throw new EndOfStreamException("上传过程中输入流提前结束。");
 
             var chunkOffset = offset;
-            var chunkAttempt = 0;
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -572,27 +614,105 @@ public sealed class OneDriveService : IOneDriveService
 
                 try
                 {
-                    using var response = await uploadClient.PutAsync(session.UploadUrl, chunk, cancellationToken).ConfigureAwait(false);
+                    using var response = await _uploadClient.PutAsync(uploadUrl, chunk, cancellationToken).ConfigureAwait(false);
                     if (IsTransientReadStatus(response.StatusCode))
                     {
-                        await DelayBeforeReadRetryAsync(response, chunkAttempt++, cancellationToken).ConfigureAwait(false);
-                        continue;
+                        await DelayBeforeReadRetryAsync(response, retryAttempt++, cancellationToken).ConfigureAwait(false);
+                        offset = await GetUploadSessionOffsetAsync(uploadUrl, length, cancellationToken).ConfigureAwait(false);
+                        break;
                     }
 
+                    if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+                    {
+                        // A response may be lost after OneDrive accepted the fragment. Query the
+                        // session instead of treating a replayed/accepted range as upload failure.
+                        var next = await GetUploadSessionOffsetAsync(uploadUrl, length, cancellationToken).ConfigureAwait(false);
+                        if (next == offset && ++recoveryAttempt > 3)
+                            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                        if (next > offset)
+                            retryAttempt = recoveryAttempt = 0;
+                        offset = next;
+                        break;
+                    }
+
+                    if (response.StatusCode == HttpStatusCode.NotFound)
+                        throw new UploadSessionExpiredException();
+
                     await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                    if (response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created)
+                    {
+                        var completed = await DeserializeAsync<DriveItemModel>(response, cancellationToken).ConfigureAwait(false);
+                        if (string.IsNullOrWhiteSpace(completed.Id) || !completed.IsFile || completed.Size != length)
+                            throw new InvalidDataException("OneDrive 未确认上传文件的完整内容。");
+                        progress?.Report(1.0);
+                        return;
+                    }
+                    if (response.StatusCode != HttpStatusCode.Accepted)
+                        throw new InvalidDataException("OneDrive 返回了无法识别的上传状态。");
+
+                    var status = await DeserializeAsync<UploadSessionResponse>(response, cancellationToken).ConfigureAwait(false);
+                    var expected = GetNextUploadOffset(status, length);
+                    if (expected == offset && ++recoveryAttempt > 3)
+                        throw new InvalidDataException("OneDrive 未接收当前上传分片，请重新尝试。");
+                    if (expected > offset)
+                        retryAttempt = recoveryAttempt = 0;
+                    offset = expected;
                     break;
                 }
                 catch (Exception ex) when (IsTransientTransportFailure(ex, cancellationToken))
                 {
-                    await DelayBeforeReadRetryAsync(null, chunkAttempt++, cancellationToken).ConfigureAwait(false);
+                    await DelayBeforeReadRetryAsync(null, retryAttempt++, cancellationToken).ConfigureAwait(false);
+                    offset = await GetUploadSessionOffsetAsync(uploadUrl, length, cancellationToken).ConfigureAwait(false);
+                    break;
                 }
             }
 
-            offset += readTotal;
             progress?.Report((double)offset / length);
         }
 
-        progress?.Report(1.0);
+        throw new InvalidDataException("OneDrive 尚未确认上传完成。");
+    }
+
+    private async Task<long> GetUploadSessionOffsetAsync(
+        string uploadUrl, long length, CancellationToken cancellationToken)
+    {
+        var attempt = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // uploadUrl is preauthenticated; never attach the Graph bearer token here.
+                using var response = await _uploadClient.GetAsync(uploadUrl, cancellationToken).ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                    throw new UploadSessionExpiredException();
+                if (IsTransientReadStatus(response.StatusCode))
+                {
+                    await DelayBeforeReadRetryAsync(response, attempt++, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+                var status = await DeserializeAsync<UploadSessionResponse>(response, cancellationToken).ConfigureAwait(false);
+                return GetNextUploadOffset(status, length);
+            }
+            catch (Exception ex) when (IsTransientTransportFailure(ex, cancellationToken))
+            {
+                await DelayBeforeReadRetryAsync(null, attempt++, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static long GetNextUploadOffset(UploadSessionResponse status, long length)
+    {
+        long? next = null;
+        foreach (var range in status.NextExpectedRanges ?? [])
+        {
+            var start = range.Split('-', 2)[0];
+            if (!long.TryParse(start, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var offset) || offset < 0 || offset >= length)
+                throw new InvalidDataException("OneDrive 返回了无效的上传分片位置。");
+            next = next is null ? offset : Math.Min(next.Value, offset);
+        }
+        return next ?? throw new InvalidDataException("OneDrive 未返回上传确认或待上传分片位置。");
     }
 
     private static bool IsSizeOrderRequest(string? url, string? orderBy)
@@ -619,7 +739,8 @@ public sealed class OneDriveService : IOneDriveService
     private async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken,
-        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead,
+        HttpClient? client = null)
     {
         // Browsing/preview/metadata calls are reads. A temporary Wi-Fi, DNS, TLS, proxy, 429 or
         // Graph 5xx failure should never become a red English exception banner. Keep retrying with
@@ -667,7 +788,7 @@ public sealed class OneDriveService : IOneDriveService
             attemptRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             try
             {
-                var response = await _httpClient.SendAsync(attemptRequest, completionOption, cancellationToken)
+                var response = await (client ?? _httpClient).SendAsync(attemptRequest, completionOption, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (retryableRead && IsTransientReadStatus(response.StatusCode))
@@ -716,28 +837,10 @@ public sealed class OneDriveService : IOneDriveService
     }
 
     private static bool IsTransientReadStatus(HttpStatusCode statusCode)
-    {
-        var code = (int)statusCode;
-        return code is 408 or 425 or 429 || code >= 500;
-    }
+        => NetworkFailureClassifier.IsTransientStatus(statusCode);
 
     private static bool IsTransientTransportFailure(Exception ex, CancellationToken cancellationToken)
-    {
-        if (cancellationToken.IsCancellationRequested)
-            return false;
-
-        if (ex is HttpRequestException http)
-        {
-            if (http.StatusCode is null)
-                return true;
-            return IsTransientReadStatus(http.StatusCode.Value);
-        }
-
-        if (ex is TaskCanceledException or TimeoutException)
-            return true;
-
-        return ex.InnerException is not null && IsTransientTransportFailure(ex.InnerException, cancellationToken);
-    }
+        => NetworkFailureClassifier.IsTransient(ex, cancellationToken);
 
     private static async Task DelayBeforeReadRetryAsync(
         HttpResponseMessage? response,

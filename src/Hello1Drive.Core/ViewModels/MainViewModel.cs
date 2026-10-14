@@ -1277,9 +1277,16 @@ public partial class MainViewModel : ViewModelBase
                 if (transfer.State != TransferState.Running)
                     return;
 
-                transfer.Progress = p;
-                var percent = (int)Math.Round(p * 100);
-                if (percent != uploadPercent)
+                // Sending the last byte is not a server commit acknowledgement. Keep the row
+                // below 100% until UploadFileAsync confirms the final OneDrive response.
+                transfer.Progress = Math.Min(p, 0.99);
+                var percent = (int)Math.Round(transfer.Progress * 100);
+                if (p >= 0.995)
+                {
+                    uploadPercent = percent;
+                    transfer.Message = "正在确认上传结果";
+                }
+                else if (percent != uploadPercent)
                 {
                     uploadPercent = percent;
                     transfer.Message = $"正在上传 {percent}%";
@@ -1294,6 +1301,12 @@ public partial class MainViewModel : ViewModelBase
             InvalidateFolderCache(targetFolderId);
             if (refreshWhenDone && FolderCacheKey(CurrentFolderId) == FolderCacheKey(targetFolderId))
                 await RefreshCurrentFolderAsync();
+        }
+        catch (Exception ex) when (transfer.State == TransferState.Completed)
+        {
+            // Browsing/cache/UI follow-up is separate from the committed remote upload.
+            StatusText = $"上传完成：{fileName} · 文件夹刷新未完成";
+            ErrorMessage = $"文件已上传，但文件夹刷新失败：{ex.Message}";
         }
         catch (Exception ex)
         {
@@ -5325,19 +5338,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (ex is OperationCanceledException)
             return false;
-
-        if (ex is HttpRequestException http)
-        {
-            if (http.StatusCode is null)
-                return true;
-
-            var code = (int)http.StatusCode.Value;
-            return code is 408 or 425 or 429 || code >= 500;
-        }
-
-        // TLS/DNS/socket failures are commonly wrapped by the authentication stack or file-cache
-        // helpers. Walk the inner-exception chain instead of ever exposing their raw English text.
-        return ex.InnerException is not null && IsTransientNetworkFailure(ex.InnerException);
+        return NetworkFailureClassifier.IsTransient(ex);
     }
 
     private async Task<Exception?> RunFolderNavigationAsync(

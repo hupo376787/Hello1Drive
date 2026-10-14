@@ -19,6 +19,10 @@ public sealed class TransferForegroundService : global::Android.App.Service
     private static TransferForegroundService? _instance;
 
     private global::Android.OS.PowerManager.WakeLock? _transferWakeLock;
+    private global::Android.Net.Wifi.WifiManager.WifiLock? _transferWifiLock;
+    private readonly global::Android.OS.Handler _mainHandler = new(global::Android.OS.Looper.MainLooper!);
+    private global::Android.Net.ConnectivityManager? _connectivity;
+    private TransferNetworkCallback? _networkCallback;
 
     public override global::Android.OS.IBinder? OnBind(global::Android.Content.Intent? intent) => null;
 
@@ -28,6 +32,20 @@ public sealed class TransferForegroundService : global::Android.App.Service
         EnsureNotificationChannel();
         lock (InstanceSync)
             _instance = this;
+        _connectivity = GetSystemService(global::Android.Content.Context.ConnectivityService) as global::Android.Net.ConnectivityManager;
+        if (_connectivity is not null)
+        {
+            try
+            {
+                _networkCallback = new TransferNetworkCallback();
+                using var builder = new global::Android.Net.NetworkRequest.Builder();
+                builder.AddCapability(global::Android.Net.NetCapability.Internet);
+                using var request = builder.Build();
+                if (request is not null)
+                    _connectivity.RegisterNetworkCallback(request, _networkCallback);
+            }
+            catch { _networkCallback?.Dispose(); _networkCallback = null; }
+        }
     }
 
     /// <summary>
@@ -46,7 +64,16 @@ public sealed class TransferForegroundService : global::Android.App.Service
 
         try
         {
-            instance.ApplyState(state);
+            // Service callbacks and lock disposal run on Android's main looper. Never race them
+            // with worker-thread notifications or apply an outdated completion snapshot.
+            instance._mainHandler.Post(() =>
+            {
+                lock (InstanceSync)
+                    if (!ReferenceEquals(_instance, instance))
+                        return;
+                try { instance.ApplyState(AndroidTransferBackgroundService.GetLatestState(state)); }
+                catch { /* Android may already be tearing down this service. */ }
+            });
             return true;
         }
         catch
@@ -82,7 +109,6 @@ public sealed class TransferForegroundService : global::Android.App.Service
             return global::Android.App.StartCommandResult.NotSticky;
         }
 
-        EnsureTransferWakeLock();
         var notification = BuildNotification(state.ActiveCount, state.RunningCount, state.UploadCount, state.DownloadCount, state.CacheCount);
 
         // The overload that declares a foreground-service type was introduced in Android 10
@@ -98,6 +124,9 @@ public sealed class TransferForegroundService : global::Android.App.Service
         {
             StartForeground(NotificationId, notification);
         }
+
+        EnsureTransferWakeLock();
+        EnsureTransferWifiLock();
 
         // Do not synthesize a transfer after process death. The existing transfer persistence
         // layer will safely reconstruct pending work the next time the app UI starts.
@@ -115,6 +144,7 @@ public sealed class TransferForegroundService : global::Android.App.Service
         }
 
         EnsureTransferWakeLock();
+        EnsureTransferWifiLock();
         var manager = GetSystemService(global::Android.Content.Context.NotificationService) as global::Android.App.NotificationManager;
         manager?.Notify(
             NotificationId,
@@ -139,8 +169,16 @@ public sealed class TransferForegroundService : global::Android.App.Service
         }
 
         AndroidTransferBackgroundService.NotifyServiceStopped();
+        if (_networkCallback is not null)
+        {
+            try { _connectivity?.UnregisterNetworkCallback(_networkCallback); } catch { }
+            _networkCallback.Dispose();
+            _networkCallback = null;
+        }
         ReleaseTransferWakeLock();
         StopForegroundCompat();
+        _mainHandler.RemoveCallbacksAndMessages(null);
+        _mainHandler.Dispose();
         base.OnDestroy();
     }
 
@@ -156,6 +194,8 @@ public sealed class TransferForegroundService : global::Android.App.Service
         _transferWakeLock ??= powerManager.NewWakeLock(
             global::Android.OS.WakeLockFlags.Partial,
             $"{PackageName}:Hello1DriveTransfer");
+        if (_transferWakeLock is null)
+            return;
         _transferWakeLock.SetReferenceCounted(false);
         if (!_transferWakeLock.IsHeld)
             _transferWakeLock.Acquire();
@@ -163,6 +203,7 @@ public sealed class TransferForegroundService : global::Android.App.Service
 
     private void ReleaseTransferWakeLock()
     {
+        ReleaseTransferWifiLock();
         var wakeLock = _transferWakeLock;
         _transferWakeLock = null;
         if (wakeLock is null)
@@ -180,6 +221,50 @@ public sealed class TransferForegroundService : global::Android.App.Service
         finally
         {
             wakeLock.Dispose();
+        }
+    }
+
+    private void EnsureTransferWifiLock()
+    {
+        if (_transferWifiLock?.IsHeld == true)
+            return;
+        var manager = ApplicationContext?.GetSystemService(global::Android.Content.Context.WifiService) as global::Android.Net.Wifi.WifiManager;
+        if (manager?.IsWifiEnabled != true)
+            return;
+        try
+        {
+            // Partial wake locks protect CPU execution; this lock separately protects an active
+            // Wi-Fi transfer when the screen is off. It is held only while the queue is active.
+            _transferWifiLock ??= manager.CreateWifiLock(global::Android.Net.WifiMode.FullHighPerf,
+                $"{PackageName}:Hello1DriveTransferWifi");
+            if (_transferWifiLock is null)
+                return;
+            _transferWifiLock.SetReferenceCounted(false);
+            if (!_transferWifiLock.IsHeld)
+                _transferWifiLock.Acquire();
+        }
+        catch { ReleaseTransferWifiLock(); }
+    }
+
+    private void ReleaseTransferWifiLock()
+    {
+        var wifiLock = _transferWifiLock;
+        _transferWifiLock = null;
+        if (wifiLock is null)
+            return;
+        try { if (wifiLock.IsHeld) wifiLock.Release(); }
+        catch { }
+        finally { wifiLock.Dispose(); }
+    }
+
+    private sealed class TransferNetworkCallback : global::Android.Net.ConnectivityManager.NetworkCallback
+    {
+        public override void OnAvailable(global::Android.Net.Network network)
+        {
+            base.OnAvailable(network);
+            var state = AndroidTransferBackgroundService.GetLatestState(default);
+            if (state.HasActiveTransfers)
+                TryUpdate(state);
         }
     }
 

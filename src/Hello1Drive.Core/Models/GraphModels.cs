@@ -743,6 +743,9 @@ public sealed class UploadSessionResponse
 
     [JsonPropertyName("expirationDateTime")]
     public DateTimeOffset? ExpirationDateTime { get; set; }
+
+    [JsonPropertyName("nextExpectedRanges")]
+    public string[]? NextExpectedRanges { get; set; }
 }
 
 public sealed class DownloadUrlResponse

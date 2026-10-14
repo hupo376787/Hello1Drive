@@ -768,6 +768,11 @@ public partial class MainView : UserControl
         {
             await action();
         }
+        catch (Exception ex) when (transfer.Direction == TransferDirection.Upload && transfer.State == TransferState.Completed)
+        {
+            transfer.RetryAction = null;
+            vm.ErrorMessage = $"传输已完成，但本地文件收尾失败：{ex.Message}";
+        }
         catch (Exception ex)
         {
             if (SuppressTransientNetworkError(vm, ex))
@@ -3604,6 +3609,11 @@ if (visibleItems.Count > 0)
                 transfer.RetryAction = null;
                 file.Dispose();
             }
+        }
+        catch (Exception ex) when (transfer.State == TransferState.Completed)
+        {
+            transfer.RetryAction = null;
+            vm.ErrorMessage = $"文件已上传，但本地文件收尾失败：{ex.Message}";
         }
         catch (Exception ex)
         {
