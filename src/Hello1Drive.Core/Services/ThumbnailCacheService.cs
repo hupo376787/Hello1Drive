@@ -121,8 +121,10 @@ public sealed class ThumbnailCacheService
             if (TryGetCachedPath(item, out alreadyCached))
                 return alreadyCached;
 
+            var version = item.VersionToken;
             var bytes = await oneDrive.GetThumbnailAsync(item, cancellationToken).ConfigureAwait(false);
-            if (bytes is not { Length: > 0 })
+            cancellationToken.ThrowIfCancellationRequested();
+            if (bytes is not { Length: > 0 } || version != item.VersionToken)
                 return null;
 
             var itemDirectory = GetItemDirectory(item.Id);
@@ -131,7 +133,7 @@ public sealed class ThumbnailCacheService
 
             // Version the content filename so a future cache lookup can validate it with a
             // single File.Exists() instead of opening/parsing metadata.json for every item.
-            var finalPath = GetVersionedContentPath(item.Id, item.VersionToken);
+            var finalPath = GetVersionedContentPath(item.Id, version);
             var tempPath = Path.Combine(itemDirectory, "thumbnail.tmp");
             await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, finalPath, overwrite: true);
@@ -140,14 +142,14 @@ public sealed class ThumbnailCacheService
             {
                 ItemId = item.Id,
                 FileName = item.Name,
-                VersionToken = item.VersionToken,
+                VersionToken = version,
                 Size = item.Size,
                 LastModifiedDateTime = item.LastModifiedDateTime,
                 ContentPath = finalPath,
                 LastAccessUtc = DateTimeOffset.UtcNow
             }, cancellationToken).ConfigureAwait(false);
 
-            _memoryIndex[item.Id] = new ThumbnailCacheIndexEntry(item.VersionToken, finalPath);
+            _memoryIndex[item.Id] = new ThumbnailCacheIndexEntry(version, finalPath);
             return finalPath;
         }
         finally

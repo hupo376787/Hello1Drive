@@ -5,9 +5,10 @@ namespace Hello1Drive.Services;
 /// resumable retries. Android providers may return pipes which advertise a file channel but
 /// cannot actually seek (or report a zero length), so always stage picker input on Android.
 /// </summary>
-internal sealed class PreparedUploadSource(Stream stream, bool ownsStream) : IAsyncDisposable
+internal sealed class PreparedUploadSource(Stream stream, bool ownsStream, string? checksum = null) : IAsyncDisposable
 {
     public Stream Stream { get; } = stream;
+    public string? ContentChecksum { get; } = checksum;
 
     public static async Task<PreparedUploadSource> PrepareAsync(
         Stream source, bool forceCopy, CancellationToken cancellationToken)
@@ -30,10 +31,17 @@ internal sealed class PreparedUploadSource(Stream stream, bool ownsStream) : IAs
             128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose);
         try
         {
-            await source.CopyToAsync(staged, 128 * 1024, cancellationToken).ConfigureAwait(false);
+            var hash = new OneDriveContentHash();
+            var buffer = new byte[128 * 1024];
+            int count;
+            while ((count = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                hash.Append(buffer.AsSpan(0, count));
+                await staged.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            }
             await staged.FlushAsync(cancellationToken).ConfigureAwait(false);
             staged.Position = 0;
-            return new PreparedUploadSource(staged, ownsStream: true);
+            return new PreparedUploadSource(staged, ownsStream: true, hash.GetValue());
         }
         catch
         {

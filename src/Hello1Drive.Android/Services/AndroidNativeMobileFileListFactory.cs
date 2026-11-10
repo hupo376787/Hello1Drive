@@ -346,6 +346,8 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
 
     private void ReportScrollState(bool scrolling)
     {
+        if (_disposed)
+            return;
         var first = GetFirstVisiblePosition();
         var last = GetLastVisiblePosition();
         _adapter.UpdateVisibleRange(first, last);
@@ -396,10 +398,15 @@ internal sealed class AndroidNativeFileListController : Java.Lang.Object, IDispo
         {
             // A new navigation/refresh superseded this one.
         }
+        catch (Exception ex)
+        {
+            if (!_disposed && _viewModel is not null)
+                _viewModel.ErrorMessage = $"刷新失败：{ex.Message}";
+        }
         finally
         {
             if (!_disposed)
-                _refresh.Post(() => _refresh.Refreshing = false);
+                _refresh.Post(() => { if (!_disposed) _refresh.Refreshing = false; });
         }
     }
 
@@ -606,8 +613,9 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     private readonly NativeMobileFileListHost _host;
     private readonly RecyclerView _recycler;
     private readonly SemaphoreSlim _thumbnailGate = new(4, 4);
-    private readonly ConcurrentDictionary<string, byte> _loadingIds = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _prefetchingIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CancellationToken> _loadingIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CancellationToken> _prefetchingIds = new(StringComparer.Ordinal);
+    private readonly HashSet<NativeFileViewHolder> _boundHolders = [];
     private readonly object _bitmapCacheGate = new();
     private readonly Dictionary<string, Bitmap> _bitmapCache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _bitmapLru = [];
@@ -752,6 +760,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
             return;
 
         var slot = _viewModel.MobileItems[position];
+        _boundHolders.Add(fileHolder);
         var item = slot.Item;
         Bitmap? cachedBitmap = null;
         if (item is not null)
@@ -767,7 +776,10 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
     public override void OnViewRecycled(Java.Lang.Object holder)
     {
         if (holder is NativeFileViewHolder fileHolder)
+        {
+            _boundHolders.Remove(fileHolder);
             fileHolder.Unbind();
+        }
         base.OnViewRecycled(holder);
     }
 
@@ -776,6 +788,13 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (holder is NativeFileViewHolder fileHolder)
             fileHolder.CancelThumbnailBinding();
         base.OnViewDetachedFromWindow(holder);
+    }
+
+    public override void OnViewAttachedToWindow(Java.Lang.Object holder)
+    {
+        base.OnViewAttachedToWindow(holder);
+        if (holder is NativeFileViewHolder fileHolder && !_disposed && !_scrolling)
+            RebindHolder(fileHolder);
     }
 
     internal void RebindHolder(NativeFileViewHolder holder)
@@ -829,18 +848,19 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         if (TryGetBitmap(item, out var bitmap) && bitmap is not null)
             return;
 
-        if (!_prefetchingIds.TryAdd(item.Id, 0))
+        var generationToken = _thumbnailGenerationCts.Token;
+        var key = BitmapKey(item);
+        if (!_prefetchingIds.TryAdd(key, generationToken))
             return;
 
-        var generationToken = _thumbnailGenerationCts.Token;
-        _ = PrefetchThumbnailAsync(item, generationToken);
+        _ = PrefetchThumbnailAsync(item, key, generationToken);
     }
 
-    private async Task PrefetchThumbnailAsync(DriveItemModel item, CancellationToken generationToken)
+    private async Task PrefetchThumbnailAsync(DriveItemModel item, string key, CancellationToken generationToken)
     {
         try
         {
-            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
             try
             {
                 if (generationToken.IsCancellationRequested) return;
@@ -848,7 +868,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
@@ -867,13 +887,16 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 if (bitmap is null)
                     return;
 
-                if (generationToken.IsCancellationRequested)
+                if (generationToken.IsCancellationRequested || key != BitmapKey(item))
                 {
                     bitmap.Dispose();
-                    if (generationToken.IsCancellationRequested) return;
+                    return;
                 }
 
-                AddBitmapToCache(item, bitmap);
+                if (!AddBitmapToCache(key, bitmap))
+                    bitmap.Dispose();
+                else
+                    PublishThumbnail(key, bitmap, generationToken);
             }
             finally
             {
@@ -890,7 +913,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         }
         finally
         {
-            _prefetchingIds.TryRemove(item.Id, out _);
+            _prefetchingIds.TryRemove(new KeyValuePair<string, CancellationToken>(key, generationToken));
         }
     }
 
@@ -905,23 +928,26 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
 
         if (TryGetBitmap(item, out var existing) && existing is not null)
         {
-            holder.ApplyThumbnail(item.Id, existing);
+            var cachedKey = BitmapKey(item);
+            holder.MarkThumbnailRequest(cachedKey);
+            holder.ApplyThumbnail(cachedKey, existing);
             return;
         }
 
-        if (!_loadingIds.TryAdd(item.Id, 0))
+        var generationToken = _thumbnailGenerationCts.Token;
+        var key = BitmapKey(item);
+        if (!_loadingIds.TryAdd(key, generationToken))
             return;
 
-        var generationToken = _thumbnailGenerationCts.Token;
-        holder.MarkThumbnailRequest(item.Id);
-        _ = LoadThumbnailAsync(holder, item, generationToken);
+        holder.MarkThumbnailRequest(key);
+        _ = LoadThumbnailAsync(item, key, generationToken);
     }
 
-    private async Task LoadThumbnailAsync(NativeFileViewHolder holder, DriveItemModel item, CancellationToken generationToken)
+    private async Task LoadThumbnailAsync(DriveItemModel item, string key, CancellationToken generationToken)
     {
         try
         {
-            await _thumbnailGate.WaitAsync().ConfigureAwait(false);
+            await _thumbnailGate.WaitAsync(generationToken).ConfigureAwait(false);
             try
             {
                 if (generationToken.IsCancellationRequested) return;
@@ -929,7 +955,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                     return;
 
                 var path = await AppServices.ThumbnailCache
-                    .GetOrDownloadAsync(item, AppServices.OneDrive, CancellationToken.None)
+                    .GetOrDownloadAsync(item, AppServices.OneDrive, generationToken)
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                     return;
@@ -946,16 +972,13 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 if (bitmap is null)
                     return;
 
-                AddBitmapToCache(item, bitmap);
-                if (generationToken.IsCancellationRequested)
-                    return;
-
-                _recycler.Post(() =>
+                if (generationToken.IsCancellationRequested || key != BitmapKey(item) || !AddBitmapToCache(key, bitmap))
                 {
-                    if (_disposed || _scrolling)
-                        return;
-                    holder.ApplyThumbnail(item.Id, bitmap);
-                });
+                    bitmap.Dispose();
+                    return;
+                }
+
+                PublishThumbnail(key, bitmap, generationToken);
             }
             finally
             {
@@ -973,8 +996,30 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         }
         finally
         {
-            _loadingIds.TryRemove(item.Id, out _);
+            _loadingIds.TryRemove(new KeyValuePair<string, CancellationToken>(key, generationToken));
         }
+    }
+
+    private void PublishThumbnail(string key, Bitmap bitmap, CancellationToken generationToken)
+    {
+        _recycler.Post(() =>
+        {
+            if (_disposed || _scrolling || generationToken.IsCancellationRequested || ItemCount == 0)
+                return;
+            // Recycled/replaced holders must receive the completed image too. The holder that
+            // initiated the request may now belong to a completely different file.
+            var first = Math.Clamp(_visibleFirst, 0, ItemCount - 1);
+            var last = Math.Clamp(_visibleLast, first, ItemCount - 1);
+            for (var position = first; position <= last; position++)
+            {
+                if (GetItem(position) is { } item && BitmapKey(item) == key &&
+                    _recycler.FindViewHolderForAdapterPosition(position) is NativeFileViewHolder holder)
+                {
+                    holder.MarkThumbnailRequest(key);
+                    holder.ApplyThumbnail(key, bitmap);
+                }
+            }
+        });
     }
 
     private Bitmap? DecodeScaled(string path, int targetPx)
@@ -1020,11 +1065,12 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         }
     }
 
-    private void AddBitmapToCache(DriveItemModel item, Bitmap bitmap)
+    private bool AddBitmapToCache(string key, Bitmap bitmap)
     {
-        var key = BitmapKey(item);
         lock (_bitmapCacheGate)
         {
+            if (_disposed)
+                return false;
             _bitmapCache[key] = bitmap;
             TouchBitmapLru(key);
             while (_bitmapLru.Count > BitmapCacheLimit)
@@ -1038,6 +1084,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
                 // Do not Dispose here: a currently attached native item may still be drawing this
                 // bitmap. Once no View/cache reference remains Android's GC releases it safely.
             }
+            return true;
         }
     }
 
@@ -1054,7 +1101,7 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
         _bitmapLruNodes[key] = created;
     }
 
-    private string BitmapKey(DriveItemModel item) => $"{item.Id}|{item.VersionToken}|{Mode}";
+    internal string BitmapKey(DriveItemModel item) => $"{item.Id}|{item.VersionToken}|{Mode}";
 
     private void RefreshVisible()
     {
@@ -1085,6 +1132,10 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
             _viewModel.MobileItems.CollectionChanged -= MobileItems_CollectionChanged;
         _viewModel = null;
 
+        foreach (var holder in _boundHolders)
+            holder.Detach();
+        _boundHolders.Clear();
+
         CancelThumbnailGeneration();
         _thumbnailGenerationCts.Dispose();
 
@@ -1094,7 +1145,8 @@ internal sealed class NativeFileAdapter : RecyclerView.Adapter, IDisposable
             _bitmapLru.Clear();
             _bitmapLruNodes.Clear();
         }
-        _thumbnailGate.Dispose();
+        // Cancelled async workers still own/release permits. The managed semaphore can be
+        // collected with those workers; disposing it here races their finally blocks.
     }
 }
 
@@ -1105,7 +1157,7 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
     private readonly NativeMobileFileListHost _host;
     private VirtualDriveItemSlot? _slot;
     private int _refreshQueued;
-    private string? _thumbnailRequestItemId;
+    private string? _thumbnailRequestKey;
 
     public NativeFileViewHolder(NativeFileItemView view, NativeFileAdapter owner, NativeMobileFileListHost host)
         : base(view)
@@ -1136,32 +1188,40 @@ internal sealed class NativeFileViewHolder : RecyclerView.ViewHolder
             _slot.PropertyChanged += Slot_PropertyChanged;
         }
 
-        _thumbnailRequestItemId = null;
+        _thumbnailRequestKey = null;
         _view.Bind(slot.Item, mode, darkTheme, transparentBackground, selectionMode, selected, bitmap);
     }
 
-    public void MarkThumbnailRequest(string itemId) => _thumbnailRequestItemId = itemId;
+    public void MarkThumbnailRequest(string itemId) => _thumbnailRequestKey = itemId;
 
     public void ApplyThumbnail(string itemId, Bitmap bitmap)
     {
         if (_slot?.Item is not { } item ||
-            !string.Equals(item.Id, itemId, StringComparison.Ordinal) ||
+            !string.Equals(_thumbnailRequestKey, itemId, StringComparison.Ordinal) ||
+            !string.Equals(_owner.BitmapKey(item), itemId, StringComparison.Ordinal) ||
             bitmap.IsRecycled)
             return;
 
-        _thumbnailRequestItemId = null;
+        _thumbnailRequestKey = null;
         _view.SetThumbnail(bitmap);
     }
 
-    public void CancelThumbnailBinding() => _thumbnailRequestItemId = null;
+    public void CancelThumbnailBinding() => _thumbnailRequestKey = null;
 
     public void Unbind()
     {
         if (_slot is not null)
             _slot.PropertyChanged -= Slot_PropertyChanged;
         _slot = null;
-        _thumbnailRequestItemId = null;
+        _thumbnailRequestKey = null;
         _view.Bind(null, _view.Mode, _view.DarkTheme, _view.TransparentBackground, false, false, null);
+    }
+
+    public void Detach()
+    {
+        Unbind();
+        _view.Click -= View_Click;
+        _view.LongClick -= View_LongClick;
     }
 
     private void Slot_PropertyChanged(object? sender, PropertyChangedEventArgs e)

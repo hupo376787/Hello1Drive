@@ -713,6 +713,15 @@ public sealed class FileFacet
 {
     [JsonPropertyName("mimeType")]
     public string? MimeType { get; set; }
+
+    [JsonPropertyName("hashes")]
+    public FileHashes? Hashes { get; set; }
+}
+
+public sealed class FileHashes
+{
+    [JsonPropertyName("quickXorHash")]
+    public string? QuickXorHash { get; set; }
 }
 
 public sealed class SpecialFolderFacet

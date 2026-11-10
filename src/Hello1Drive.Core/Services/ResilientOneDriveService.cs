@@ -152,15 +152,18 @@ public sealed class ResilientOneDriveService : IOneDriveService
                 {
                     // If the final acknowledgement was lost, verify before recovering/recreating
                     // the session so a background timeout cannot create a second copy.
-                    sentFinalBytes |= heartbeat.LastValue >= 0.995;
+                    sentFinalBytes |= heartbeat.LastValue >= 1;
                     if (sentFinalBytes && remainingLength is long expectedLength &&
                         await TryVerifyCompletedUploadAsync(
-                            parentItemId, fileName, expectedLength, startedUtc,
+                            parentItemId, fileName, expectedLength, startedUtc, source, originalPosition, prepared.ContentChecksum,
                             cancellationToken).ConfigureAwait(false))
                     {
                         progress?.Report(1.0);
                         return;
                     }
+
+                    if (sentFinalBytes && ex is UploadSessionExpiredException)
+                        throw new UploadCompletionUnknownException();
 
                     await DelayBeforeTransferRetryAsync(attempt++, cancellationToken).ConfigureAwait(false);
                 }
@@ -203,8 +206,15 @@ public sealed class ResilientOneDriveService : IOneDriveService
                 progress?.Report(0);
 
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCts.CancelAfter(_transferStallTimeout);
-            var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, _transferStallTimeout);
+            var stallTimeout = _transferStallTimeout;
+            if (DownloadBytesPerSecondLimit is long rate && rate > 0)
+            {
+                var limitedInterval = TimeSpan.FromSeconds(256d * 1024 / rate + 30);
+                if (limitedInterval > stallTimeout)
+                    stallTimeout = limitedInterval;
+            }
+            attemptCts.CancelAfter(stallTimeout);
+            var heartbeat = new TransferHeartbeatProgress(progress, attemptCts, stallTimeout);
 
             try
             {
@@ -227,6 +237,9 @@ public sealed class ResilientOneDriveService : IOneDriveService
         string requestedName,
         long expectedLength,
         DateTimeOffset startedUtc,
+        Stream source,
+        long originalPosition,
+        string? contentChecksum,
         CancellationToken cancellationToken)
     {
         try
@@ -241,15 +254,27 @@ public sealed class ResilientOneDriveService : IOneDriveService
                 // which has already been committed.
                 var page = await _inner.GetChildrenPageAsync(parentItemId, nextLink, pageSize: 200,
                     cancellationToken: verifyCts.Token, orderBy: "lastModifiedDateTime desc").ConfigureAwait(false);
-                if (page.Items.Any(item => item.IsFile && item.Size == expectedLength &&
+                foreach (var candidate in page.Items.Where(item => item.IsFile && item.Size == expectedLength &&
                     LooksLikeRequestedUploadName(requestedName, item.Name) &&
                     item.LastModifiedDateTime is { } modified && modified >= startedUtc.AddMinutes(-1)))
-                    return true;
+                {
+                    var metadata = await _inner.GetItemMetadataAsync(candidate.Id, verifyCts.Token).ConfigureAwait(false);
+                    var remoteChecksum = metadata.File?.Hashes?.QuickXorHash;
+                    if (!metadata.IsFile || metadata.Size != expectedLength || string.IsNullOrEmpty(remoteChecksum))
+                        continue;
+                    contentChecksum ??= await OneDriveContentHash.ComputeAsync(source, originalPosition, verifyCts.Token).ConfigureAwait(false);
+                    if (string.Equals(contentChecksum, remoteChecksum, StringComparison.Ordinal))
+                        return true;
+                }
                 nextLink = page.NextLink;
             } while (!string.IsNullOrWhiteSpace(nextLink));
             return false;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             return false;
         }
@@ -269,9 +294,12 @@ public sealed class ResilientOneDriveService : IOneDriveService
         var candidateExtension = Path.GetExtension(candidateName);
         var candidateStem = Path.GetFileNameWithoutExtension(candidateName);
 
-        return string.Equals(extension, candidateExtension, StringComparison.OrdinalIgnoreCase) &&
+        if (!(string.Equals(extension, candidateExtension, StringComparison.OrdinalIgnoreCase) &&
                candidateStem.StartsWith(stem + " (", StringComparison.OrdinalIgnoreCase) &&
-               candidateStem.EndsWith(')');
+               candidateStem.EndsWith(')')))
+            return false;
+        var suffix = candidateStem.AsSpan(stem.Length + 2, candidateStem.Length - stem.Length - 3);
+        return suffix.Length > 0 && suffix[0] != '0' && suffix.IndexOfAnyExceptInRange('0', '9') < 0;
     }
 
     private static bool ShouldRetryAttempt(

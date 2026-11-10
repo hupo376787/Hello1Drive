@@ -36,6 +36,9 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
     private bool _seeking;
     private bool _speedBoostActive;
     private bool _shutdown;
+    private int _resumePosition;
+    private bool _resumePlaying = true;
+    private int? _pendingResumeSeek;
 
     public AndroidVideoPlayerControl(string localFilePath)
     {
@@ -67,7 +70,7 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
             Gravity = GravityFlags.Bottom
         });
 
-        var preparedListener = new PreparedListener(this);
+        var preparedListener = new PreparedListener(this, videoView);
         videoView.SetOnPreparedListener(preparedListener);
 
         var gestureListener = new VideoGestureListener(this);
@@ -75,7 +78,6 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         var touchListener = new VideoTouchListener(this, gestureDetector);
         videoView.SetOnTouchListener(touchListener);
         videoView.Clickable = true;
-        videoView.SetVideoPath(_localFilePath);
 
         _root = root;
         _videoView = videoView;
@@ -84,6 +86,7 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         _gestureListener = gestureListener;
         _gestureDetector = gestureDetector;
         _touchListener = touchListener;
+        videoView.SetVideoPath(_localFilePath);
 
         UpdateTransportState();
         return new AndroidViewControlHandle(root);
@@ -145,15 +148,21 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
     private static int Dp(Context context, float value) =>
         (int)Math.Round(value * (context.Resources?.DisplayMetrics?.Density ?? 1f));
 
-    private void HandlePrepared(MediaPlayer mediaPlayer)
+    private void HandlePrepared(VideoView source, MediaPlayer mediaPlayer)
     {
-        if (_shutdown || _videoView is null)
+        if (_shutdown || !ReferenceEquals(_videoView, source))
             return;
 
         _mediaPlayer = mediaPlayer;
         try
         {
-            _videoView.Start();
+            if (_resumePosition > 0)
+            {
+                _pendingResumeSeek = _resumePosition;
+                _videoView.SeekTo(_resumePosition);
+            }
+            if (_resumePlaying)
+                _videoView.Start();
             _controls!.Visibility = ViewStates.Visible;
             _progressTimer.Start();
             UpdateTransportState();
@@ -175,9 +184,15 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         try
         {
             if (_videoView.IsPlaying)
+            {
                 _videoView.Pause();
+                _resumePlaying = false;
+            }
             else
+            {
                 _videoView.Start();
+                _resumePlaying = true;
+            }
             UpdateTransportState();
         }
         catch
@@ -197,6 +212,13 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         {
             var duration = Math.Max(0, _videoView.Duration);
             var position = Math.Clamp(_videoView.CurrentPosition, 0, Math.Max(0, duration));
+            if (_mediaPlayer is not null)
+            {
+                if (_pendingResumeSeek is int target && Math.Abs((long)position - target) < 1000)
+                    _pendingResumeSeek = null;
+                _resumePosition = _pendingResumeSeek ?? position;
+                _resumePlaying = _videoView.IsPlaying;
+            }
             if (_playPauseButton is not null)
                 _playPauseButton.Text = _videoView.IsPlaying ? "Ⅱ" : "▶";
             if (_currentTimeText is not null)
@@ -297,14 +319,36 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
 
         EndTemporarySpeed();
         _shutdown = true;
-        _progressTimer.Stop();
         _progressTimer.Tick -= ProgressTimer_Tick;
+        ReleaseNativeView();
+    }
+
+    protected override void DestroyNativeControlCore(IPlatformHandle control)
+    {
+        ReleaseNativeView();
+        base.DestroyNativeControlCore(control);
+    }
+
+    private void ReleaseNativeView()
+    {
+        EndTemporarySpeed();
+        _progressTimer.Stop();
+        _seeking = false;
 
         if (_playPauseButton is not null)
             _playPauseButton.Click -= PlayPause_Click;
 
         if (_videoView is not null)
         {
+            if (_mediaPlayer is not null)
+            {
+                try
+                {
+                    _resumePosition = _pendingResumeSeek ?? Math.Max(0, _videoView.CurrentPosition);
+                    _resumePlaying = _videoView.IsPlaying;
+                }
+                catch { }
+            }
             try { _videoView.SetOnTouchListener(null); } catch { }
             try { _videoView.SetOnPreparedListener(null); } catch { }
             try { _videoView.StopPlayback(); } catch { }
@@ -324,6 +368,7 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         _preparedListener?.Dispose();
         _preparedListener = null;
         _mediaPlayer = null; // VideoView owns the MediaPlayer instance.
+        _pendingResumeSeek = null;
         _playPauseButton = null;
         _seekBar = null;
         _currentTimeText = null;
@@ -333,19 +378,13 @@ internal sealed class AndroidVideoPlayerControl : NativeControlHost
         _root = null;
     }
 
-    protected override void DestroyNativeControlCore(IPlatformHandle control)
-    {
-        Shutdown();
-        base.DestroyNativeControlCore(control);
-    }
-
-    private sealed class PreparedListener(AndroidVideoPlayerControl owner)
+    private sealed class PreparedListener(AndroidVideoPlayerControl owner, VideoView source)
         : Java.Lang.Object, MediaPlayer.IOnPreparedListener
     {
         public void OnPrepared(MediaPlayer? mp)
         {
             if (mp is not null)
-                owner.HandlePrepared(mp);
+                owner.HandlePrepared(source, mp);
         }
     }
 

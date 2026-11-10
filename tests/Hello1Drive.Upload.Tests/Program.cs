@@ -25,6 +25,8 @@ Run("native timeout resumes the same session", () => Network(() => CheckSessionA
 Run("progress-watchdog cancellation resumes the existing session", () => Network(() => CheckSessionAsync("watchdog")));
 Run("HTTP 416 resumes from server offset", () => Network(() => CheckSessionAsync("416")));
 Run("lost final response verifies completion without creating another session", () => Network(() => CheckSessionAsync("final-lost")));
+Run("same-name same-size remote file cannot fake upload success", () => Network(() => CheckSessionAsync("final-lost-mismatch")));
+Run("missing content hash leaves completion unconfirmed without duplicate replay", () => Network(() => CheckSessionAsync("final-lost-nohash")));
 Run("202 Accepted is not mistaken for completed upload", () => Network(() => CheckSessionAsync("final-202")));
 Run("nonzero stream position uploads only remaining bytes", () => Network(() => CheckSessionAsync("position")));
 Run("premature EOF cannot send a malformed last fragment", () => Network(CheckPrematureEndAsync));
@@ -35,6 +37,12 @@ Run("100% request serialization remains 99% until server confirmation", CheckUiP
 Run("refresh failure cannot overwrite confirmed upload", CheckRefreshFailure);
 Run("Android stream-close failure cannot overwrite confirmed upload", CheckCloseFailure);
 Run("native abort keeps transfer/background state active through retry", CheckBackgroundRetry);
+Run("OneDrive checksum vectors and source position", () => Network(CheckContentHashAsync));
+Run("truncated download retries instead of completing", () => Network(CheckTruncatedDownloadAsync));
+Run("oversized download is rejected", () => Network(CheckOversizedDownloadAsync));
+Run("slow download limit preserves healthy transfer", () => Network(CheckSlowDownloadAsync));
+Run("thumbnail metadata mutation cannot cache obsolete bytes as a new version", () => Network(CheckThumbnailVersionAsync));
+Run("cancelled thumbnail download releases the next request", () => Network(CheckThumbnailCancellationAsync));
 Console.WriteLine("PASS: all upload regressions");
 
 static void Run(string name, Action action) { action(); Console.WriteLine($"PASS: {name}"); }
@@ -103,7 +111,14 @@ static async Task CheckSessionAsync(string scenario)
         }
         if (request.RequestUri!.Host != "upload.example")
         {
-            Assert(scenario == "final-lost" && request.Method == HttpMethod.Get, "only final-loss verification uses Graph listing");
+            Assert(scenario.StartsWith("final-lost") && request.Method == HttpMethod.Get, "only final-loss verification uses Graph listing");
+            if (request.RequestUri.AbsolutePath.EndsWith("/items/uploaded-id"))
+            {
+                var checksum = Convert.FromBase64String(await ContentHashAsync(bytes));
+                if (scenario == "final-lost-mismatch") checksum[0] ^= 1;
+                return Json(HttpStatusCode.OK, new { id = "uploaded-id", name = "upload.bin", size,
+                    file = new { hashes = new { quickXorHash = scenario == "final-lost-nohash" ? null : Convert.ToBase64String(checksum) } } });
+            }
             Assert(request.RequestUri.AbsolutePath.EndsWith("/children"), "verification stops on newest page without fetching all continuation pages");
             Assert(Uri.UnescapeDataString(request.RequestUri.Query).Contains("lastModifiedDateTime desc"), "completion verification requests newest files first");
             return Json(HttpStatusCode.OK, new Dictionary<string, object> {
@@ -115,7 +130,7 @@ static async Task CheckSessionAsync(string scenario)
         if (request.Method == HttpMethod.Get)
         {
             statusReads++;
-            if (scenario == "final-lost") return Json(HttpStatusCode.NotFound, new { error = "session finished" });
+            if (scenario.StartsWith("final-lost")) return Json(HttpStatusCode.NotFound, new { error = "session finished" });
             recovered = true;
             return Json(HttpStatusCode.OK, Pending(2L * chunkSize));
         }
@@ -140,7 +155,7 @@ static async Task CheckSessionAsync(string scenario)
         }
         if (start + body.Length == size)
         {
-            if (scenario == "final-lost") throw new HttpRequestException("simulated missing final acknowledgement");
+            if (scenario.StartsWith("final-lost")) throw new HttpRequestException("simulated missing final acknowledgement");
             if (scenario == "final-202" && !recovered)
             {
                 recovered = true;
@@ -154,7 +169,15 @@ static async Task CheckSessionAsync(string scenario)
     var service = scenario == "watchdog"
         ? new ResilientOneDriveService(new OneDriveService(new TokenAuthentication(), client, client), TimeSpan.FromMilliseconds(300))
         : Service(client);
-    await service.UploadFileAsync(null, "upload.bin", input);
+    var unconfirmed = false;
+    try { await service.UploadFileAsync(null, "upload.bin", input); }
+    catch (UploadCompletionUnknownException) { unconfirmed = true; }
+    if (scenario is "final-lost-mismatch" or "final-lost-nohash")
+    {
+        Assert(unconfirmed && sessionCreates == 1, "unverified upload must not succeed or automatically create another copy");
+        return;
+    }
+    Assert(!unconfirmed, "valid completion remains confirmed");
     Assert(sessionCreates == 1, "no duplicate full-upload session");
     Assert(acknowledged || scenario == "final-lost", "requires final acknowledgement or verified remote item");
     if (scenario is "lost" or "416" or "socket" or "abort" or "java-socket" or "java-io" or "timeout" or "watchdog")
@@ -302,10 +325,145 @@ static void CheckBackgroundRetry()
     Assert(recorder.States.Last().ActiveCount == otherActive, "completed job removed from keep-alive without stopping other pending jobs");
 }
 
+static async Task<string> ContentHashAsync(byte[] bytes)
+{
+    using var source = new MemoryStream(bytes);
+    var type = typeof(ResilientOneDriveService).Assembly.GetType("Hello1Drive.Services.OneDriveContentHash")!;
+    return await (Task<string>)type.GetMethod("ComputeAsync")!.Invoke(null, [source, 0L, CancellationToken.None])!;
+}
+
+static async Task CheckContentHashAsync()
+{
+    Assert(await ContentHashAsync([]) == "AAAAAAAAAAAAAAAAAAAAAAAAAAA=", "empty checksum vector");
+    Assert(await ContentHashAsync(Encoding.UTF8.GetBytes("abc")) == "YRDDGAAAAAAAAAAAAwAAAAAAAAA=", "abc checksum vector");
+    var bytes = Enumerable.Range(0, 768).Select(i => (byte)i).ToArray();
+    using var source = new FragmentedReadStream(bytes);
+    source.Position = 17;
+    var type = typeof(ResilientOneDriveService).Assembly.GetType("Hello1Drive.Services.OneDriveContentHash")!;
+    var checksum = await (Task<string>)type.GetMethod("ComputeAsync")!.Invoke(null, [source, 0L, CancellationToken.None])!;
+    Assert(checksum == "rxAOGe1RimTF/e+k/m0O5nnSZT8=", "checksum independent of read boundaries");
+    Assert(source.Position == 17, "verification preserves the upload retry position");
+}
+
+static async Task CheckTruncatedDownloadAsync()
+{
+    var requests = 0;
+    var expected = Enumerable.Range(0, 10).Select(i => (byte)i).ToArray();
+    using var destination = new MemoryStream();
+    var progress = new CaptureProgress();
+    using var client = Client((_, _) =>
+    {
+        if (++requests == 2) Assert(!progress.Values.Contains(1), "short EOF must not report completion");
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
+            Content = new RawDownloadContent(requests == 1 ? expected[..3] : expected, expected.Length)
+        });
+    });
+    await Service(client).DownloadFileAsync("download", destination, progress);
+    Assert(requests == 2 && destination.ToArray().SequenceEqual(expected), "retry replaces incomplete data instead of appending");
+    Assert(progress.Values.Last() == 1, "100% follows complete EOF and flush");
+}
+
+static async Task CheckOversizedDownloadAsync()
+{
+    using var destination = new MemoryStream();
+    using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
+        Content = new RawDownloadContent(new byte[12], 10)
+    }));
+    try { await Service(client).DownloadFileAsync("download", destination); throw new Exception("expected size error"); }
+    catch (InvalidDataException) { }
+}
+
+static async Task CheckSlowDownloadAsync()
+{
+    var inner = DispatchProxy.Create<IOneDriveService, UploadServiceStub>();
+    var attempts = 0;
+    ((UploadServiceStub)(object)inner).DownloadCancellable = async (progress, token) =>
+    {
+        attempts++;
+        await Task.Delay(200, token);
+        progress!.Report(1);
+    };
+    var service = new ResilientOneDriveService(inner, TimeSpan.FromMilliseconds(50)) { DownloadBytesPerSecondLimit = 1024 };
+    using var destination = new MemoryStream();
+    await service.DownloadFileAsync("download", destination, new CaptureProgress());
+    Assert(attempts == 1, "explicit download throttling doesn't trigger a watchdog restart");
+}
+
+static async Task CheckThumbnailVersionAsync()
+{
+    var cache = new ThumbnailCacheService();
+    var item = new DriveItemModel { Id = Guid.NewGuid().ToString(), Name = "test.jpg", ETag = "old", File = new FileFacet() };
+    var service = DispatchProxy.Create<IOneDriveService, UploadServiceStub>();
+    var pending = new TaskCompletionSource<byte[]?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    ((UploadServiceStub)(object)service).Thumbnail = (_, _) => pending.Task;
+    try
+    {
+        var first = cache.GetOrDownloadAsync(item, service);
+        item.ETag = "new";
+        pending.SetResult([1, 2, 3]);
+        Assert(await first is null && !cache.TryGetCachedPath(item, out _), "old bytes cannot be published under new version");
+        ((UploadServiceStub)(object)service).Thumbnail = (_, _) => Task.FromResult<byte[]?>([4, 5, 6]);
+        var path = await cache.GetOrDownloadAsync(item, service);
+        Assert(path is not null && File.ReadAllBytes(path).SequenceEqual(new byte[] { 4, 5, 6 }), "new version can load after stale request finishes");
+    }
+    finally { cache.Invalidate(item.Id); }
+}
+
+static async Task CheckThumbnailCancellationAsync()
+{
+    var cache = new ThumbnailCacheService();
+    var item = new DriveItemModel { Id = Guid.NewGuid().ToString(), Name = "test.jpg", ETag = "v1", File = new FileFacet() };
+    var service = DispatchProxy.Create<IOneDriveService, UploadServiceStub>();
+    var calls = 0;
+    ((UploadServiceStub)(object)service).Thumbnail = async (_, token) =>
+    {
+        if (++calls == 1) await Task.Delay(Timeout.Infinite, token);
+        return [4, 5, 6];
+    };
+    using var cancellation = new CancellationTokenSource();
+    try
+    {
+        var first = cache.GetOrDownloadAsync(item, service, cancellation.Token);
+        var second = cache.GetOrDownloadAsync(item, service);
+        cancellation.Cancel();
+        try { await first; throw new Exception("expected thumbnail cancellation"); }
+        catch (OperationCanceledException) { }
+        Assert(await second is not null && calls == 2, "next request acquires released cache permit");
+    }
+    finally { cache.Invalidate(item.Id); }
+}
+
 public sealed class BackgroundRecorder : ITransferBackgroundService
 {
     public List<TransferBackgroundState> States { get; } = [];
     public void Update(TransferBackgroundState state) => States.Add(state);
+}
+
+public sealed class CaptureProgress : IProgress<double>
+{
+    public List<double> Values { get; } = [];
+    public void Report(double value) => Values.Add(value);
+}
+
+public sealed class FragmentedReadStream(byte[] bytes) : MemoryStream(bytes)
+{
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        base.ReadAsync(buffer[..Math.Min(17, buffer.Length)], cancellationToken);
+}
+
+public sealed class RawDownloadContent : HttpContent
+{
+    private readonly byte[] _bytes;
+    private readonly long _declaredLength;
+    public RawDownloadContent(byte[] bytes, long declaredLength)
+    {
+        _bytes = bytes;
+        _declaredLength = declaredLength;
+        Headers.ContentLength = declaredLength;
+    }
+    protected override bool TryComputeLength(out long length) { length = _declaredLength; return true; }
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(_bytes).AsTask();
+    protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new MemoryStream(_bytes));
 }
 
 public sealed class ScriptedHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
@@ -317,15 +475,21 @@ public class UploadServiceStub : DispatchProxy
 {
     public Func<IProgress<double>?, Task> Upload { get; set; } = _ => Task.CompletedTask;
     public Func<IProgress<double>?, CancellationToken, Task>? UploadCancellable { get; set; }
+    public Func<IProgress<double>?, CancellationToken, Task>? DownloadCancellable { get; set; }
+    public Func<DriveItemModel, CancellationToken, Task<byte[]?>>? Thumbnail { get; set; }
     private long? _uploadLimit;
+    private long? _downloadLimit;
     private object? SetUploadLimit(object? value) { _uploadLimit = (long?)value; return null; }
+    private object? SetDownloadLimit(object? value) { _downloadLimit = (long?)value; return null; }
     protected override object? Invoke(MethodInfo? method, object?[]? args) => method!.Name switch
     {
         "UploadFileAsync" => UploadCancellable?.Invoke((IProgress<double>?)args![3], (CancellationToken)args[4]!) ?? Upload((IProgress<double>?)args![3]),
+        "DownloadFileAsync" => DownloadCancellable!.Invoke((IProgress<double>?)args![2], (CancellationToken)args[3]!),
+        "GetThumbnailAsync" => Thumbnail!.Invoke((DriveItemModel)args![0]!, (CancellationToken)args[1]!),
         "set_UploadBytesPerSecondLimit" => SetUploadLimit(args![0]),
-        "set_DownloadBytesPerSecondLimit" => null,
+        "set_DownloadBytesPerSecondLimit" => SetDownloadLimit(args![0]),
         "get_UploadBytesPerSecondLimit" => _uploadLimit,
-        "get_DownloadBytesPerSecondLimit" => null,
+        "get_DownloadBytesPerSecondLimit" => _downloadLimit,
         _ => throw new NotSupportedException(method.Name)
     };
 }

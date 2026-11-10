@@ -492,10 +492,14 @@ public sealed class OneDriveService : IOneDriveService
                         await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                         await limiter.ThrottleAsync(read, cancellationToken).ConfigureAwait(false);
                         copied += read;
+                        if (total is long expected && copied > expected)
+                            throw new InvalidDataException("下载内容超过服务端声明的文件大小。");
                         if (total is > 0)
-                            progress?.Report((double)copied / total.Value);
+                            progress?.Report(Math.Min(0.99, (double)copied / total.Value));
                     }
 
+                    if (total is long expectedLength && copied != expectedLength)
+                        throw new EndOfStreamException("下载连接提前结束，文件内容不完整。");
                     await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
                     progress?.Report(1.0);
                     return;
@@ -505,7 +509,9 @@ public sealed class OneDriveService : IOneDriveService
                     ArrayPool<byte>.Shared.Return(buffer);
                 }
             }
-            catch (Exception ex) when (destination.CanSeek && IsTransientTransportFailure(ex, cancellationToken))
+            catch (Exception ex) when (destination.CanSeek &&
+                (ex is EndOfStreamException || IsTransientTransportFailure(ex, cancellationToken)) &&
+                !cancellationToken.IsCancellationRequested)
             {
                 await DelayBeforeReadRetryAsync(null, retryAttempt++, cancellationToken).ConfigureAwait(false);
             }
